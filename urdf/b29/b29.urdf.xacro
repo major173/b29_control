@@ -1,0 +1,424 @@
+<?xml version="1.0" encoding="utf-8"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="b29">
+
+    <xacro:arg name="use_simulation" default="true"/>
+
+    <link name="base_link">
+        <inertial>
+            <mass value="0.307"/>
+            <origin xyz="0.003599 -0.017711 -0.020225"/>
+            <inertia ixx="2.331e-4" ixy="2.1312e-5" ixz="-3e-6" iyy="7.147e-4" iyz="-4.86e-5" izz="7.489e-4"/>
+        </inertial>
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://b29_control/meshes/b29/base_link.stl"/>
+            </geometry>
+        </visual>
+        <collision>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://b29_control/meshes/b29/base_link.stl"/>
+            </geometry>
+        </collision>
+    </link>
+
+    <link name="left_first_leg">
+        <inertial>
+            <mass value="1.655723"/>
+            <origin xyz="-0.000892 0.009 -0.0013"/>
+            <inertia ixx="9.527e-4" ixy="3.7e-5" ixz="-4.25e-5" iyy="1.167e-3" iyz="2.709e-5" izz="9.965e-4"/>
+        </inertial>
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://b29_control/meshes/b29/left_first_leg.stl"/>
+            </geometry>
+        </visual>
+        <collision>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://b29_control/meshes/b29/left_first_leg.stl"/>
+            </geometry>
+        </collision>
+    </link>
+
+    <joint name="left_first_leg_joint" type="revolute">
+        <origin xyz="0.1689 -0.01425 -0.016"
+                rpy="0 0 0"/>
+        <dynamics damping="0.0" friction="0.1"/>
+        <limit effort="97" velocity="6.28" lower="-1e10" upper="1e10"/>
+        <parent link="base_link"/>
+        <child link="left_first_leg"/>
+        <axis xyz="0 1 0"/>
+    </joint>
+
+    <link name="left_second_leg">
+        <inertial>
+            <mass value="2.148"/>
+            <origin xyz="-0.000392 -0.002265 0.144156"/>
+            <inertia ixx="2.888e-2" ixy="1.74e-7" ixz="5.5701e-5" iyy="2.91e-2" iyz="4.159e-6" izz="1.22e-3"/>
+        </inertial>
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://b29_control/meshes/b29/second_leg.stl"/>
+            </geometry>
+        </visual>
+        <collision>
+            <origin xyz="0 0.0 0.0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://b29_control/meshes/b29/second_leg.stl"/>
+            </geometry>
+        </collision>
+    </link>
+
+    <joint name="left_second_leg_joint" type="revolute">
+        <origin xyz="0.050346 -0.03 0.04783"
+                rpy="0 0 0"/>
+        <dynamics damping="0.0" friction="0.1"/>
+        <limit effort="27" velocity="5.44" lower="-1e10" upper="1e10"/>
+        <parent link="left_first_leg"/>
+        <child link="left_second_leg"/>
+        <axis xyz="0 0 1"/>
+    </joint>
+
+    <link name="left_rod">
+        <inertial>
+            <mass value="0.083"/>
+            <origin xyz="-0.000518 -0.006737 0.124837"/>
+            <inertia ixx="5.17e-4" ixy="0" ixz="0" iyy="5.834e-4" iyz="-4.7556e-5" izz="1.21e-4"/>
+        </inertial>
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://b29_control/meshes/b29/rod.stl"/>
+            </geometry>
+        </visual>
+        <collision>
+            <origin xyz="0 0.0 0.0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://b29_control/meshes/b29/rod.stl"/>
+            </geometry>
+        </collision>
+    </link>
+
+    <joint name="left_rod_joint" type="prismatic">
+        <origin xyz="0 0 0.161"
+                rpy="0 0 0"/>
+        <dynamics damping="0.0" friction="0.1"/>
+        <limit effort="27" velocity="0.2" lower="0" upper="0.06"/>
+        <parent link="left_second_leg"/>
+        <child link="left_rod"/>
+        <axis xyz="0 0 1"/>
+    </joint>
+
+    <!--    <link name="left_rod">-->
+    <!--        <inertial>-->
+    <!--            <mass value="0.038424"/>-->
+    <!--            <origin xyz="0.0 0.0 0.002"/>-->
+    <!--            <inertia ixx="2.711e-6" ixy="0" ixz="0" iyy="1.1584e-5" iyz="-2.69e-7" izz="1.1076e-5"/>-->
+    <!--        </inertial>-->
+    <!--        <visual>-->
+    <!--            <origin xyz="0 0 0" rpy="0 0 0"/>-->
+    <!--            <geometry>-->
+    <!--                <mesh filename="package://b29_control/meshes/b29/jaw.stl"/>-->
+    <!--            </geometry>-->
+    <!--        </visual>-->
+    <!--        <collision>-->
+    <!--            <origin xyz="0 0.0 0.0" rpy="0 0 0"/>-->
+    <!--            <geometry>-->
+    <!--                <mesh filename="package://b29_control/meshes/b29/jaw.stl"/>-->
+    <!--            </geometry>-->
+    <!--        </collision>-->
+    <!--    </link>-->
+
+    <!--    <joint name="left_jaw_joint" type="revolute">-->
+    <!--        <origin xyz="0 -0.030904 0.11904"-->
+    <!--                rpy="0 0 0"/>-->
+    <!--        <dynamics damping="0.0" friction="0.1"/>-->
+    <!--        <limit effort="27" velocity="5.44" lower="-1e10" upper="1e10"/> &lt;!&ndash;> Motor choose <&ndash;&gt;-->
+    <!--        <parent link="left_second_leg"/>-->
+    <!--        <child link="left_jaw"/>-->
+    <!--        <axis xyz="1 0 0"/>-->
+    <!--    </joint>-->
+
+    <link name="left_friction_wheel">
+        <inertial>
+            <mass value="0.046925"/>
+            <origin xyz="0 0.009657 0"/>
+            <inertia ixx="3.7784e-5" ixy="0" ixz="0" iyy="7.1998e-5" iyz="0" izz="3.7784e-5"/>
+        </inertial>
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://b29_control/meshes/b29/friction_wheel.stl"/>
+            </geometry>
+        </visual>
+        <collision>
+            <origin xyz="0 0.0 0.0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://b29_control/meshes/b29/friction_wheel.stl"/>
+            </geometry>
+        </collision>
+    </link>
+
+    <joint name="left_friction_wheel_joint" type="revolute">
+        <origin xyz="0 0.012 0.2665"
+                rpy="0 0 0"/>
+        <dynamics damping="0.0" friction="0.1"/>
+        <limit effort="3.42" velocity="73" lower="-1e10" upper="1e10"/>
+        <parent link="left_second_leg"/>
+        <child link="left_friction_wheel"/>
+        <axis xyz="0 1 0"/>
+    </joint>
+
+    <link name="right_first_leg">
+        <inertial>
+            <mass value="1.656"/>
+            <origin xyz="-0.001 0.00879 -0.00079"/>
+            <inertia ixx="9.546e-4" ixy="-3.5123e-5" ixz="4.3e-5" iyy="1.172e-3" iyz="2.844e-5" izz="9.998e-4"/>
+        </inertial>
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://b29_control/meshes/b29/right_first_leg.stl"/>
+            </geometry>
+        </visual>
+        <collision>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://b29_control/meshes/b29/right_first_leg.stl"/>
+            </geometry>
+        </collision>
+    </link>
+
+    <joint name="right_first_leg_joint" type="revolute">
+        <origin xyz="-0.1312 -0.01425 -0.016"
+                rpy="0 0 0"/>
+        <dynamics damping="0.0" friction="0.1"/>
+        <limit effort="97" velocity="6.28" lower="-1e10" upper="1e10"/>
+        <parent link="base_link"/>
+        <child link="right_first_leg"/>
+        <axis xyz="0 1 0"/>
+    </joint>
+
+    <link name="right_second_leg">
+        <inertial>
+            <mass value="2.231"/>
+            <origin xyz="-0.000392 -0.002265 0.144156"/>
+            <inertia ixx="2.888e-2" ixy="1.74e-7" ixz="5.5701e-5" iyy="2.91e-2" iyz="4.159e-6" izz="1.22e-3"/>
+        </inertial>
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://b29_control/meshes/b29/second_leg.stl"/>
+            </geometry>
+        </visual>
+        <collision>
+            <origin xyz="0 0.0 0.0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://b29_control/meshes/b29/second_leg.stl"/>
+            </geometry>
+        </collision>
+    </link>
+
+    <joint name="right_second_leg_joint" type="revolute">
+        <origin xyz="-0.050346 -0.03 0.04783"
+                rpy="0 0 0"/>
+        <dynamics damping="0.0" friction="0.1"/>
+        <limit effort="27" velocity="5.44" lower="-1e10" upper="1e10"/>
+        <parent link="right_first_leg"/>
+        <child link="right_second_leg"/>
+        <axis xyz="0 0 1"/>
+    </joint>
+
+    <link name="right_rod">
+        <inertial>
+            <mass value="0.083"/>
+            <origin xyz="-0.000518 -0.006737 0.124837"/>
+            <inertia ixx="5.17e-4" ixy="0" ixz="0" iyy="5.834e-4" iyz="-4.7556e-5" izz="1.21e-4"/>
+        </inertial>
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://b29_control/meshes/b29/rod.stl"/>
+            </geometry>
+        </visual>
+        <collision>
+            <origin xyz="0 0.0 0.0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://b29_control/meshes/b29/rod.stl"/>
+            </geometry>
+        </collision>
+    </link>
+
+    <joint name="right_rod_joint" type="prismatic">
+        <origin xyz="0 0 0.161"
+                rpy="0 0 0"/>
+        <dynamics damping="0.0" friction="0.1"/>
+        <limit effort="27" velocity="0.2" lower="0" upper="0.06"/>
+        <parent link="right_second_leg"/>
+        <child link="right_rod"/>
+        <axis xyz="0 0 1"/>
+    </joint>
+
+    <!--    <link name="right_jaw">-->
+    <!--        <inertial>-->
+    <!--            <mass value="0.038424"/>-->
+    <!--            <origin xyz="0.0 0.0 0.002"/>-->
+    <!--            <inertia ixx="2.711e-6" ixy="0" ixz="0" iyy="1.1584e-5" iyz="-2.69e-7" izz="1.1076e-5"/>-->
+    <!--        </inertial>-->
+    <!--        <visual>-->
+    <!--            <origin xyz="0 0 0" rpy="0 0 0"/>-->
+    <!--            <geometry>-->
+    <!--                <mesh filename="package://b29_control/meshes/b29/jaw.stl"/>-->
+    <!--            </geometry>-->
+    <!--        </visual>-->
+    <!--        <collision>-->
+    <!--            <origin xyz="0 0.0 0.0" rpy="0 0 0"/>-->
+    <!--            <geometry>-->
+    <!--                <mesh filename="package://b29_control/meshes/b29/jaw.stl"/>-->
+    <!--            </geometry>-->
+    <!--        </collision>-->
+    <!--    </link>-->
+
+    <!--    <joint name="right_jaw_joint" type="revolute">-->
+    <!--        <origin xyz="0 -0.030904 0.11904"-->
+    <!--                rpy="0 0 0"/>-->
+    <!--        <dynamics damping="0.0" friction="0.1"/>-->
+    <!--        <limit effort="27" velocity="5.44" lower="-1e10" upper="1e10"/> &lt;!&ndash;> Motor choose <&ndash;&gt;-->
+    <!--        <parent link="right_second_leg"/>-->
+    <!--        <child link="right_jaw"/>-->
+    <!--        <axis xyz="1 0 0"/>-->
+    <!--    </joint>-->
+
+    <link name="right_friction_wheel">
+        <inertial>
+            <mass value="0.046925"/>
+            <origin xyz="0 0.009657 0"/>
+            <inertia ixx="3.7784e-5" ixy="0" ixz="0" iyy="7.1998e-5" iyz="0" izz="3.7784e-5"/>
+        </inertial>
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://b29_control/meshes/b29/friction_wheel.stl"/>
+            </geometry>
+        </visual>
+        <collision>
+            <origin xyz="0 0.0 0.0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://b29_control/meshes/b29/friction_wheel.stl"/>
+            </geometry>
+        </collision>
+    </link>
+
+    <joint name="right_friction_wheel_joint" type="revolute">
+        <origin xyz="0 0.012 0.2665"
+                rpy="0 0 0"/>
+        <dynamics damping="0.0" friction="0.1"/>
+        <limit effort="3.42" velocity="73" lower="-1e10" upper="1e10"/>
+        <parent link="right_second_leg"/>
+        <child link="right_friction_wheel"/>
+        <axis xyz="0 1 0"/>
+    </joint>
+
+    <transmission name="trans_left_first_leg_joint">
+        <type>transmission_interface/SimpleTransmission</type>
+        <actuator name="left_first_leg_motor">
+            <mechanicalReduction>1</mechanicalReduction>
+        </actuator>
+        <joint name="left_first_leg_joint">
+            <offset>0</offset>
+            <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+        </joint>
+    </transmission>
+
+    <transmission name="trans_left_second_leg_joint">
+        <type>transmission_interface/SimpleTransmission</type>
+        <actuator name="left_second_leg_motor">
+            <mechanicalReduction>1</mechanicalReduction>
+        </actuator>
+        <joint name="left_second_leg_joint">
+            <offset>0</offset>
+            <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+        </joint>
+    </transmission>
+
+    <transmission name="trans_left_rod_joint">
+        <type>transmission_interface/SimpleTransmission</type>
+        <actuator name="left_rod_motor">
+            <mechanicalReduction>1</mechanicalReduction>
+        </actuator>
+        <joint name="left_rod_joint">
+            <offset>0</offset>
+            <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+        </joint>
+    </transmission>
+
+    <transmission name="trans_left_friction_wheel_joint">
+        <type>transmission_interface/SimpleTransmission</type>
+        <actuator name="left_friction_wheel_motor">
+            <mechanicalReduction>1</mechanicalReduction> <!--> 3508 real mechanicalReduction: 17:268 <-->
+        </actuator>
+        <joint name="left_friction_wheel_joint">
+            <offset>0</offset>
+            <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+        </joint>
+    </transmission>
+
+    <transmission name="trans_right_first_leg_joint">
+        <type>transmission_interface/SimpleTransmission</type>
+        <actuator name="right_first_leg_motor">
+            <mechanicalReduction>1</mechanicalReduction>
+        </actuator>
+        <joint name="right_first_leg_joint">
+            <offset>0</offset>
+            <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+        </joint>
+    </transmission>
+
+    <transmission name="trans_right_second_leg_joint">
+        <type>transmission_interface/SimpleTransmission</type>
+        <actuator name="right_second_leg_motor">
+            <mechanicalReduction>1</mechanicalReduction>
+        </actuator>
+        <joint name="right_second_leg_joint">
+            <offset>0</offset>
+            <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+        </joint>
+    </transmission>
+
+    <transmission name="trans_right_rod_joint">
+        <type>transmission_interface/SimpleTransmission</type>
+        <actuator name="right_rod_motor">
+            <mechanicalReduction>1</mechanicalReduction>
+        </actuator>
+        <joint name="right_rod_joint">
+            <offset>0</offset>
+            <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+        </joint>
+    </transmission>
+
+    <transmission name="trans_right_friction_wheel_joint">
+        <type>transmission_interface/SimpleTransmission</type>
+        <actuator name="right_friction_wheel_motor">
+            <mechanicalReduction>1</mechanicalReduction>
+        </actuator>
+        <joint name="right_friction_wheel_joint">
+            <offset>0</offset>
+            <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+        </joint>
+    </transmission>
+
+    <xacro:if value="$(arg use_simulation)">
+        <gazebo>
+            <plugin name="rm_ros_control" filename="librm_robot_hw_sim.so">
+                <robotNamespace>/</robotNamespace>
+                <robotSimType>rm_gazebo/RmRobotHWSim</robotSimType>
+            </plugin>
+        </gazebo>
+    </xacro:if>
+
+
+</robot>

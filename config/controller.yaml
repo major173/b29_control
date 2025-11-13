@@ -1,0 +1,50 @@
+b29_controller:
+  # Publish all joint states -----------------------------------
+  joint_state_controller:
+    type: joint_state_controller/JointStateController
+    publish_rate: 50
+
+  robot_state_controller:
+    type: robot_state_controller/RobotStateController
+    publish_rate: 100
+
+  # Position Controllers --------------------------------------
+  left_first_leg_joint_position_controller:
+    type: position_controllers/JointPositionController
+    joint: left_first_leg_joint
+    pid: { p: 1.5, i: 0.01, d: 0.05 }
+
+  left_second_leg_joint_position_controller:
+    type: position_controllers/JointPositionController
+    joint: left_second_leg_joint
+    pid: { p: 1.5, i: 0.01, d: 0.05 }
+
+  left_rod_joint_position_controller:
+    type: position_controllers/JointPositionController
+    joint: left_rod_joint
+    pid: { p: 1.5, i: 0.01, d: 0.05 }
+
+  left_friction_wheel_joint_position_controller:
+    type: position_controllers/JointPositionController
+    joint: left_friction_wheel_joint
+    pid: { p: 1.5, i: 0.01, d: 0.05 }
+
+  right_first_leg_joint_position_controller:
+    type: position_controllers/JointPositionController
+    joint: right_first_leg_joint
+    pid: { p: 1.5, i: 0.01, d: 0.05 }
+
+  right_second_leg_joint_position_controller:
+    type: position_controllers/JointPositionController
+    joint: right_second_leg_joint
+    pid: { p: 1.5, i: 0.01, d: 0.05 }
+
+  right_rod_joint_position_controller:
+    type: position_controllers/JointPositionController
+    joint: right_rod_joint
+    pid: { p: 1.5, i: 0.01, d: 0.05 }
+
+  right_friction_wheel_joint_position_controller:
+    type: position_controllers/JointPositionController
+    joint: right_friction_wheel_joint
+    pid: { p: 1.5, i: 0.01, d: 0.05 }

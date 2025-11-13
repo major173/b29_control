@@ -1,0 +1,73 @@
+gazebo_ros_control:
+  pid_gains:
+    left_first_leg_joint:
+      p: 10.0
+      i: 0.1
+      d: 1.0
+      i_clamp_max: 0.0
+      i_clamp_min: 0.0
+      antiwindup: true
+      publish_state: true
+
+    left_second_leg_joint:
+      p: 10.0
+      i: 0.1
+      d: 1.0
+      i_clamp_max: 0.0
+      i_clamp_min: 0.0
+      antiwindup: true
+      publish_state: true
+
+    left_rod_joint:
+      p: 5.0
+      i: 0.1
+      d: 0.5
+      i_clamp_max: 0.0
+      i_clamp_min: 0.0
+      antiwindup: true
+      publish_state: true
+
+    left_friction_wheel_joint:
+      p: 5.0
+      i: 0.0
+      d: 0.0
+      i_clamp_max: 0.0
+      i_clamp_min: 0.0
+      antiwindup: true
+      publish_state: true
+
+    right_first_leg_joint:
+      p: 10.0
+      i: 0.1
+      d: 1.0
+      i_clamp_max: 0.0
+      i_clamp_min: 0.0
+      antiwindup: true
+      publish_state: true
+
+    right_second_leg_joint:
+      p: 10.0
+      i: 0.1
+      d: 1.0
+      i_clamp_max: 0.0
+      i_clamp_min: 0.0
+      antiwindup: true
+      publish_state: true
+
+    right_rod_joint:
+      p: 5.0
+      i: 0.1
+      d: 0.5
+      i_clamp_max: 0.0
+      i_clamp_min: 0.0
+      antiwindup: true
+      publish_state: true
+
+    right_friction_wheel_joint:
+      p: 5.0
+      i: 0.0
+      d: 0.0
+      i_clamp_max: 0.0
+      i_clamp_min: 0.0
+      antiwindup: true
+      publish_state: true

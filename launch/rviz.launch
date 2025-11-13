@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<launch>
+	
+	<arg name="rvizconfig" default="$(find steering_engine)/rviz/config.rviz"/>
+	
+	<!-- rviz -->
+        <node name="rviz" pkg="rviz" args="-d $(arg rvizconfig)" type="rviz"/>
+
+</launch>

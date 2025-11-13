@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<launch>
+   <!-- load description -->
+   <arg name="model" default="$(find sg90_mechanical_arm_description)/urdf/sg90_mechanical_arm.xacro"/>
+   <param name="robot_description" command="$(find xacro)/xacro $(arg model)"/>
+   
+   <!-- joint state publisher -->
+   <!--node name="joint_state_publisher" pkg="joint_state_publisher" type="joint_state_publisher"/-->
+   <!--node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher"/-->
+
+    <!-- load controller yaml -->
+   <rosparam file="$(find steering_engine)/config/controller.yaml" command="load"/>
+    
+    <!-- controller manager -->
+    <node name="controller_manager" pkg="controller_manager"  type="controller_manager" output="screen"
+          args="load
+	 sg90_mechanical_arm_controller/joint_state_controller
+	 sg90_mechanical_arm_controller/middle_rotation_joint_position_controller
+	 sg90_mechanical_arm_controller/rotation_baselink_joint_position_controller
+	 sg90_mechanical_arm_controller/left3_middle_joint_position_controller
+	 	"/>
+	 	
+    <!--node name="controller_loader" pkg="controller_manager"  type="spawner" output="screen"
+          args="
+	 /sg90_mechanical_arm_controller/joint_state_controller
+	 /sg90_mechanical_arm_controller/middle_rotation_joint_position_controller
+	 /sg90_mechanical_arm_controller/rotation_baselink_joint_position_controller
+	 /sg90_mechanical_arm_controller/left3_middle_joint_position_controller
+	 	"/-->
+          
+</launch>

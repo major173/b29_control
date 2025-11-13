@@ -1,0 +1,4 @@
+steering_engine_hw:
+  serial:
+    name:
+      - "/dev/usbReferee"
