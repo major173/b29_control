@@ -24,10 +24,10 @@ b29_controller:
     joint: left_rod_joint
     pid: { p: 1.5, i: 0.01, d: 0.05 }
 
-  left_friction_wheel_joint_position_controller:
-    type: position_controllers/JointPositionController
+  left_friction_wheel_joint_velocity_controller:
+    type: velocity_controllers/JointVelocityController
     joint: left_friction_wheel_joint
-    pid: { p: 1.5, i: 0.01, d: 0.05 }
+    pid: { p: 0.1, i: 0.0, d: 0.0 }
 
   right_first_leg_joint_position_controller:
     type: position_controllers/JointPositionController
@@ -44,7 +44,7 @@ b29_controller:
     joint: right_rod_joint
     pid: { p: 1.5, i: 0.01, d: 0.05 }
 
-  right_friction_wheel_joint_position_controller:
-    type: position_controllers/JointPositionController
+  right_friction_wheel_joint_velocity_controller:
+    type: velocity_controllers/JointVelocityController
     joint: right_friction_wheel_joint
-    pid: { p: 1.5, i: 0.01, d: 0.05 }
+    pid: { p: 0.1, i: 0.0, d: 0.0 }

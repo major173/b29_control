@@ -2,6 +2,10 @@
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="b29">
 
     <xacro:arg name="use_simulation" default="true"/>
+    <xacro:property name="wheel_radius" value="0.0405"/>
+    <xacro:property name="wheel_edge_radius" value="0.0460"/>
+    <xacro:property name="wheel_height" value="0.0153"/>
+    <xacro:property name="wheel_edge_height" value="0.002"/>
 
     <link name="base_link">
         <inertial>
@@ -16,9 +20,9 @@
             </geometry>
         </visual>
         <collision>
-            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <origin xyz="0 -0.01 -0.017" rpy="0 0 0"/>
             <geometry>
-                <mesh filename="package://b29_control/meshes/b29/base_link.stl"/>
+                <box size="0.344 0.064 0.075"/>
             </geometry>
         </collision>
     </link>
@@ -35,12 +39,6 @@
                 <mesh filename="package://b29_control/meshes/b29/left_first_leg.stl"/>
             </geometry>
         </visual>
-        <collision>
-            <origin xyz="0 0 0" rpy="0 0 0"/>
-            <geometry>
-                <mesh filename="package://b29_control/meshes/b29/left_first_leg.stl"/>
-            </geometry>
-        </collision>
     </link>
 
     <joint name="left_first_leg_joint" type="revolute">
@@ -156,9 +154,21 @@
             </geometry>
         </visual>
         <collision>
-            <origin xyz="0 0.0 0.0" rpy="0 0 0"/>
+            <origin xyz="0 ${wheel_edge_height/2} 0" rpy="${-pi/2} 0 0"/>
             <geometry>
-                <mesh filename="package://b29_control/meshes/b29/friction_wheel.stl"/>
+                <cylinder radius="${wheel_edge_radius}" length="${wheel_edge_height}"/>
+            </geometry>
+        </collision>
+        <collision>
+            <origin xyz="0 ${wheel_edge_height+wheel_height/2} 0" rpy="${-pi/2} 0 0"/>
+            <geometry>
+                <cylinder radius="${wheel_radius}" length="${wheel_height}"/>
+            </geometry>
+        </collision>
+        <collision>
+            <origin xyz="0 ${wheel_edge_height+wheel_height+wheel_edge_height/2} 0" rpy="${-pi/2} 0 0"/>
+            <geometry>
+                <cylinder radius="${wheel_edge_radius}" length="${wheel_edge_height}"/>
             </geometry>
         </collision>
     </link>
@@ -185,12 +195,6 @@
                 <mesh filename="package://b29_control/meshes/b29/right_first_leg.stl"/>
             </geometry>
         </visual>
-        <collision>
-            <origin xyz="0 0 0" rpy="0 0 0"/>
-            <geometry>
-                <mesh filename="package://b29_control/meshes/b29/right_first_leg.stl"/>
-            </geometry>
-        </collision>
     </link>
 
     <joint name="right_first_leg_joint" type="revolute">
@@ -306,9 +310,21 @@
             </geometry>
         </visual>
         <collision>
-            <origin xyz="0 0.0 0.0" rpy="0 0 0"/>
+            <origin xyz="0 ${wheel_edge_height/2} 0" rpy="${-pi/2} 0 0"/>
             <geometry>
-                <mesh filename="package://b29_control/meshes/b29/friction_wheel.stl"/>
+                <cylinder radius="${wheel_edge_radius}" length="${wheel_edge_height}"/>
+            </geometry>
+        </collision>
+        <collision>
+            <origin xyz="0 ${wheel_edge_height+wheel_height/2} 0" rpy="${-pi/2} 0 0"/>
+            <geometry>
+                <cylinder radius="${wheel_radius}" length="${wheel_height}"/>
+            </geometry>
+        </collision>
+        <collision>
+            <origin xyz="0 ${wheel_edge_height+wheel_height+wheel_edge_height/2} 0" rpy="${-pi/2} 0 0"/>
+            <geometry>
+                <cylinder radius="${wheel_edge_radius}" length="${wheel_edge_height}"/>
             </geometry>
         </collision>
     </link>
@@ -363,7 +379,7 @@
         </actuator>
         <joint name="left_friction_wheel_joint">
             <offset>0</offset>
-            <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+            <hardwareInterface>hardware_interface/VelocityJointInterface</hardwareInterface>
         </joint>
     </transmission>
 
@@ -407,7 +423,7 @@
         </actuator>
         <joint name="right_friction_wheel_joint">
             <offset>0</offset>
-            <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+            <hardwareInterface>hardware_interface/VelocityJointInterface</hardwareInterface>
         </joint>
     </transmission>
 
