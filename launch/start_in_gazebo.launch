@@ -21,10 +21,6 @@
 
     <rosparam file="$(find b29_control)/config/gazebo_ros_control.yaml" command="load"/>
 
-    <!-- joint state publisher -->
-    <node name="joint_state_publisher" pkg="joint_state_publisher" type="joint_state_publisher"/>
-    <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher"/>
-
     <!-- gazebo -->
     <include file="$(find gazebo_ros)/launch/empty_world.launch">
         <arg name="world_name" value="$(find power_line_simulation)/worlds/power_line_2.world"/>
