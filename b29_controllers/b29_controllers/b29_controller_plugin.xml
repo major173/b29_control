@@ -1,0 +1,13 @@
+<library path="lib/libb29_controllers">
+    <!-- controller_interface types -->
+    <class name="b29_controllers/B29JointController"
+           type="b29_controllers::B29JointController"
+           base_class_type="controller_interface::ControllerBase">
+        <description>
+            A multi-joint controller for the B29 robot that supports position, velocity,
+            effort, and trajectory control modes. Features include joint limit enforcement,
+            power management, and emergency stop capabilities.
+        </description>
+    </class>
+
+</library>

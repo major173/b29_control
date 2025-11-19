@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<package format="2">
+    <name>robot_controllers</name>
+    <version>0.1.11</version>
+    <description>Meta package that contains package for RoboMaster.</description>
+    <maintainer email="yuchen@gmail.com">yuchen</maintainer>
+
+    <license>BSD</license>
+
+    <url type="repository">1</url>
+    <url type="bugtracker">1</url>
+
+    <author email="1@gmail.com">1</author>
+
+    <buildtool_depend>catkin</buildtool_depend>
+    <exec_depend>robot_state_controller</exec_depend>
+
+    <export>
+        <metapackage/>
+    </export>
+</package>

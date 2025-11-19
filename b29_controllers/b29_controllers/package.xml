@@ -1,0 +1,91 @@
+<?xml version="1.0"?>
+<package format="2">
+    <name>b29_controllers</name>
+    <version>1.0.0</version>
+    <description>
+        ROS control controllers for the B29 robot. Includes joint position, velocity,
+        effort, and trajectory control with power management and safety features.
+    </description>
+
+    <maintainer email="chenhui@example.com">Your Name</maintainer>
+    <license>BSD</license>
+
+    <url type="website">http://wiki.ros.org/b29_controllers</url>
+    <url type="repository">https://github.com/your_org/b29_controllers</url>
+    <url type="bugtracker">https://github.com/your_org/b29_controllers/issues</url>
+
+    <author email="your_email@example.com">Your Name</author>
+
+    <buildtool_depend>catkin</buildtool_depend>
+
+    <!-- Build dependencies -->
+    <build_depend>angles</build_depend>
+    <build_depend>control_msgs</build_depend>
+    <build_depend>control_toolbox</build_depend>
+    <build_depend>controller_interface</build_depend>
+    <build_depend>controller_manager</build_depend>
+    <build_depend>hardware_interface</build_depend>
+    <build_depend>joint_limits_interface</build_depend>
+    <build_depend>pluginlib</build_depend>
+    <build_depend>realtime_tools</build_depend>
+    <build_depend>roscpp</build_depend>
+    <build_depend>sensor_msgs</build_depend>
+    <build_depend>std_msgs</build_depend>
+    <build_depend>tf2</build_depend>
+    <build_depend>tf2_geometry_msgs</build_depend>
+    <build_depend>tf2_ros</build_depend>
+    <build_depend>urdf</build_depend>
+    <build_depend>geometry_msgs</build_depend>
+    <build_depend>nav_msgs</build_depend>
+    <build_depend>rm_common</build_depend>
+
+    <!-- Build export dependencies -->
+    <build_export_depend>angles</build_export_depend>
+    <build_export_depend>control_msgs</build_export_depend>
+    <build_export_depend>control_toolbox</build_export_depend>
+    <build_export_depend>controller_interface</build_export_depend>
+    <build_export_depend>hardware_interface</build_export_depend>
+    <build_export_depend>joint_limits_interface</build_export_depend>
+    <build_export_depend>pluginlib</build_export_depend>
+    <build_export_depend>realtime_tools</build_export_depend>
+    <build_export_depend>roscpp</build_export_depend>
+    <build_export_depend>sensor_msgs</build_export_depend>
+    <build_export_depend>std_msgs</build_export_depend>
+    <build_export_depend>tf2</build_export_depend>
+    <build_export_depend>tf2_geometry_msgs</build_export_depend>
+    <build_export_depend>tf2_ros</build_export_depend>
+    <build_export_depend>urdf</build_export_depend>
+    <build_export_depend>geometry_msgs</build_export_depend>
+    <build_export_depend>nav_msgs</build_export_depend>
+    <build_export_depend>rm_common</build_export_depend>
+
+    <!-- Execution dependencies -->
+    <exec_depend>angles</exec_depend>
+    <exec_depend>control_msgs</exec_depend>
+    <exec_depend>control_toolbox</exec_depend>
+    <exec_depend>controller_interface</exec_depend>
+    <exec_depend>controller_manager</exec_depend>
+    <exec_depend>hardware_interface</exec_depend>
+    <exec_depend>joint_limits_interface</exec_depend>
+    <exec_depend>pluginlib</exec_depend>
+    <exec_depend>realtime_tools</exec_depend>
+    <exec_depend>roscpp</exec_depend>
+    <exec_depend>sensor_msgs</exec_depend>
+    <exec_depend>std_msgs</exec_depend>
+    <exec_depend>tf2</exec_depend>
+    <exec_depend>tf2_geometry_msgs</exec_depend>
+    <exec_depend>tf2_ros</exec_depend>
+    <exec_depend>urdf</exec_depend>
+    <exec_depend>geometry_msgs</exec_depend>
+    <exec_depend>nav_msgs</exec_depend>
+    <exec_depend>rm_common</exec_depend>
+
+    <!-- Test dependencies -->
+    <test_depend>rostest</test_depend>
+
+    <!-- The export tag contains other, unspecified, tags -->
+    <export>
+        <!-- Declare the controller plugin -->
+        <controller_interface plugin="${prefix}/b29_controller_plugin.xml"/>
+    </export>
+</package>
