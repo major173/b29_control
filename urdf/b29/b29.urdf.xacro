@@ -22,7 +22,7 @@
         <collision>
             <origin xyz="0 -0.01 -0.017" rpy="0 0 0"/>
             <geometry>
-                <box size="0.344 0.064 0.075"/>
+                <box size="0.244 0.064 0.075"/>
             </geometry>
         </collision>
     </link>
@@ -64,9 +64,9 @@
             </geometry>
         </visual>
         <collision>
-            <origin xyz="0 0.0 0.0" rpy="0 0 0"/>
+            <origin xyz="0 -0.03 0.184" rpy="0 0 0"/>
             <geometry>
-                <mesh filename="package://b29_control/meshes/b29/second_leg.stl"/>
+                <box size="0.1 0.002 0.26"/>
             </geometry>
         </collision>
     </link>
@@ -220,9 +220,9 @@
             </geometry>
         </visual>
         <collision>
-            <origin xyz="0 0.0 0.0" rpy="0 0 0"/>
+            <origin xyz="0 -0.03 0.184" rpy="0 0 0"/>
             <geometry>
-                <mesh filename="package://b29_control/meshes/b29/second_leg.stl"/>
+                <box size="0.1 0.002 0.26"/>
             </geometry>
         </collision>
     </link>
@@ -426,6 +426,14 @@
             <hardwareInterface>hardware_interface/VelocityJointInterface</hardwareInterface>
         </joint>
     </transmission>
+
+    <gazebo>
+        <joint name="world_fixed_joint" type="fixed">
+            <parent>world</parent>
+            <child>left_second_leg</child>
+            <pose>0 0 -0.25 0 0 0</pose>
+        </joint>
+    </gazebo>
 
     <xacro:if value="$(arg use_simulation)">
         <gazebo>
