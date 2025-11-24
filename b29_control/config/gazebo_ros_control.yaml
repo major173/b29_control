@@ -1,7 +1,7 @@
 gazebo_ros_control:
   pid_gains:
     left_first_leg_joint:
-      p: 5.0
+      p: 100.0
       i: 0.
       d: 0.8
       i_clamp_max: 0.0
@@ -10,25 +10,25 @@ gazebo_ros_control:
       publish_state: true
 
     left_second_leg_joint:
-      p: 0.0
+      p: 20.0
       i: 0.
-      d: 0.0
+      d: 0.4
       i_clamp_max: 0.0
       i_clamp_min: 0.0
       antiwindup: true
       publish_state: true
 
     left_rod_joint:
-      p: 0.0
+      p: 60.0
       i: 0.
-      d: 0.0
+      d: 2.0
       i_clamp_max: 0.0
       i_clamp_min: 0.0
       antiwindup: true
       publish_state: true
 
     left_friction_wheel_joint:
-      p: 0.0
+      p: 0.3
       i: 0.
       d: 0.0
       i_clamp_max: 0.0
@@ -37,25 +37,34 @@ gazebo_ros_control:
       publish_state: true
 
     right_first_leg_joint:
-      p: 0.0
+      p: 100.0
       i: 0.
-      d: 0.0
+      d: 0.8
       i_clamp_max: 0.0
       i_clamp_min: 0.0
       antiwindup: true
       publish_state: true
 
     right_second_leg_joint:
-      p: 0.0
+      p: 20.0
       i: 0.
-      d: 0.0
+      d: 0.4
       i_clamp_max: 0.0
       i_clamp_min: 0.0
       antiwindup: true
       publish_state: true
 
     right_rod_joint:
-      p: 0.0
+      p: 60.0
+      i: 0.
+      d: 2.0
+      i_clamp_max: 0.0
+      i_clamp_min: 0.0
+      antiwindup: true
+      publish_state: true
+
+    right_friction_wheel_joint:
+      p: 0.3
       i: 0.
       d: 0.0
       i_clamp_max: 0.0
@@ -63,11 +72,9 @@ gazebo_ros_control:
       antiwindup: true
       publish_state: true
 
-    right_friction_wheel_joint:
-      p: 0.0
-      i: 0.
-      d: 0.0
-      i_clamp_max: 0.0
-      i_clamp_min: 0.0
-      antiwindup: true
-      publish_state: true
+imus:
+  base_imu:
+    frame_id: base_imu
+    orientation_covariance_diagonal: [ 0.0012, 0.0012, 0.0012 ]
+    angular_velocity_covariance: [ 0.0004, 0.0004, 0.0004 ]
+    linear_acceleration_covariance: [ 0.01, 0.01, 0.01 ]

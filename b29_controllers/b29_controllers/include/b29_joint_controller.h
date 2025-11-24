@@ -48,29 +48,64 @@ private:
   void dbusDataCallback(const rm_msgs::DbusData::ConstPtr& msg);
   void updateArmMode(const ros::Time& time, const ros::Duration& period);
   void updateTrackMode(const ros::Time& time, const ros::Duration& period);
+  void updateDebugMode(const ros::Time& time, const ros::Duration& period);
+  void updateIdleMode(const ros::Time& time, const ros::Duration& period);
+
+  void updateLastJointState();
+  void updateRodThreshold();
+  void applyJointCommand();
 
   rm_control::RobotStateHandle robot_state_handle_{};
   hardware_interface::PositionJointInterface* position_joint_interface_{};
   hardware_interface::VelocityJointInterface* velocity_joint_interface_{};
+  hardware_interface::ImuSensorInterface* imu_sensor_interface_{};
+  hardware_interface::ImuSensorHandle base_imu_handle_{};
+  hardware_interface::JointHandle lf_handle_, ls_handle_, lr_handle_, lf_wheel_handle_, rf_handle_, rs_handle_,
+                                  rr_handle_, rf_wheel_handle_;
+  std::vector<double> last_joint_position_, last_joint_velocity_, command_vector_;
 
+  // Params
+  double fixed_check_vel_, fixed_check_period_, dbus_online_threshold_;
+  double release_rod_pos_, move_rod_pos_, fixed_rod_pos_;
   double publish_rate_{};
   double max_odom_vel_{};
   bool enable_odom_tf_ = false;
   bool topic_update_ = false;
   bool publish_odom_tf_ = false;
-  bool state_changed_ = false;
 
-  enum
+  enum State
   {
     TRACK,
     ARM,
+    DEBUG,
+    IDLE
   };
 
-  int state_ = ARM;
-  RampFilter<double>* ramp_x_{};
-  std::string front_frame_{}, base_frame_{};
+  enum ForwardFrame
+  {
+    Left,
+    Right,
+  };
 
-  ros::Time last_publish_time_;
+  enum JointIndex
+  {
+    leftFriction = 0,
+    rightFriction,
+    leftFirst,
+    leftSecond,
+    leftRod,
+    rightFirst,
+    rightSecond,
+    rightRod,
+    COUNT_P
+  };
+
+  bool state_changed_ = false, dbus_online_ = false;
+  int state_ = DEBUG, front_frame_ = Left, last_state_;
+  RampFilter<double>* ramp_x_{};
+  std::string base_frame_{};
+
+  ros::Time last_publish_time_, last_dbus_time_;
   geometry_msgs::TransformStamped odom2base_{};
   tf2::Transform world2odom_;
   geometry_msgs::Vector3 vel_cmd_{}; // x, y
@@ -81,7 +116,7 @@ private:
   ros::Subscriber outside_odom_sub_;
   ros::Subscriber cmd_chassis_sub_;
   ros::Subscriber dbus_sub_;
-  rm_msgs::DbusData cmd_struct_;
+  rm_msgs::DbusData dbus_data_;
   realtime_tools::RealtimeBuffer<rm_msgs::DbusData> cmd_rt_buffer_;
   realtime_tools::RealtimeBuffer<nav_msgs::Odometry> odom_buffer_;
 };

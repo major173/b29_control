@@ -9,35 +9,24 @@ b29_controller:
     publish_rate: 100
 
   # Position Controllers --------------------------------------
-  left_first_leg_joint_position_controller:
-    type: position_controllers/JointPositionController
-    joint: left_first_leg_joint
+  b29_joint_controller:
+    type: b29_controllers/B29JointController
+    max_odom_vel: 10.0
+    release_rod_pos: 0.01
+    move_rod_pos: 0.04
+    fixed_rod_pos: 0.05
+    fixed_check_vel: 0.3
+    fixed_check_period: 0.1
 
-  left_second_leg_joint_position_controller:
-    type: position_controllers/JointPositionController
-    joint: left_second_leg_joint
+    joint_names:
+      left_first_leg_joint: "left_first_leg_joint"
+      left_second_leg_joint: "left_second_leg_joint"
+      left_rod_joint: "left_rod_joint"
+      right_first_leg_joint: "right_first_leg_joint"
+      right_second_leg_joint: "right_second_leg_joint"
+      right_rod_joint: "right_rod_joint"
+      left_friction_wheel_joint: "left_friction_wheel_joint"
+      right_friction_wheel_joint: "right_friction_wheel_joint"
 
-  left_rod_joint_position_controller:
-    type: position_controllers/JointPositionController
-    joint: left_rod_joint
 
-  left_friction_wheel_joint_velocity_controller:
-    type: velocity_controllers/JointVelocityController
-    joint: left_friction_wheel_joint
 
-  right_first_leg_joint_position_controller:
-    type: position_controllers/JointPositionController
-    joint: right_first_leg_joint
-
-  right_second_leg_joint_position_controller:
-    type: position_controllers/JointPositionController
-    joint: right_second_leg_joint
-
-  right_rod_joint_position_controller:
-    type: position_controllers/JointPositionController
-    joint: right_rod_joint
-
-  right_friction_wheel_joint_velocity_controller:
-    type: velocity_controllers/JointVelocityController
-    joint: right_friction_wheel_joint
-    pid: { p: 0.1, i: 0.0, d: 0.0 }

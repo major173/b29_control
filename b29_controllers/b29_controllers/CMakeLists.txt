@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.0.2)
 project(b29_controllers)
 
-## Compile as C++14, supported in ROS Kinetic and newer
-set(CMAKE_CXX_STANDARD 14)
+## Compile as C++17, supported in ROS Kinetic and newer
+set(CMAKE_CXX_STANDARD 17)
 
 ## Find catkin macros and libraries
 find_package(catkin REQUIRED COMPONENTS
