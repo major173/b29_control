@@ -177,11 +177,11 @@
         </collision>
     </link>
 
-    <joint name="left_friction_wheel_joint" type="revolute">
+    <joint name="left_friction_wheel_joint" type="continuous">
         <origin xyz="0 0.012 0.2665"
                 rpy="0 0 0"/>
         <dynamics damping="0.0" friction="0.1"/>
-        <limit effort="3.42" velocity="73" lower="-1e10" upper="1e10"/>
+        <limit effort="3.42" velocity="73"/>
         <parent link="left_second_leg"/>
         <child link="left_friction_wheel"/>
         <axis xyz="0 1 0"/>
@@ -333,11 +333,11 @@
         </collision>
     </link>
 
-    <joint name="right_friction_wheel_joint" type="revolute">
+    <joint name="right_friction_wheel_joint" type="continuous">
         <origin xyz="0 0.012 0.2665"
                 rpy="0 0 0"/>
         <dynamics damping="0.0" friction="0.1"/>
-        <limit effort="3.42" velocity="73" lower="-1e10" upper="1e10"/>
+        <limit effort="3.42" velocity="73"/>
         <parent link="right_second_leg"/>
         <child link="right_friction_wheel"/>
         <axis xyz="0 1 0"/>

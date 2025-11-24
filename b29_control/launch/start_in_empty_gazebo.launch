@@ -1,0 +1,54 @@
+<?xml version="1.0"?>
+<launch>
+
+    <!-- Arguments -->
+    <arg name="use_sim_time" default="true"/>
+    <arg name="debug" default="false"/>
+    <!--    <arg name="config_file" default="$(find robot_config)/config/rm_controllers/b29.yaml"/>-->
+
+    <!-- Set use_sim_time parameter -->
+    <param name="use_sim_time" value="$(arg use_sim_time)"/>
+
+    <arg name="model" default="$(find b29_control)/urdf/b29/b29.urdf.xacro"/>
+    <arg name="gui" default="true"/>
+    <arg name="rvizconfig" default="$(find b29_control)/rviz/config.rviz"/>
+    <param name="robot_description" command="$(find xacro)/xacro $(arg model)"/>
+    <param name="use_gui" value="$(arg gui)"/>
+
+    <!-- Load robot description -->
+    <param name="robot_description"
+           command="xacro $(find b29_control)/urdf/b29/b29.urdf.xacro use_simulation:=$(arg use_sim_time)"/>
+
+    <rosparam file="$(find b29_control)/config/gazebo_ros_control.yaml" command="load"/>
+
+    <!-- gazebo -->
+    <include file="$(find gazebo_ros)/launch/empty_world.launch">
+        <arg name="paused" value="true"/>
+        <arg name="use_sim_time" value="true"/>
+        <arg name="gui" value="true"/>
+        <arg name="headless" value="false"/>
+        <arg name="debug" value="false"/>
+    </include>
+
+    <!-- spawn model -->
+    <node name="spawn_urdf" pkg="gazebo_ros" type="spawn_model"
+          args="-x 0.0 -y 0.0 -z 1.0
+                -R 0.0 -P 0.0 -Y 0.0
+                -param robot_description -urdf -model b29"/>
+
+    <!-- load controller yaml -->
+    <rosparam file="$(find b29_control)/config/controller.yaml" command="load"/>
+
+    <!-- controller manager -->
+    <node name="controller_manager" pkg="controller_manager" type="controller_manager" output="screen"
+          args="load
+         b29_controller/joint_state_controller
+         b29_controller/robot_state_controller
+         b29_controller/b29_joint_controller
+      "/>
+
+    <!--    &lt;!&ndash; rviz &ndash;&gt;-->
+    <!--    <node name="rviz" pkg="rviz" args="-d $(arg rvizconfig)" type="rviz"/>-->
+
+
+</launch>
