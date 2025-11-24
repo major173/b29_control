@@ -6,6 +6,7 @@
     <xacro:property name="wheel_edge_radius" value="0.0460"/>
     <xacro:property name="wheel_height" value="0.0153"/>
     <xacro:property name="wheel_edge_height" value="0.002"/>
+    <xacro:include filename="$(find b29_control)/urdf/common/imu.urdf.xacro"/>
 
     <link name="base_link">
         <inertial>
@@ -27,6 +28,9 @@
         </collision>
     </link>
 
+    <xacro:IMU connected_to="base_link" imu_name="base_imu" xyz="0.0 0.0 0.01"
+               rpy="0 0 0"/>
+
     <link name="left_first_leg">
         <inertial>
             <mass value="1.655723"/>
@@ -45,7 +49,7 @@
         <origin xyz="0.1689 -0.01425 -0.016"
                 rpy="0 0 0"/>
         <dynamics damping="0.0" friction="0.1"/>
-        <limit effort="97" velocity="6.28" lower="-1e10" upper="1e10"/>
+        <limit effort="97" velocity="6.28" lower="${-pi}" upper="${pi}"/>
         <parent link="base_link"/>
         <child link="left_first_leg"/>
         <axis xyz="0 1 0"/>
@@ -75,7 +79,7 @@
         <origin xyz="0.050346 -0.03 0.04783"
                 rpy="0 0 0"/>
         <dynamics damping="0.0" friction="0.1"/>
-        <limit effort="27" velocity="5.44" lower="-1e10" upper="1e10"/>
+        <limit effort="27" velocity="5.44" lower="${-pi}" upper="${pi}"/>
         <parent link="left_first_leg"/>
         <child link="left_second_leg"/>
         <axis xyz="0 0 1"/>
@@ -201,7 +205,7 @@
         <origin xyz="-0.1312 -0.01425 -0.016"
                 rpy="0 0 0"/>
         <dynamics damping="0.0" friction="0.1"/>
-        <limit effort="97" velocity="6.28" lower="-1e10" upper="1e10"/>
+        <limit effort="97" velocity="6.28" lower="${-pi}" upper="${pi}"/>
         <parent link="base_link"/>
         <child link="right_first_leg"/>
         <axis xyz="0 1 0"/>
@@ -231,7 +235,7 @@
         <origin xyz="-0.050346 -0.03 0.04783"
                 rpy="0 0 0"/>
         <dynamics damping="0.0" friction="0.1"/>
-        <limit effort="27" velocity="5.44" lower="-1e10" upper="1e10"/>
+        <limit effort="27" velocity="5.44" lower="${-pi}" upper="${pi}"/>
         <parent link="right_first_leg"/>
         <child link="right_second_leg"/>
         <axis xyz="0 0 1"/>

@@ -18,7 +18,7 @@
             <visual>
                 <origin rpy="0 0 0" xyz="0 0 0"/>
                 <geometry>
-                    <mesh filename="package://rm_description/meshes/common/imu.stl" scale="1 1 1"/>
+                    <box size="0.03 0.02 0.005"/>
                 </geometry>
             </visual>
             <material name="orange">
