@@ -448,10 +448,16 @@ void B29JointController::updateDebugMode(const ros::Time& time, const ros::Durat
   command_vector_.at(leftFriction) = dbus_data_.wheel;
   command_vector_.at(rightFriction) = dbus_data_.wheel;
 
-  command_vector_.at(leftFirst) += dbus_data_.ch_l_x * period.toSec();
-  command_vector_.at(leftSecond) += dbus_data_.ch_l_y * period.toSec();
-  command_vector_.at(rightFirst) += dbus_data_.ch_r_x * period.toSec();
-  command_vector_.at(rightSecond) += dbus_data_.ch_r_y * period.toSec();
+  if (dbus_data_.s_l == rm_msgs::DbusData::MID)
+  {
+    command_vector_.at(leftFirst) += dbus_data_.ch_r_y * period.toSec();
+    command_vector_.at(leftSecond) += dbus_data_.ch_l_x * period.toSec();
+  }
+  else if (dbus_data_.s_l == rm_msgs::DbusData::DOWN)
+  {
+    command_vector_.at(rightFirst) += dbus_data_.ch_r_y * period.toSec();
+    command_vector_.at(rightSecond) += dbus_data_.ch_l_x * period.toSec();
+  }
 
   switch (dbus_data_.s_l)
   {
