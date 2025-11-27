@@ -23,6 +23,8 @@
 #include <nav_msgs/Odometry.h>
 #include <urdf/model.h>
 
+#include <input_event.h>
+
 
 namespace b29_controllers
 {
@@ -54,6 +56,10 @@ private:
   void updateLastJointState();
   void updateRodThreshold();
   void applyJointCommand();
+
+  // CallBack
+  void updateEvents();
+  void leftSwitchUpRise();
 
   rm_control::RobotStateHandle robot_state_handle_{};
   hardware_interface::PositionJointInterface* position_joint_interface_{};
@@ -119,6 +125,8 @@ private:
   rm_msgs::DbusData dbus_data_;
   realtime_tools::RealtimeBuffer<rm_msgs::DbusData> cmd_rt_buffer_;
   realtime_tools::RealtimeBuffer<nav_msgs::Odometry> odom_buffer_;
+
+  InputEvent left_switch_up_event_;
 };
 } // namespace b29_controllers
 

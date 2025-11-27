@@ -172,6 +172,9 @@ bool B29JointController::init(hardware_interface::RobotHW* robot_hw,
   // odom2base_.setIdentity();
   // world2odom_.setIdentity();
 
+  // 绑定事件沿函数
+  left_switch_up_event_.setRising(boost::bind(&B29JointController::leftSwitchUpRise, this));
+
   ROS_INFO("B29 Joint Controller initialized successfully");
   return true;
 }
@@ -279,11 +282,12 @@ void B29JointController::update(const ros::Time& time, const ros::Duration& peri
   // --------------------------------------------------------------------------
 
   if (dbus_online_ && (ros::Time::now() - last_dbus_time_).sec > dbus_online_threshold_)
+  if (dbus_online_ && (ros::Time::now() - last_dbus_time_) > ros::Duration(dbus_online_threshold_))
   {
     ROS_INFO("Dbus state change to [offline]");
     dbus_online_ = false;
   }
-  else if (!dbus_online_ && (ros::Time::now() - last_dbus_time_).sec < dbus_online_threshold_)
+  else if (!dbus_online_ && (ros::Time::now() - last_dbus_time_) < ros::Duration(dbus_online_threshold_))
   {
     ROS_INFO("Dbus state change to [online]");
     dbus_online_ = true;
@@ -500,12 +504,6 @@ void B29JointController::updateIdleMode(const ros::Time& time, const ros::Durati
     ROS_INFO("State Enter IDLE model");
     state_changed_ = false;
   }
-
-  if (dbus_data_.s_l == rm_msgs::DbusData::UP && dbus_data_.s_r == rm_msgs::DbusData::UP)
-  {
-    state_ = DEBUG;
-    state_changed_ = true;
-  }
 }
 
 
@@ -604,13 +602,28 @@ void B29JointController::publishOdometry(const ros::Time& time)
 // bool B29JointController::hasLanded() { return false; }
 // bool B29JointController::obstacleCrossed() { return false; }
 
+void B29JointController::updateEvents()
+{
+  left_switch_up_event_.update(dbus_data_.s_l == rm_msgs::DbusData::UP);
+}
 // ============================================================================
 // 回调函数
 // ============================================================================
+void B29JointController::leftSwitchUpRise()
+{
+  ROS_INFO("ENTER EVENT");
+  if (state_ == IDLE)
+  {
+    state_ = DEBUG;
+    state_changed_ = true;
+  }
+}
+
 void B29JointController::dbusDataCallback(const rm_msgs::DbusData::ConstPtr& msg)
 {
   // TODO: 将速度指令写入实时缓冲区
   dbus_data_ = *msg;
+  updateEvents();
 
   last_dbus_time_ = dbus_data_.stamp;
 }
