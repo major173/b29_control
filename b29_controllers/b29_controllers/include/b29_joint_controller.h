@@ -53,6 +53,7 @@ private:
   void updateDebugMode(const ros::Time& time, const ros::Duration& period);
   void updateIdleMode(const ros::Time& time, const ros::Duration& period);
 
+  void changeState(int state);
   void updateLastJointState();
   void updateRodThreshold();
   void applyJointCommand();

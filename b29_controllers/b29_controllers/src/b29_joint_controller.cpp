@@ -196,8 +196,7 @@ void B29JointController::starting(const ros::Time& time)
   // odom2base_.setIdentity();
   // world2odom_.setIdentity();
 
-  state_ = DEBUG;
-  state_changed_ = true;
+  changeState(DEBUG);
 
   last_publish_time_ = time;
 
@@ -281,7 +280,6 @@ void B29JointController::update(const ros::Time& time, const ros::Duration& peri
   // 4. 根据模式执行不同的控制逻辑
   // --------------------------------------------------------------------------
 
-  if (dbus_online_ && (ros::Time::now() - last_dbus_time_).sec > dbus_online_threshold_)
   if (dbus_online_ && (ros::Time::now() - last_dbus_time_) > ros::Duration(dbus_online_threshold_))
   {
     ROS_INFO("Dbus state change to [offline]");
@@ -295,8 +293,7 @@ void B29JointController::update(const ros::Time& time, const ros::Duration& peri
 
   if (!dbus_online_ && state_ != IDLE)
   {
-    state_ = IDLE;
-    state_changed_ = true;
+    changeState(IDLE);
   }
 
   switch (state_)
@@ -614,8 +611,7 @@ void B29JointController::leftSwitchUpRise()
   ROS_INFO("ENTER EVENT");
   if (state_ == IDLE)
   {
-    state_ = DEBUG;
-    state_changed_ = true;
+    changeState(DEBUG);
   }
 }
 
@@ -684,6 +680,24 @@ void B29JointController::applyJointCommand()
   rf_handle_.setCommand(command_vector_.at(rightFirst));
   rs_handle_.setCommand(command_vector_.at(rightSecond));
   rr_handle_.setCommand(command_vector_.at(rightRod));
+}
+
+void B29JointController::changeState(int state)
+{
+  if (state < TRACK || state > IDLE)
+  {
+    ROS_WARN("Mismatched state: %d", state);
+    return;
+  }
+  if (state == state_)
+  {
+    ROS_INFO("State not change: %d", state);
+    return;
+  }
+
+  last_state_ = state_;
+  state_ = state;
+  state_changed_ = true;
 }
 } // namespace b29_controllers
 
