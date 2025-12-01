@@ -35,6 +35,15 @@ class B29JointController
       hardware_interface::PositionJointInterface,
       hardware_interface::VelocityJointInterface>
 {
+  struct ClampStatus
+  {
+    bool is_clamping = false;
+    bool is_clamped = false;
+    double target_rod_pos = 0.0;
+    double fixed_rod_pos = 0.0;
+    ros::Time clamp_start_time;
+  } left_clamp_, right_clamp_;
+
 public:
   B29JointController() = default;
   ~B29JointController() override = default;
@@ -56,11 +65,18 @@ private:
   void changeState(int state);
   void updateLastJointState();
   void updateRodThreshold();
+  bool B29JointController::tryClampSide(ClampStatus& clamp,
+                                        hardware_interface::JointHandle& rod_handle,
+                                        hardware_interface::JointHandle& wheel_handle,
+                                        const ros::Duration& period);
   void applyJointCommand();
 
   // CallBack
   void updateEvents();
   void leftSwitchUpRise();
+
+  // Action
+  bool releaseAndRaise(ClampStatus& clamp);
 
   rm_control::RobotStateHandle robot_state_handle_{};
   hardware_interface::PositionJointInterface* position_joint_interface_{};
@@ -72,13 +88,14 @@ private:
   std::vector<double> last_joint_position_, last_joint_velocity_, command_vector_;
 
   // Params
-  double fixed_check_vel_, fixed_check_period_, dbus_online_threshold_;
+  double friction_radius_, fixed_check_vel_, fixed_check_period_, dbus_online_threshold_;
   double release_rod_pos_, move_rod_pos_, fixed_rod_pos_;
   double publish_rate_{};
   double max_odom_vel_{};
   bool enable_odom_tf_ = false;
   bool topic_update_ = false;
   bool publish_odom_tf_ = false;
+  double clamp_try_vel_, clamp_stall_vel_th_, clamp_stall_duration_, clamp_step_size_, clamp_backoff_;
 
   enum State
   {
@@ -108,7 +125,7 @@ private:
   };
 
   bool state_changed_ = false, dbus_online_ = false;
-  int state_ = DEBUG, front_frame_ = Left, last_state_;
+  int state_ = DEBUG, front_frame_ = Left, last_state_ = -1;
   RampFilter<double>* ramp_x_{};
   std::string base_frame_{};
 

@@ -93,6 +93,12 @@ bool B29JointController::init(hardware_interface::RobotHW* robot_hw,
   controller_nh.param<double>("dbus_online_threshold", dbus_online_threshold_, 0.3);
   controller_nh.param<bool>("enable_odom_tf", enable_odom_tf_, true);
   controller_nh.param<std::string>("base_frame", base_frame_, "base_link");
+  controller_nh.param<double>("clamp_try_vel", clamp_try_vel_, 3.0);
+  controller_nh.param<double>("clamp_stall_vel_th", clamp_stall_vel_th_, 0.3);
+  controller_nh.param<double>("clamp_stall_duration", clamp_stall_duration_, 0.4);
+  controller_nh.param<double>("clamp_step_size", clamp_step_size_, 0.001);
+  controller_nh.param<double>("clamp_backoff", clamp_backoff_, 0.001);
+  controller_nh.param<double>("friction_radius", friction_radius_, 0.04);
 
   // TODO: 加载模式切换相关参数（如切换阈值、安全检查参数等）
   // double mode_switch_threshold;
@@ -342,6 +348,24 @@ void B29JointController::update(const ros::Time& time, const ros::Duration& peri
 // ============================================================================
 void B29JointController::updateTrackMode(const ros::Time& time, const ros::Duration& period)
 {
+  if (state_changed_)
+  {
+    ROS_INFO("State Enter TRACK model");
+    state_changed_ = false;
+  }
+  if (!left_clamp_.is_clamped || !right_clamp_.is_clamped)
+  {
+    ROS_WARN("[Clamp] Has rod not clamped! Exit TRACK");
+    changeState(last_state_);
+  }
+
+  // 两侧都夹好了，可以正常根据遥控器速度行驶
+  double v = dbus_data_.wheel;
+  command_vector_[leftFriction] = v / friction_radius_;
+  command_vector_[rightFriction] = v / friction_radius_;
+
+  // TODO: need test & arm joint need cancel pos control to adapt arc line
+
   // TODO: 1. 计算目标位置和姿态
   // - 保持机械臂收拢以夹紧导线
   // - 计算左右摩擦轮速度以实现前进/后退
@@ -404,7 +428,7 @@ void B29JointController::updateArmMode(const ros::Time& time, const ros::Duratio
   //   // 计算摆动轨迹
   //   double swing_angle = calculateSwingAngle(time);
   //   double swing_extension = calculateSwingExtension(time);
-  //   
+  //
   //   // 控制自由端的关节实现摆动
   //   right_first_leg_handle_.setCommand(swing_angle);
   //   right_second_leg_handle_.setCommand(...);
@@ -416,10 +440,10 @@ void B29JointController::updateArmMode(const ros::Time& time, const ros::Duratio
   // {
   //   // 新的支撑点夹紧
   //   right_rod_handle_.setCommand(GRIP_POSITION);
-  //   
+  //
   //   // 释放旧的支撑点
   //   left_rod_handle_.setCommand(RELEASE_POSITION);
-  //   
+  //
   //   // 准备下一次摆动或切换回轨道模式
   // }
 
@@ -603,6 +627,75 @@ void B29JointController::updateEvents()
 {
   left_switch_up_event_.update(dbus_data_.s_l == rm_msgs::DbusData::UP);
 }
+
+bool B29JointController::tryClampSide(ClampStatus& clamp, hardware_interface::JointHandle& rod_handle,
+                                      hardware_interface::JointHandle& wheel_handle,
+                                      const ros::Duration& period)
+{
+  if (!clamp.is_clamping)
+  {
+    // 第一次进入：初始化
+    clamp.is_clamping = true;
+    clamp.is_clamped = false;
+    clamp.target_rod_pos = rod_handle.getPosition(); // 从当前位置开始推进
+    clamp.clamp_start_time = ros::Time::now();
+    ROS_INFO("[Clamp] Start clamping, side = %s", (&clamp == &left_clamp_ ? "LEFT" : "RIGHT"));
+  }
+
+  // Step 1: 推杆逐步推进
+  clamp.target_rod_pos += clamp_step_size_;
+  command_vector_[leftRod] = clamp.target_rod_pos; // 直接写到指令向量
+
+  // Step 2: 给摩擦轮一个恒定尝试速度（正向）
+  double wheel_cmd = clamp_try_vel_;
+  if (&wheel_handle == &rf_wheel_handle_) // 如果你定义右轮正方向相反，可以加个负号
+    wheel_cmd = -clamp_try_vel_;          // 根据你的实际正方向调整
+
+  command_vector_[leftFriction] = wheel_cmd;
+
+  // Step 3: 判断是否堵转
+  double actual_vel = wheel_handle.getVelocity();
+  if (std::abs(actual_vel) < clamp_stall_vel_th_)
+  {
+    if ((ros::Time::now() - clamp.clamp_start_time).toSec() > clamp_stall_duration_)
+    {
+      // 堵转成功
+      clamp.is_clamped = true;
+      clamp.is_clamping = false;
+      clamp.fixed_rod_pos = rod_handle.getPosition();
+
+      // 回退,防止过夹
+      command_vector_[leftRod] = clamp.fixed_rod_pos - clamp_backoff_;
+
+      // 停止尝试速度
+      command_vector_[leftFriction] = 0.0;
+
+      ROS_INFO("[Clamp] SUCCESS! Fixed pos = %.4f", clamp.fixed_rod_pos);
+      return true;
+    }
+  }
+  else
+  {
+    // 还没堵转，重置计时（防抖）
+    clamp.clamp_start_time = ros::Time::now();
+  }
+
+  return false;
+}
+
+bool B29JointController::releaseAndRaise(ClampStatus& clamp)
+{
+  // TODO
+  if (!clamp.is_clamped)
+  {
+    ROS_INFO("[Clamp] Start releasing but rod is released, side = %s", (&clamp == &left_clamp_ ? "LEFT" : "RIGHT"));
+    return false;
+  }
+  else
+  {
+  }
+}
+
 // ============================================================================
 // 回调函数
 // ============================================================================

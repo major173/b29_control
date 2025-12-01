@@ -12,11 +12,18 @@ b29_controller:
   b29_joint_controller:
     type: b29_controllers/B29JointController
     max_odom_vel: 10.0
+    friction_radius: 0.0405
     release_rod_pos: 0.01
     move_rod_pos: 0.04
     fixed_rod_pos: 0.05
     fixed_check_vel: 0.3
     fixed_check_period: 0.1
+
+    clamp_try_vel_: 3.0;    # 尝试夹紧时给摩擦轮的速度 (rad/s)
+    clamp_stall_vel_th_: 0.3    # 认为堵转的速度阈值
+    clamp_stall_duration_: 0.4;    # 堵转需要持续的时间（防抖）
+    clamp_step_size_: 0.001;  # 每次推杆推进的步长（m），建议 0.5~1mm
+    clamp_backoff_: 0.001;  # 夹紧成功后回退一点点距离，释放应力
 
     joint_names:
       left_first_leg_joint: "left_first_leg_joint"
