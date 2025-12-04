@@ -65,10 +65,10 @@ private:
   void changeState(int state);
   void updateLastJointState();
   void updateRodThreshold();
-  bool B29JointController::tryClampSide(ClampStatus& clamp,
-                                        hardware_interface::JointHandle& rod_handle,
-                                        hardware_interface::JointHandle& wheel_handle,
-                                        const ros::Duration& period);
+  bool tryClampSide(ClampStatus& clamp,
+                    hardware_interface::JointHandle& rod_handle,
+                    hardware_interface::JointHandle& wheel_handle,
+                    const ros::Duration& period);
   void applyJointCommand();
 
   // CallBack
