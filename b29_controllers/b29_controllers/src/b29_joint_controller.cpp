@@ -215,8 +215,8 @@ void B29JointController::starting(const ros::Time& time)
 void B29JointController::stopping(const ros::Time& time)
 {
   // TODO: 停止所有运动
-  // left_friction_wheel_handle_.setCommand(0.0);
-  // right_friction_wheel_handle_.setCommand(0.0);
+  lf_wheel_handle_.setCommand(0.0);
+  rf_wheel_handle_.setCommand(0.0);
 
   // TODO: 将关节移动到安全位置
   // moveToSafePosition();
@@ -525,6 +525,8 @@ void B29JointController::updateIdleMode(const ros::Time& time, const ros::Durati
     ROS_INFO("State Enter IDLE model");
     state_changed_ = false;
   }
+  lf_wheel_handle_.setCommand(0.0);
+  rf_wheel_handle_.setCommand(0.0);
 }
 
 
@@ -701,7 +703,6 @@ bool B29JointController::releaseAndRaise(ClampStatus& clamp)
 // ============================================================================
 void B29JointController::leftSwitchUpRise()
 {
-  ROS_INFO("ENTER EVENT");
   if (state_ == IDLE)
   {
     changeState(DEBUG);
