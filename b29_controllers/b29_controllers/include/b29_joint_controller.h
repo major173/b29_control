@@ -74,6 +74,7 @@ private:
   // CallBack
   void updateEvents();
   void leftSwitchUpRise();
+  void leftSwitchDownRise();
 
   // Action
   bool releaseAndRaise(ClampStatus& clamp);
@@ -144,7 +145,7 @@ private:
   realtime_tools::RealtimeBuffer<rm_msgs::DbusData> cmd_rt_buffer_;
   realtime_tools::RealtimeBuffer<nav_msgs::Odometry> odom_buffer_;
 
-  InputEvent left_switch_up_event_;
+  InputEvent left_switch_up_event_, left_switch_down_event_;
 };
 } // namespace b29_controllers
 

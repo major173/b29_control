@@ -179,7 +179,8 @@ bool B29JointController::init(hardware_interface::RobotHW* robot_hw,
   // world2odom_.setIdentity();
 
   // 绑定事件沿函数
-  left_switch_up_event_.setRising(boost::bind(&B29JointController::leftSwitchUpRise, this));
+  left_switch_up_event_.setRising([this] { leftSwitchUpRise(); });
+  left_switch_down_event_.setRising([this] { leftSwitchDownRise(); });
 
   ROS_INFO("B29 Joint Controller initialized successfully");
   return true;
@@ -217,6 +218,7 @@ void B29JointController::stopping(const ros::Time& time)
   // TODO: 停止所有运动
   lf_wheel_handle_.setCommand(0.0);
   rf_wheel_handle_.setCommand(0.0);
+  changeState(IDLE);
 
   // TODO: 将关节移动到安全位置
   // moveToSafePosition();
@@ -628,6 +630,7 @@ void B29JointController::publishOdometry(const ros::Time& time)
 void B29JointController::updateEvents()
 {
   left_switch_up_event_.update(dbus_data_.s_l == rm_msgs::DbusData::UP);
+  left_switch_down_event_.update(dbus_data_.s_l == rm_msgs::DbusData::DOWN);
 }
 
 bool B29JointController::tryClampSide(ClampStatus& clamp, hardware_interface::JointHandle& rod_handle,
@@ -706,6 +709,14 @@ void B29JointController::leftSwitchUpRise()
   if (state_ == IDLE)
   {
     changeState(DEBUG);
+  }
+}
+
+void B29JointController::leftSwitchDownRise()
+{
+  if (state_ == IDLE)
+  {
+    changeState(TRACK);
   }
 }
 
