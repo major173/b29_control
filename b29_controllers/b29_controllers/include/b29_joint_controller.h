@@ -44,6 +44,23 @@ class B29JointController
     ros::Time clamp_start_time;
   } left_clamp_, right_clamp_;
 
+  struct ArmStatus
+  {
+    enum
+    {
+      CLAMPED,
+      UP,
+      TURN,
+      DOWN
+    };
+
+    bool is_running = false;
+    int state = CLAMPED;
+    double c_u_duration = 2.0, u_t_duration = 5.0, t_d_duration = 2.0;
+    double fixed_rod_pos = 0.0;
+    ros::Time last_start_time;
+  } arm_state_;
+
 public:
   B29JointController() = default;
   ~B29JointController() override = default;
@@ -70,6 +87,7 @@ private:
                     hardware_interface::JointHandle& wheel_handle,
                     const ros::Duration& period);
   void applyJointCommand();
+  void setForwardFrame(int state);
 
   // CallBack
   void updateEvents();
@@ -90,7 +108,7 @@ private:
 
   // Params
   double friction_radius_, fixed_check_vel_, fixed_check_period_, dbus_online_threshold_;
-  double release_rod_pos_, move_rod_pos_, fixed_rod_pos_;
+  double release_rod_pos_, release_refer_angle_, move_rod_pos_, fixed_rod_pos_;
   double publish_rate_{};
   double max_odom_vel_{};
   bool enable_odom_tf_ = false;

@@ -19,6 +19,8 @@ b29_controller:
     fixed_check_vel: 0.3
     fixed_check_period: 0.1
 
+    release_refer_angle: -0.23
+
     clamp_try_vel_: 3.0;    # 尝试夹紧时给摩擦轮的速度 (rad/s)
     clamp_stall_vel_th_: 0.3    # 认为堵转的速度阈值
     clamp_stall_duration_: 0.4;    # 堵转需要持续的时间（防抖）

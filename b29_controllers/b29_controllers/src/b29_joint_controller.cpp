@@ -99,6 +99,7 @@ bool B29JointController::init(hardware_interface::RobotHW* robot_hw,
   controller_nh.param<double>("clamp_step_size", clamp_step_size_, 0.001);
   controller_nh.param<double>("clamp_backoff", clamp_backoff_, 0.001);
   controller_nh.param<double>("friction_radius", friction_radius_, 0.04);
+  controller_nh.param<double>("release_refer_angle", release_refer_angle_, 0.23);
 
   // TODO: 加载模式切换相关参数（如切换阈值、安全检查参数等）
   // double mode_switch_threshold;
@@ -406,6 +407,88 @@ void B29JointController::updateTrackMode(const ros::Time& time, const ros::Durat
 // ============================================================================
 void B29JointController::updateArmMode(const ros::Time& time, const ros::Duration& period)
 {
+  if (state_changed_)
+  {
+    ROS_INFO("State Enter ARM model");
+    state_changed_ = false;
+  }
+
+  // if (!left_clamp_.is_clamped && !right_clamp_.is_clamped)
+  // {
+  //   ROS_WARN("[Clamp] Has rod not clamped! Exit ARM");
+  //   changeState(last_state_);
+  // }
+  //
+  // int fixed_index = left_clamp_.is_clamped ? Left : Right;
+  // if (!(fixed_index == Left && left_clamp_.is_clamped) || !(fixed_index == Right && right_clamp_.is_clamped))
+  // {
+  //   ROS_WARN("[Clamp] Fixed leg not clamped! Exit ARM");
+  //   changeState(last_state_);
+  // }
+
+  switch (arm_state_.state)
+  {
+    case arm_state_.CLAMPED:
+      if (!arm_state_.is_running)
+      {
+        command_vector_[leftFirst] = release_refer_angle_;
+        command_vector_[rightFirst] = release_refer_angle_;
+        arm_state_.is_running = true;
+        arm_state_.last_start_time = time;
+        ROS_INFO("Starting UP");
+      }
+      if (ros::Time::now() - arm_state_.last_start_time > ros::Duration(arm_state_.c_u_duration))
+      {
+        arm_state_.state = arm_state_.UP;
+        arm_state_.is_running = false;
+        ROS_INFO("Enter UP");
+      }
+      break;
+    case arm_state_.UP:
+      if (!arm_state_.is_running)
+      {
+        command_vector_[leftSecond] = ls_handle_.getPosition() < -M_PI / 2 ? 0 : -M_PI;
+        command_vector_[rightSecond] = rs_handle_.getPosition() < -M_PI / 2 ? 0 : -M_PI;
+        arm_state_.is_running = true;
+        arm_state_.last_start_time = time;
+        ROS_INFO("Starting TURN");
+      }
+      if (ros::Time::now() - arm_state_.last_start_time > ros::Duration(arm_state_.u_t_duration))
+      {
+        arm_state_.state = arm_state_.TURN;
+        arm_state_.is_running = false;
+        ROS_INFO("Enter TURN");
+      }
+      break;
+    case arm_state_.TURN:
+      if (!arm_state_.is_running)
+      {
+        command_vector_[leftFirst] = 0;
+        command_vector_[rightFirst] = 0;
+        arm_state_.is_running = true;
+        arm_state_.last_start_time = time;
+        ROS_INFO("Starting DOWN");
+      }
+      if (ros::Time::now() - arm_state_.last_start_time > ros::Duration(arm_state_.t_d_duration))
+      {
+        arm_state_.state = arm_state_.DOWN;
+        arm_state_.is_running = false;
+        ROS_INFO("Enter DOWN");
+      }
+      break;
+    case arm_state_.DOWN:
+      if (!arm_state_.is_running)
+      {
+        //todo: check clamped
+        arm_state_.state = arm_state_.CLAMPED;
+        ROS_INFO("Enter CLAMPED");
+      }
+      break;
+    default:
+      ROS_WARN("Default arm state enter CLAMPED");
+      break;
+  }
+
   // TODO: 1. 确定是摆动跨越还是静止状态
   // bool is_crossing = isCrossingObstacle();
 
@@ -714,10 +797,7 @@ void B29JointController::leftSwitchUpRise()
 
 void B29JointController::leftSwitchDownRise()
 {
-  if (state_ == IDLE)
-  {
-    changeState(TRACK);
-  }
+  changeState(ARM);
 }
 
 void B29JointController::dbusDataCallback(const rm_msgs::DbusData::ConstPtr& msg)
@@ -785,6 +865,16 @@ void B29JointController::applyJointCommand()
   rf_handle_.setCommand(command_vector_.at(rightFirst));
   rs_handle_.setCommand(command_vector_.at(rightSecond));
   rr_handle_.setCommand(command_vector_.at(rightRod));
+}
+
+void B29JointController::setForwardFrame(int state)
+{
+  if (state != Left || state != Right)
+  {
+    ROS_WARN("Invalid ForwardFrame state: %d", state);
+    return;
+  }
+  front_frame_ = state;
 }
 
 void B29JointController::changeState(int state)
