@@ -45,7 +45,7 @@
         </visual>
     </link>
 
-    <joint name="left_first_leg_joint" type="revolute">
+    <joint name="left_first_leg_joint" type="continuous">
         <origin xyz="0.1689 -0.01425 -0.016"
                 rpy="0 0 0"/>
         <dynamics damping="0.0" friction="0.1"/>
@@ -75,11 +75,11 @@
         </collision>
     </link>
 
-    <joint name="left_second_leg_joint" type="revolute">
+    <joint name="left_second_leg_joint" type="continuous">
         <origin xyz="0.050346 -0.03 0.04783"
                 rpy="0 0 0"/>
         <dynamics damping="0.0" friction="0.1"/>
-        <limit effort="27" velocity="5.44" lower="${-pi}" upper="${pi}"/>
+        <limit effort="27" velocity="1.44" lower="${-pi}" upper="${pi}"/>
         <parent link="left_first_leg"/>
         <child link="left_second_leg"/>
         <axis xyz="0 0 1"/>
@@ -201,7 +201,7 @@
         </visual>
     </link>
 
-    <joint name="right_first_leg_joint" type="revolute">
+    <joint name="right_first_leg_joint" type="continuous">
         <origin xyz="-0.1312 -0.01425 -0.016"
                 rpy="0 0 0"/>
         <dynamics damping="0.0" friction="0.1"/>
@@ -231,11 +231,11 @@
         </collision>
     </link>
 
-    <joint name="right_second_leg_joint" type="revolute">
+    <joint name="right_second_leg_joint" type="continuous">
         <origin xyz="-0.050346 -0.03 0.04783"
                 rpy="0 0 0"/>
         <dynamics damping="0.0" friction="0.1"/>
-        <limit effort="27" velocity="5.44" lower="${-pi}" upper="${pi}"/>
+        <limit effort="27" velocity="1.44" lower="${-pi}" upper="${pi}"/>
         <parent link="right_first_leg"/>
         <child link="right_second_leg"/>
         <axis xyz="0 0 1"/>
