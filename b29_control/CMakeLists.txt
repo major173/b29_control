@@ -128,7 +128,7 @@ include_directories(
         ${catkin_INCLUDE_DIRS}
 )
 
-add_executable(b29_hardware include/steering_engine/common/command_sender.h src/common/hardware_interface.cpp src/main.cpp)
+add_executable(b29_hardware src/common/hardware_interface.cpp src/main.cpp)
 target_link_libraries(b29_hardware ${catkin_LIBRARIES})
 
 ## Declare a C++ library

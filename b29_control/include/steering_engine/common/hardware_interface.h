@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <array>
 #include <memory>
 #include <std_msgs/String.h>
 #include <string>
@@ -134,23 +135,40 @@ public:
   }
 
 private:
-  double angle_[4], vel_[4], effort_[4];
-  double cmd_[4];
+  enum ActuatorIndex {
+    kLeftFirstLeg = 0,
+    kLeftSecondLeg,
+    kLeftRod,
+    kLeftFrictionWheel,
+    kRightFirstLeg,
+    kRightSecondLeg,
+    kRightRod,
+    kRightFrictionWheel,
+    kActuatorCount
+  };
+
+  double angle_[kActuatorCount]{}, vel_[kActuatorCount]{},
+      effort_[kActuatorCount]{};
+  double cmd_[kActuatorCount]{};
   serial::Serial serial_;
 
   // interface of the robot
   hardware_interface::PositionActuatorInterface position_act_interface_;
+  hardware_interface::VelocityActuatorInterface velocity_act_interface_;
   hardware_interface::ActuatorStateInterface act_state_interface_;
   hardware_interface::PositionJointInterface position_joint_interface_;
   std::shared_ptr<controller_manager::ControllerManager> controller_manager_;
   std::vector<hardware_interface::JointStateHandle> joint_state_handles_{};
   std::vector<hardware_interface::JointHandle> position_joint_handles_{};
+  std::vector<hardware_interface::JointHandle> velocity_joint_handles_{};
 
   // transmission of the robot
   transmission_interface::ActuatorToJointStateInterface
       *act_to_jnt_state_interface_{};
   transmission_interface::JointToActuatorPositionInterface
       *jnt_to_act_position_interface_{};
+  transmission_interface::JointToActuatorVelocityInterface
+      *jnt_to_act_velocity_interface_{};
   transmission_interface::RobotTransmissions robot_transmissions_;
   std::unique_ptr<transmission_interface::TransmissionInterfaceLoader>
       transmission_interface_loader_;
@@ -179,7 +197,7 @@ private:
   const unsigned char ender[2] = {0x0d, 0x0a};
 
   // actor offset
-  std::vector<double> offset_vector_ = {0, 90, 90, 0};
+  std::array<double, kActuatorCount> offset_vector_{};
 };
 
 typedef struct {

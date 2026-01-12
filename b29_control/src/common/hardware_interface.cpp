@@ -60,7 +60,9 @@ void StRobotHW::read(const ros::Time &time, const ros::Duration &period) {
     serial_.read(rx_buffer_, rx_len_);
 
     unpack(rx_buffer_);
-    act_to_jnt_state_interface_->propagate();
+    if (act_to_jnt_state_interface_) {
+      act_to_jnt_state_interface_->propagate();
+    }
   } else {
     return;
   }
@@ -68,31 +70,36 @@ void StRobotHW::read(const ros::Time &time, const ros::Duration &period) {
 }
 
 void StRobotHW::write(const ros::Time &time, const ros::Duration &period) {
-  static uint8_t last_send_data[12];
-  uint8_t ctrl = 0xc0;
-  uint8_t data[12] = {0};
+  static std::array<uint8_t, 12> last_send_data{};
+  const uint8_t ctrl = 0xc0;
+  std::array<uint8_t, 12> data{};
 
-  jnt_to_act_position_interface_
-      ->propagate(); // now cmd[]'s data will be changed, pack
-                     // cmd[] and send it.
-
-  for (int i = 1; i < 4; i++) {
-    *(data + i) = static_cast<uint8_t>(
-        cmd_[i] + offset_vector_[i]); // set offset, ugly and unfetchable code
+  if (jnt_to_act_position_interface_) {
+    jnt_to_act_position_interface_->propagate();
   }
-  cmd_[3] = cmd_[3] + cmd_[2];
+  if (jnt_to_act_velocity_interface_) {
+    jnt_to_act_velocity_interface_->propagate();
+  }
 
-  if (memcmp(data, last_send_data, 12) != 0) {
-    ROS_INFO("send rotation_baselink:%d  middle_rotation:%d left3_middle:%d",
-             data[1], data[2], data[3]);
-    pack(tx_buffer_, ctrl, data);
+  const size_t payload_count =
+      static_cast<size_t>(kActuatorCount) <
+              static_cast<size_t>(k_data_length_)
+          ? static_cast<size_t>(kActuatorCount)
+          : static_cast<size_t>(k_data_length_);
+
+  for (size_t i = 0; i < payload_count; ++i) {
+    data[i] = static_cast<uint8_t>(cmd_[i] + offset_vector_[i]);
+  }
+
+  if (memcmp(data.data(), last_send_data.data(), data.size()) != 0) {
+    pack(tx_buffer_, ctrl, data.data());
     tx_len_ = sizeof(tx_buffer_);
     try {
       serial_.write(tx_buffer_, tx_len_);
     } catch (serial::PortNotOpenedException &e) {
       ROS_ERROR_STREAM("Failed to usart data. " << e.what());
     }
-    memcpy(last_send_data, data, 12);
+    memcpy(last_send_data.data(), data.data(), data.size());
   }
 
   clearTxBuffer();
@@ -135,20 +142,41 @@ bool StRobotHW::setupTransmission(ros::NodeHandle &root_nh) {
   jnt_to_act_position_interface_ =
       robot_transmissions_
           .get<transmission_interface::JointToActuatorPositionInterface>();
+  jnt_to_act_velocity_interface_ =
+      robot_transmissions_
+          .get<transmission_interface::JointToActuatorVelocityInterface>();
 
   auto position_joint_interface =
       this->get<hardware_interface::PositionJointInterface>();
-  std::vector<std::string> p_j_names = position_joint_interface->getNames();
+  auto velocity_joint_interface =
+      this->get<hardware_interface::VelocityJointInterface>();
   auto joint_state_interface =
       this->get<hardware_interface::JointStateInterface>();
-  std::vector<std::string> j_s_names = joint_state_interface->getNames();
 
-  for (const auto &name : p_j_names) {
+  if (!position_joint_interface) {
+    ROS_ERROR("PositionJointInterface is not available in RobotHW");
+    return false;
+  }
+  if (!velocity_joint_interface) {
+    ROS_ERROR("VelocityJointInterface is not available in RobotHW");
+    return false;
+  }
+  if (!joint_state_interface) {
+    ROS_ERROR("JointStateInterface is not available in RobotHW");
+    return false;
+  }
+
+  for (const auto &name : position_joint_interface->getNames()) {
     ROS_INFO("position_joint_handle: %s", name.c_str());
     position_joint_handles_.push_back(
         position_joint_interface->getHandle(name));
   }
-  for (const auto &name : j_s_names) {
+  for (const auto &name : velocity_joint_interface->getNames()) {
+    ROS_INFO("velocity_joint_handle: %s", name.c_str());
+    velocity_joint_handles_.push_back(
+        velocity_joint_interface->getHandle(name));
+  }
+  for (const auto &name : joint_state_interface->getNames()) {
     ROS_INFO("joint_state_handle: %s", name.c_str());
     joint_state_handles_.push_back(joint_state_interface->getHandle(name));
     joint_states_segment_.insert(
@@ -159,39 +187,40 @@ bool StRobotHW::setupTransmission(ros::NodeHandle &root_nh) {
 }
 
 void StRobotHW::setInterface() {
-  //  hardware_interface::JointStateHandle rotation_baselink_joint_state_handle(
-  //      "rotation_baselink_joint", &angle_[0], &vel_[1], &effort_[1]);
-  //  joint_state_interface_.registerHandle(rotation_baselink_joint_state_handle);
-  //  hardware_interface::JointHandle joint_state_handle(
-  //      joint_state_interface_.getHandle("rotation_baselink_joint"),
-  //      &cmd_[1]);
-  //  position_joint_interface_.registerHandle(joint_state_handle);
-  hardware_interface::ActuatorStateHandle rotation_baselink_act_state(
-      "rotation_baselink_joint_motor", &angle_[1], &vel_[1], &effort_[1]);
-  act_state_interface_.registerHandle(rotation_baselink_act_state);
-  hardware_interface::ActuatorHandle rotation_baselink_act_handle(
-      act_state_interface_.getHandle("rotation_baselink_joint_motor"),
-      &cmd_[1]);
-  position_act_interface_.registerHandle(rotation_baselink_act_handle);
+  struct ActuatorSpec {
+    const char *name;
+    ActuatorIndex index;
+    bool velocity_interface;
+  };
 
-  hardware_interface::ActuatorStateHandle middle_rotation_act_state(
-      "middle_rotation_joint_motor", &angle_[2], &vel_[2], &effort_[2]);
-  act_state_interface_.registerHandle(middle_rotation_act_state);
-  hardware_interface::ActuatorHandle middle_rotation_act_handle(
-      act_state_interface_.getHandle("middle_rotation_joint_motor"), &cmd_[2]);
-  position_act_interface_.registerHandle(middle_rotation_act_handle);
+  const ActuatorSpec actuator_specs[] = {
+      {"left_first_leg_motor", kLeftFirstLeg, false},
+      {"left_second_leg_motor", kLeftSecondLeg, false},
+      {"left_rod_motor", kLeftRod, false},
+      {"left_friction_wheel_motor", kLeftFrictionWheel, true},
+      {"right_first_leg_motor", kRightFirstLeg, false},
+      {"right_second_leg_motor", kRightSecondLeg, false},
+      {"right_rod_motor", kRightRod, false},
+      {"right_friction_wheel_motor", kRightFrictionWheel, true},
+  };
 
-  hardware_interface::ActuatorStateHandle left3_middle_act_state(
-      "left3_middle_joint_motor", &angle_[3], &vel_[3], &effort_[3]);
-  act_state_interface_.registerHandle(left3_middle_act_state);
-  hardware_interface::ActuatorHandle left3_middle_act_handle(
-      act_state_interface_.getHandle("left3_middle_joint_motor"), &cmd_[3]);
-  position_act_interface_.registerHandle(left3_middle_act_handle);
+  for (const auto &spec : actuator_specs) {
+    hardware_interface::ActuatorStateHandle state_handle(
+        spec.name, &angle_[spec.index], &vel_[spec.index],
+        &effort_[spec.index]);
+    act_state_interface_.registerHandle(state_handle);
+    hardware_interface::ActuatorHandle cmd_handle(
+        act_state_interface_.getHandle(spec.name), &cmd_[spec.index]);
+    if (spec.velocity_interface) {
+      velocity_act_interface_.registerHandle(cmd_handle);
+    } else {
+      position_act_interface_.registerHandle(cmd_handle);
+    }
+  }
 
-  // registerInterface(&joint_state_interface_);
-  // registerInterface(&position_joint_interface_);
   registerInterface(&act_state_interface_);
   registerInterface(&position_act_interface_);
+  registerInterface(&velocity_act_interface_);
 }
 
 void StRobotHW::setKDLSegment() {
@@ -286,39 +315,54 @@ void StRobotHW::pack(unsigned char *tx_buffer, unsigned char ctrl,
 }
 
 void StRobotHW::unpack(std::vector<uint8_t> rx_buffer) {
-  uint8_t ctrl, length;
+  if (rx_buffer.size() < static_cast<size_t>(k_frame_length_)) {
+    ROS_WARN_THROTTLE(10, "Received message length %zu is too short",
+                      rx_buffer.size());
+    return;
+  }
 
   // check header and ender
-  if (rx_buffer[0] != header[0] || rx_buffer[1] != header[1]) // buf[0] buf[1]
-  {
+  if (rx_buffer[0] != header[0] || rx_buffer[1] != header[1]) {
     return;
-  } else if (rx_buffer[17] != ender[0] || rx_buffer[18] != ender[1]) {
+  }
+  if (rx_buffer[k_frame_length_ - 2] != ender[0] ||
+      rx_buffer[k_frame_length_ - 1] != ender[1]) {
     ROS_WARN("Received message ender error! Want: %x %x Real: %x %x", ender[0],
-             ender[1], rx_buffer[17], rx_buffer[18]);
+             ender[1], rx_buffer[k_frame_length_ - 2],
+             rx_buffer[k_frame_length_ - 1]);
     return;
   }
 
-  // read ctrl
-  ctrl = rx_buffer_[2]; // buf[2]
-  // read len
-  length = rx_buffer[3]; // buf[3]
-  // check crc
-  if (rx_buffer[16] !=
-      getCrc8(static_cast<unsigned char *>(&rx_buffer[0]), 4 + length)) {
-    ROS_WARN("Received message crc check error! Want: %02x Real: %02x",
-             getCrc8(static_cast<unsigned char *>(&rx_buffer[0]), 4 + length),
-             rx_buffer[16]);
+  const uint8_t length = rx_buffer[k_header_length_ + k_ctrl_length_];
+  if (length != k_data_length_) {
+    ROS_WARN_THROTTLE(10, "Received message data length %u is unexpected",
+                      length);
     return;
   }
-  // read data
-  for (int i = 0; i < 5; i++) {
-    angle_[i] = static_cast<double>(rx_buffer[4 + i]);
+
+  const size_t crc_index =
+      k_header_length_ + k_ctrl_length_ + k_length_ + length;
+  if (rx_buffer[crc_index] !=
+      getCrc8(static_cast<unsigned char *>(&rx_buffer[0]),
+              k_header_length_ + k_ctrl_length_ + k_length_ + length)) {
+    ROS_WARN("Received message crc check error! Want: %02x Real: %02x",
+             getCrc8(static_cast<unsigned char *>(&rx_buffer[0]),
+                     k_header_length_ + k_ctrl_length_ + k_length_ + length),
+             rx_buffer[crc_index]);
+    return;
+  }
+
+  const size_t payload_start = k_header_length_ + k_ctrl_length_ + k_length_;
+  const size_t payload_count =
+      static_cast<size_t>(kActuatorCount) < static_cast<size_t>(length)
+          ? static_cast<size_t>(kActuatorCount)
+          : static_cast<size_t>(length);
+
+  for (size_t i = 0; i < payload_count; ++i) {
+    angle_[i] = static_cast<double>(rx_buffer[payload_start + i]) -
+                offset_vector_[i];
     effort_[i] = 0.;
     vel_[i] = 0.;
-  }
-  // set offset, ugly and unfetchable code
-  for (int i = 0; i < 4; i++) {
-    angle_[i] -= offset_vector_[i - 1];
   }
 }
 } // namespace steering_engine_hw
