@@ -257,6 +257,16 @@ void StRobotHW::setInterface() {
   registerInterface(&act_state_interface_);
   registerInterface(&position_act_interface_);
   registerInterface(&velocity_act_interface_);
+
+  // 占位 IMU 数据，后续由真实传感器填充
+  hardware_interface::ImuSensorHandle imu_handle(
+      "base_imu", "base_imu", imu_orientation_.data(),
+      imu_orientation_covariance_.data(), imu_angular_velocity_.data(),
+      imu_angular_velocity_covariance_.data(), imu_linear_acceleration_.data(),
+      imu_linear_acceleration_covariance_.data());
+  imu_sensor_interface_.registerHandle(imu_handle);
+  registerInterface(&imu_sensor_interface_);
+  registerInterface(&robot_state_interface_);
 }
 
 bool StRobotHW::loadProtocolConfig(ros::NodeHandle &root_nh) {
