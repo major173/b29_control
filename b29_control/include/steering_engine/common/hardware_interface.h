@@ -7,6 +7,8 @@
 #include <array>
 #include <memory>
 #include <std_msgs/String.h>
+#include <std_msgs/Float64.h>
+#include <std_msgs/Float64MultiArray.h>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -96,6 +98,10 @@ public:
   void setKDLSegment();
   void addChildren(const KDL::SegmentMap::const_iterator segment);
   void updateTf(const ros::Time &time);
+
+  bool loadProtocolConfig(ros::NodeHandle &root_nh);
+  void jointSpeedTargetCallback(const std_msgs::Float64::ConstPtr &msg);
+  void clawSpeedTargetCallback(const std_msgs::Float64MultiArray::ConstPtr &msg);
   //去除输入字符串开头的斜线
   std::string stripSlash(const std::string &in) {
     if (!in.empty() && in[0] == '/') {
@@ -109,7 +115,7 @@ public:
   }
 
   void clearTxBuffer() {
-    for (int i = 0; i < k_frame_length_; i++)
+    for (size_t i = 0; i < k_frame_length_; i++)
       tx_buffer_[i] = 0;
     tx_len_ = 0;
   }
@@ -145,6 +151,18 @@ private:
     kRightRod,
     kRightFrictionWheel,
     kActuatorCount
+  };
+
+  struct ControlMap {
+    std::array<ActuatorIndex, 2> wheel_speed{};
+    std::array<ActuatorIndex, 2> claw_speed{};
+    std::array<ActuatorIndex, 2> claw_angle{};
+    std::array<ActuatorIndex, 4> joint_angle{};
+  };
+
+  struct ProtocolTopics {
+    std::string joint_speed_target;
+    std::string claw_speed_target;
   };
 
   double angle_[kActuatorCount]{}, vel_[kActuatorCount]{},
@@ -186,25 +204,40 @@ private:
 
   int rx_len_;
   std::vector<uint8_t> rx_buffer_;
-  uint8_t tx_buffer_[19];
   int tx_len_;
-  const int k_frame_length_ = 19, k_header_length_ = 2, k_ctrl_length_ = 1,
-            k_length_ = 1, k_data_length_ = 12, k_crc_length_ = 1,
-            k_tail_length_ = 2;
+  static constexpr size_t k_frame_length_ = 51;
+  static constexpr size_t k_header_length_ = 2;
+  static constexpr size_t k_ctrl_length_ = 1;
+  static constexpr size_t k_length_ = 1;
+  static constexpr size_t k_data_length_ = 44;
+  static constexpr size_t k_crc_length_ = 1;
+  static constexpr size_t k_tail_length_ = 2;
+  uint8_t tx_buffer_[k_frame_length_];
 
   //通信协议常量
   const unsigned char header[2] = {0x55, 0xaa};
   const unsigned char ender[2] = {0x0d, 0x0a};
+  const unsigned char control_code_ = 0x01;
 
   // actor offset
   std::array<double, kActuatorCount> offset_vector_{};
+
+  std::array<int, kActuatorCount> actuator_id_map_{};
+  std::unordered_map<int, ActuatorIndex> id_to_actuator_{};
+  std::unordered_map<std::string, ActuatorIndex> joint_to_actuator_{};
+  ControlMap control_map_{};
+  ProtocolTopics protocol_topics_{};
+  double joint_speed_target_{1.0};
+  std::array<double, 2> claw_speed_target_{{1.0, 1.0}};
+  ros::Subscriber joint_speed_sub_;
+  ros::Subscriber claw_speed_sub_;
 };
 
 typedef struct {
   unsigned char header_[2]; // k_header_length_
   unsigned char ctrl_;      // k_ctrl_length_
   unsigned char length_;    // k_length_
-  unsigned char data_[12];  // k_data_length_
+  unsigned char data_[44];  // k_data_length_
   unsigned char crc_;       // k_crc_length_
   unsigned char ender_[2];  // k_tail_length_
 } __packed SerialFrame;

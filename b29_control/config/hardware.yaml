@@ -1,4 +1,32 @@
 steering_engine_hw:
   serial:
-    name:
-      - "/dev/usbReferee"
+    port: "/dev/ttyUSB0"
+    baudrate: 115200
+  protocol:
+    id_map:
+      left_first_leg_joint: 0
+      left_second_leg_joint: 1
+      left_rod_joint: 2
+      left_friction_wheel_joint: 3
+      right_first_leg_joint: 4
+      right_second_leg_joint: 5
+      right_rod_joint: 6
+      right_friction_wheel_joint: 7
+    control_map:
+      wheel_speed_targets:
+        - left_friction_wheel_joint
+        - right_friction_wheel_joint
+      claw_speed_targets:
+        - left_rod_joint
+        - right_rod_joint
+      claw_angle_targets:
+        - left_rod_joint
+        - right_rod_joint
+      joint_angle_targets:
+        - left_first_leg_joint
+        - left_second_leg_joint
+        - right_first_leg_joint
+        - right_second_leg_joint
+    topics:
+      joint_speed_target: "/joint_speed_target"
+      claw_speed_target: "/claw_speed_target"
