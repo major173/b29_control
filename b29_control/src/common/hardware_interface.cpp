@@ -68,16 +68,20 @@ bool StRobotHW::init(ros::NodeHandle &root_nh, ros::NodeHandle &robot_hw_nh) {
 void StRobotHW::read(const ros::Time &time, const ros::Duration &period) {
   if (serial_.available()) {
     rx_len_ = static_cast<int>(serial_.available());
-    serial_.read(rx_buffer_, rx_len_);
-
-    unpack(rx_buffer_);
+    std::vector<uint8_t> incoming;
+    const size_t bytes_read = serial_.read(incoming, static_cast<size_t>(rx_len_));
+    if (bytes_read == 0) {
+      return;
+    }
+    incoming.resize(bytes_read);
+    rx_buffer_.insert(rx_buffer_.end(), incoming.begin(), incoming.end());
+    processRxBuffer();
     if (act_to_jnt_state_interface_) {
       act_to_jnt_state_interface_->propagate();
     }
   } else {
     return;
   }
-  clearRxBuffer();
 }
 
 void StRobotHW::write(const ros::Time &time, const ros::Duration &period) {
@@ -562,6 +566,77 @@ void StRobotHW::unpack(std::vector<uint8_t> rx_buffer) {
     angle_[actuator_index] = static_cast<double>(pos) - offset_vector_[actuator_index];
     vel_[actuator_index] = static_cast<double>(vel);
     effort_[actuator_index] = static_cast<double>(tor);
+  }
+}
+
+void StRobotHW::processRxBuffer() {
+  const size_t min_frame_length =
+      k_header_length_ + k_ctrl_length_ + k_length_ + k_crc_length_ +
+      k_tail_length_;
+  const size_t payload_start = k_header_length_ + k_ctrl_length_ + k_length_;
+
+  while (rx_buffer_.size() >= min_frame_length) {
+    if (rx_buffer_[0] != header[0] || rx_buffer_[1] != header[1]) {
+      bool found = false;
+      size_t header_pos = 0;
+      for (size_t i = 1; i + 1 < rx_buffer_.size(); ++i) {
+        if (rx_buffer_[i] == header[0] && rx_buffer_[i + 1] == header[1]) {
+          header_pos = i;
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        rx_buffer_.clear();
+        return;
+      }
+      rx_buffer_.erase(rx_buffer_.begin(), rx_buffer_.begin() + header_pos);
+      if (rx_buffer_.size() < min_frame_length) {
+        return;
+      }
+    }
+
+    if (rx_buffer_.size() < payload_start) {
+      return;
+    }
+
+    const uint8_t length = rx_buffer_[k_header_length_ + k_ctrl_length_];
+    const size_t expected_size =
+        payload_start + static_cast<size_t>(length) + k_crc_length_ +
+        k_tail_length_;
+    if (expected_size < min_frame_length) {
+      rx_buffer_.erase(rx_buffer_.begin());
+      continue;
+    }
+    if (rx_buffer_.size() < expected_size) {
+      return;
+    }
+
+    const uint8_t ctrl = rx_buffer_[k_header_length_];
+    if (ctrl != control_code_) {
+      rx_buffer_.erase(rx_buffer_.begin());
+      continue;
+    }
+    if (rx_buffer_[expected_size - 2] != ender[0] ||
+        rx_buffer_[expected_size - 1] != ender[1]) {
+      rx_buffer_.erase(rx_buffer_.begin());
+      continue;
+    }
+
+    const size_t expected_crc_index =
+        payload_start + static_cast<size_t>(length);
+    const unsigned char crc = getCrc8(
+        static_cast<unsigned char *>(&rx_buffer_[0]),
+        k_header_length_ + k_ctrl_length_ + k_length_ + length);
+    if (rx_buffer_[expected_crc_index] != crc) {
+      rx_buffer_.erase(rx_buffer_.begin());
+      continue;
+    }
+
+    std::vector<uint8_t> frame(rx_buffer_.begin(),
+                               rx_buffer_.begin() + expected_size);
+    unpack(frame);
+    rx_buffer_.erase(rx_buffer_.begin(), rx_buffer_.begin() + expected_size);
   }
 }
 } // namespace steering_engine_hw

@@ -124,6 +124,7 @@ public:
       iter = rx_buffer_.erase(iter);
     }
   }
+  void processRxBuffer();
   static unsigned char getCrc8(unsigned char *ptr, unsigned short len) {
     unsigned char crc;
     unsigned char i;
