@@ -128,7 +128,7 @@ public:
   static unsigned char getCrc8(unsigned char *ptr, unsigned short len) {
     unsigned char crc;
     unsigned char i;
-    crc = 0;
+    crc = 0xFF;
     while (len--) {
       crc ^= *ptr++;
       for (i = 0; i < 8; i++) {
