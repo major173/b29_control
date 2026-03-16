@@ -13,7 +13,7 @@ int main(int argc, char **argv) {
   steering_engine_hw::StRobotHW hardware;
   // controller_manager::ControllerManager cm(&robot_hw);
 
-  ros::Rate loop_rate(40);
+  ros::Rate loop_rate(10);
   ros::NodeHandle nh_hw("~");
   hardware.init(nh, nh_hw);
 
