@@ -1,0 +1,7 @@
+bool mark_hero_progress
+bool mark_engineer_progress
+bool mark_standard_3_progress
+bool mark_standard_4_progress
+bool mark_sentry_progress
+
+time stamp

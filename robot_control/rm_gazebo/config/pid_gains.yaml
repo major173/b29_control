@@ -1,0 +1,62 @@
+# PID参数配置文件
+pid_gains:
+  # 右侧夹爪关节
+  right_jaw_joint:
+    p: 1000.0
+    i: 0.01
+    d: 10.0
+    i_clamp: 1.0
+    antiwindup: true
+  
+  # 右侧摩擦轮关节
+  right_friction_wheel_joint:
+    p: 1000.0
+    i: 0.01
+    d: 10.0
+    i_clamp: 1.0
+    antiwindup: true
+  
+  # 左侧夹爪关节
+  left_jaw_joint:
+    p: 1000.0
+    i: 0.01
+    d: 10.0
+    i_clamp: 1.0
+    antiwindup: true
+  
+  # 左侧摩擦轮关节
+  left_friction_wheel_joint:
+    p: 1000.0
+    i: 0.01
+    d: 10.0
+    i_clamp: 1.0
+    antiwindup: true
+
+  # 其他关节...
+  left_first_leg_joint:
+    p: 1000.0
+    i: 0.01
+    d: 10.0
+    i_clamp: 1.0
+    antiwindup: true
+
+  left_second_leg_joint:
+    p: 1000.0
+    i: 0.01
+    d: 10.0
+    i_clamp: 1.0
+    antiwindup: true
+
+  right_first_leg_joint:
+    p: 1000.0
+    i: 0.01
+    d: 10.0
+    i_clamp: 1.0
+    antiwindup: true
+
+  right_second_leg_joint:
+    p: 1000.0
+    i: 0.01
+    d: 10.0
+    i_clamp: 1.0
+    antiwindup: true
