@@ -13,7 +13,7 @@ int main(int argc, char **argv) {
   steering_engine_hw::StRobotHW hardware;
   // controller_manager::ControllerManager cm(&robot_hw);
 
-  ros::Rate loop_rate(10);
+  ros::Rate loop_rate(50);
   ros::NodeHandle nh_hw("~");
   hardware.init(nh, nh_hw);
 
@@ -27,9 +27,9 @@ int main(int argc, char **argv) {
     ros::Time current_time = ros::Time::now();
     ros::Duration dt = current_time - previous_time;
 
-    hardware.read(ros::Time::now(), ros::Duration(1.0 / 40));
+    hardware.read(ros::Time::now(), ros::Duration(1.0 / 200));
     // In order real time ,this function maybe move into command sender
-    hardware.write(ros::Time::now(), ros::Duration(1.0 / 40));
+    hardware.write(ros::Time::now(), ros::Duration(1.0 / 200));
 
     hardware.updateControllerManager(current_time, dt);
     hardware.updateTf(current_time);
