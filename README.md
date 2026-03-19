@@ -1,0 +1,306 @@
+# B29
+
+> B29机器人控制系统
+
+
+
+## 调试
+
+### 硬件接口测试
+
+> 检查串口输出->启动hardware->观察电机数据
+
+- 串口检查
+
+```bash
+# 列出可用串口
+ls /sys/class/tty/ttyUSB* -l
+# 打开串口配置工具,需要先安装minicom或cutecom
+sudo minicom -s  # 无可视化界面
+cutecom			 # 可视化界面
+
+# minicom部分
+# 接着选择serial port set up（第三项），回车，按a键，命令口输入ttyUSB1，exit
+# 完成，接着观察是否有接受乱码输出。
+
+# cutecom部分
+# 选择端口open,点击hex输出
+
+# 确认发来的数据是否符合数据帧
+```
+
+
+
+- 启动hardware
+
+```bash
+# 启动硬件接口
+mon launch b29_control start.launch
+
+# 打开rqt
+rqt
+```
+
+进入rqt,在`controller manager`启动`joint_state_controller`
+
+
+
+- 观察电机数据
+
+```bash
+# 启动plotjugger
+rosrun plotjuggler plotjuggler
+```
+
+订阅`/joint_state`话题
+
+
+
+## 通信协议
+
+[TOC]
+
+### 数据包与校验位
+
+### 控制帧结构
+
+**流向**：上位机 (PC) →→ 下位机 (Robot)
+**作用**：告诉机器人各个部件应该怎么动（设定期望值）。
+
+**A. 数据包结构 (51 Bytes)**
+
+| 顺序       | 字段名      | 长度         | 值/类型     | 说明                      |
+| ---------- | ----------- | ------------ | ----------- | ------------------------- |
+| 1          | 帧头1       | 1 Byte       | `0x55`      | 固定头                    |
+| 2          | 帧头2       | 1 Byte       | `0xAA`      | 固定头                    |
+| 3          | 命令字      | 1 Byte       | `0x01`      | 控制指令                  |
+| 4          | 长度位      | 1 Byte       | `0x2C` (44) | 后续数据净荷长度          |
+| **5 ~ 48** | **Payload** | **44 Bytes** | **Mixed**   | **核心控制数据 (见下表)** |
+| 49         | CRC         | 1 Byte       | Calc        | CRC8 校验码               |
+| 50         | 帧尾1       | 1 Byte       | `0x0D`      | CR                        |
+| 51         | 帧尾2       | 1 Byte       | `0x0A`      | LF                        |
+
+**B. Payload 数据内容 (44 Bytes) （注：float数据按小端序发送）**
+
+驱动轮的速度期望 *2、夹爪速度期望 *2、夹爪位置期望 *2、关节速度 *1，关节角度期望 *4。
+
+这 44 个字节是纯二进制数据，由 11 个 `float` (单精度浮点数，小端模式) 组成，顺序如下：
+
+1. **左驱动轮速度** (`float`, 4B) - `wheelSpeedTarget[0]`
+2. **右驱动轮速度** (`float`, 4B) - `wheelSpeedTarget[1]`
+3. **左夹爪速度** (`float`, 4B) - `clawSpeedTarget[0]`
+4. **右夹爪速度** (`float`, 4B) - `clawSpeedTarget[1]`
+5. **左夹爪位置** (`float`, 4B) - `clawAngleTarget[0]`
+6. **右夹爪位置** (`float`, 4B) - `clawAngleTarget[1]`
+7. **关节统一速度** (`float`, 4B) - `jointSpeedTarget` (所有关节共用此限速或目标速度)
+8. **关节1 角度** (`float`, 4B) - `jointAngleTarget[0]`
+9. **关节2 角度** (`float`, 4B) - `jointAngleTarget[1]`
+10. **关节3 角度** (`float`, 4B) - `jointAngleTarget[2]`
+11. **关节4 角度** (`float`, 4B) - `jointAngleTarget[3]`
+
+```c
+float wheelSpeedTarget[2];
+float clawSpeedTarget[2];
+float clawAngleTarget[2];
+float jointSpeedTarget;
+float jointAngleTarget[4];
+```
+
+
+
+**C. 如何解析与使用**
+
+当下位机收到这串数据后：
+
+1. **校验**：计算前 48 字节的 CRC8 是否等于第 49 字节。
+2. **映射**：将字节流按每 4 个字节强转为 `float`。
+3. 应用：
+   - 将 **轮子速度** 赋值给底盘运动学解算模块。
+   - 将 **关节角度** 发送给机械臂驱动模块（如位置模式控制）。
+   - 将 **夹爪位置/速度** 发送给夹爪电机。
+
+
+
+### 反馈帧结构
+
+**流向**：下位机 (Robot) →→ 上位机 (PC)
+**作用**：告诉上位机现在各个电机的实际状态（位置、速度、力矩）。
+
+**A. 数据包结构 (111 Bytes *)**
+
+注：假设当前电机数量 `num = 8`。长度 = `7 + (8 \* 13)` = 111字节。*
+
+| 顺序        | 字段名      | 长度          | 值/类型      | 说明                    |
+| ----------- | ----------- | ------------- | ------------ | ----------------------- |
+| 1           | 帧头1       | 1 Byte        | `0x55`       | 固定头                  |
+| 2           | 帧头2       | 1 Byte        | `0xAA`       | 固定头                  |
+| 3           | 命令字      | 1 Byte        | `0x01`       | 反馈指令                |
+| 4           | 长度位      | 1 Byte        | `0x68` (104) | 后续数据净荷长度 (8*13) |
+| **5 ~ 108** | **Payload** | **104 Bytes** | **Mixed**    | **所有电机的状态列表**  |
+| 109         | CRC         | 1 Byte        | Calc         | CRC8 校验码             |
+| 110         | 帧尾1       | 1 Byte        | `0x0D`       | CR                      |
+| 111         | 帧尾2       | 1 Byte        | `0x0A`       | LF                      |
+
+
+
+**B. Payload 数据内容 (对于8个电机)**
+
+数据是一个**列表**，每个电机占用 **13 个字节**，依次排列 (Motor1 → Motor8)。
+**单个电机的数据块结构 (13 Bytes)**：**(注： float数据按小端序发送)**
+
+1. **ID** (`uint8`, 1B) - 电机物理ID (如 0x01)
+
+2. **位置 Pos** (`float`, 4B) - 当前角度 (rad)
+
+3. **速度 Vel** (`float`, 4B) - 当前角速度 (rad/s)
+
+4. **力矩 Tor** (`float`, 4B) - 当前输出力矩 (N·m)
+
+**注：POS，VEL和T数据为经过处理，减速后的数据**
+
+**排列顺序**：
+
+Block 1 (Byte 0-12): **电机 1** 的 ID, Pos, Vel, Tor
+
+Block 2 (Byte 13-25): **电机 2** 的 ID, Pos, Vel, Tor
+
+...
+
+Block 8 (Byte 91-103): **电机 8** 的 ID, Pos, Vel, Tor
+
+
+
+**C. 上位机如何解析**
+
+1. **寻找帧头**：在串口流中寻找 `55 AA`。
+
+2. **读取长度**：读取 Length 字节 (0x68 = 104)。
+
+3. **读取 Payload**：读取接下来的 104 字节。
+
+4. **循环解析**：
+
+```python
+# Python 伪代码
+num_motors = 8
+payload = rx_data[4 : 4+104]
+offset = 0
+for i in range(num_motors):
+    motor_id = payload[offset]
+    pos = struct.unpack('<f', payload[offset+1 : offset+5])
+    vel = struct.unpack('<f', payload[offset+5 : offset+9])
+    tor = struct.unpack('<f', payload[offset+9 : offset+13]) 
+    offset += 13
+    print(f"Motor {motor_id}: P={pos}, V={vel}, T={tor}")
+```
+
+
+
+![image-20260113173812270](/home/yuchen/Documents/B29调试/images/B29调试/image-20260113173812270.png)
+
+
+
+### 校验相关代码
+
+![image-20260112190724940](/home/yuchen/Documents/B29调试/images/B29调试/image-20260112190724940.png)
+
+**下位机相关代码：**
+
+~~~c
+//rx_buffer 中存放一个完整的数据帧
+uint8_t crc_rx = rx_buffer[4 + len];  //提取控制帧的crc校验位
+//此处计算控制帧的crc，用于校对
+uint8_t crc_calc = Get_CRC8_Check_Sum(rx_buffer, (uint16_t)len + 4u, 0xFF);
+if (crc_calc != crc_rx) {  
+	memmove(rx_buffer, rx_buffer + 1, rx_len - 1);
+	rx_len -= 1;
+	continue;
+}
+
+-----------------------------------------------------------------
+
+//填充反馈帧的数据
+//tx_buff中包含一个完整的反馈帧
+void slave_send_packet(void){
+    const uint8_t motor_count = (uint8_t)num;
+    const uint8_t payload_len = (uint8_t)(motor_count * 13u); //每个电机需要用到13个字节
+    static uint8_t tx_buf[256];
+    
+    uint16_t index = 0;
+    tx_buf[index++] = UART_HEADER1;
+    tx_buf[index++] = UART_HEADER2;
+    tx_buf[index++] = 0x01;
+    tx_buf[index++] = payload_len;
+    // 填充数据位，循环填充每一个电机的相关数据
+    // 按照id，pos，vel，tor的顺序循环填充（uint8_t*1,uint8_t*4,uint8_t*4,uint8_t*4）
+    for (uint8_t i = 0; i < motor_count; i++) {
+        formatTrans32Struct_t motor_data;
+        const motor_t *m = &motor[i];
+        // id
+        tx_buf[index++] = (uint8_t)(m->id & 0xFF);
+        // pos
+        motor_data.f_temp = m->para.pos;
+        memcpy(&tx_buf[index], motor_data.u8_temp, 4); index += 4;
+        // vel
+        motor_data.f_temp = m->para.vel;
+        memcpy(&tx_buf[index], motor_data.u8_temp, 4); index += 4;
+        // tor
+        motor_data.f_temp = m->para.tor;
+        memcpy(&tx_buf[index], motor_data.u8_temp, 4); index += 4;
+    }
+    // 此处计算反馈帧的crc校验位
+    tx_buf[index++] = Get_CRC8_Check_Sum(tx_buf, (uint16_t)payload_len + 4u, 0xFF);
+
+    tx_buf[index++] = UART_END1;
+    tx_buf[index++] = UART_END2;
+    
+    for(int k=0; k<index; k++){
+        debug_tx_buffer[k] = tx_buf[k];
+    }
+    (void)HAL_UART_Transmit_DMA(&huart1, tx_buf, index);
+}
+
+
+--------------------------------------------------------------------------------
+//计算crc的相关代码
+
+    
+//crc8 generator polynomial:G(x)=x8+x5+x4+1
+static const unsigned char CRC8_INIT = 0xff;
+static const unsigned char CRC8_TAB[256] = {
+	0x00, 0x5e, 0xbc, 0xe2, 0x61, 0x3f, 0xdd, 0x83, 0xc2, 0x9c, 0x7e, 0x20, 0xa3, 0xfd, 0x1f, 0x41,
+	0x9d, 0xc3, 0x21, 0x7f, 0xfc, 0xa2, 0x40, 0x1e, 0x5f, 0x01, 0xe3, 0xbd, 0x3e, 0x60, 0x82, 0xdc,
+	0x23, 0x7d, 0x9f, 0xc1, 0x42, 0x1c, 0xfe, 0xa0, 0xe1, 0xbf, 0x5d, 0x03, 0x80, 0xde, 0x3c, 0x62,
+	0xbe, 0xe0, 0x02, 0x5c, 0xdf, 0x81, 0x63, 0x3d, 0x7c, 0x22, 0xc0, 0x9e, 0x1d, 0x43, 0xa1, 0xff,
+	0x46, 0x18, 0xfa, 0xa4, 0x27, 0x79, 0x9b, 0xc5, 0x84, 0xda, 0x38, 0x66, 0xe5, 0xbb, 0x59, 0x07,
+	0xdb, 0x85, 0x67, 0x39, 0xba, 0xe4, 0x06, 0x58, 0x19, 0x47, 0xa5, 0xfb, 0x78, 0x26, 0xc4, 0x9a,
+	0x65, 0x3b, 0xd9, 0x87, 0x04, 0x5a, 0xb8, 0xe6, 0xa7, 0xf9, 0x1b, 0x45, 0xc6, 0x98, 0x7a, 0x24,
+	0xf8, 0xa6, 0x44, 0x1a, 0x99, 0xc7, 0x25, 0x7b, 0x3a, 0x64, 0x86, 0xd8, 0x5b, 0x05, 0xe7, 0xb9,
+	0x8c, 0xd2, 0x30, 0x6e, 0xed, 0xb3, 0x51, 0x0f, 0x4e, 0x10, 0xf2, 0xac, 0x2f, 0x71, 0x93, 0xcd,
+	0x11, 0x4f, 0xad, 0xf3, 0x70, 0x2e, 0xcc, 0x92, 0xd3, 0x8d, 0x6f, 0x31, 0xb2, 0xec, 0x0e, 0x50,
+	0xaf, 0xf1, 0x13, 0x4d, 0xce, 0x90, 0x72, 0x2c, 0x6d, 0x33, 0xd1, 0x8f, 0x0c, 0x52, 0xb0, 0xee,
+	0x32, 0x6c, 0x8e, 0xd0, 0x53, 0x0d, 0xef, 0xb1, 0xf0, 0xae, 0x4c, 0x12, 0x91, 0xcf, 0x2d, 0x73,
+	0xca, 0x94, 0x76, 0x28, 0xab, 0xf5, 0x17, 0x49, 0x08, 0x56, 0xb4, 0xea, 0x69, 0x37, 0xd5, 0x8b,
+	0x57, 0x09, 0xeb, 0xb5, 0x36, 0x68, 0x8a, 0xd4, 0x95, 0xcb, 0x29, 0x77, 0xf4, 0xaa, 0x48, 0x16,
+	0xe9, 0xb7, 0x55, 0x0b, 0x88, 0xd6, 0x34, 0x6a, 0x2b, 0x75, 0x97, 0xc9, 0x4a, 0x14, 0xf6, 0xa8,
+	0x74, 0x2a, 0xc8, 0x96, 0x15, 0x4b, 0xa9, 0xf7, 0xb6, 0xe8, 0x0a, 0x54, 0xd7, 0x89, 0x6b, 0x35,
+};
+
+
+/**
+  * @brief          Calculate the CRC8 checksum
+  * @param[in]      pchMessage: message to calculate
+  * @param[in]      dwLength: length of the message
+  * @param[in]      ucCRC8: initial CRC8 value
+  * @retval         ucCRC8
+**/
+unsigned char Get_CRC8_Check_Sum(unsigned char *pchMessage,unsigned int dwLength,unsigned char ucCRC8){
+	unsigned char ucIndex;
+	while (dwLength--){
+		ucIndex = ucCRC8^(*pchMessage++);
+		ucCRC8 = CRC8_TAB[ucIndex];
+	}
+	return(ucCRC8);
+}
+~~~
+
