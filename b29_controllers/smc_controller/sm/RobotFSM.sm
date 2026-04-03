@@ -1,0 +1,582 @@
+// RobotFSM.sm
+// SMC v6.6+ / v7.x  目标语言: C++
+// 修复说明:
+//   1. guard 中禁用 &&  ||  !  ==  改用封装方法
+//   2. action 中禁用字符串字面量参数  改用无参日志方法
+//   3. action block 内不允许 // 注释  已全部移除
+
+%class  RobotContext
+%header RobotFSM.h
+%start  RobotFSM::Idle
+%access public
+
+%map RobotFSM
+%%
+
+// ============================================================
+// Idle
+// ============================================================
+Idle
+{
+    evAutoStart
+        [ctxt.canStartAuto()]
+        AutoInit
+        {
+            ctxt.logIdleToAutoInit();
+            ctxt.initAutoMode();
+        }
+
+    evManualEnable
+        ManualCtrl
+        {
+            ctxt.enableManualPassthrough();
+        }
+
+    evCommsLost
+        CommsLoss
+        {
+            ctxt.stopAllMotors();
+            ctxt.reportCommsLoss();
+        }
+}
+
+// ============================================================
+// ManualCtrl
+// ============================================================
+ManualCtrl
+{
+    evManualDisable
+        Idle
+        {
+            ctxt.disableManualPassthrough();
+        }
+
+    evEmergencyStop
+        SafeStop
+        {
+            ctxt.stopAllMotors();
+            ctxt.reportEmergencyStopManual();
+        }
+
+    evCommsLost
+        CommsLoss
+        {
+            ctxt.stopAllMotors();
+            ctxt.reportCommsLoss();
+        }
+}
+
+// ============================================================
+// AutoInit
+// ============================================================
+AutoInit
+    Entry { ctxt.startInitSequence(); }
+    Exit  { ctxt.clearInitFlags(); }
+{
+    evInitDone
+        [ctxt.isReadyToTraverse()]
+        Traversing
+        {
+            ctxt.logAutoInitToTraversing();
+            ctxt.setDriveModeForward();
+        }
+
+    evInitFailed
+        SafeStop
+        {
+            ctxt.reportErrorAutoInitFailed();
+            ctxt.stopAllMotors();
+        }
+
+    evCommsLost
+        CommsLoss
+        {
+            ctxt.stopAllMotors();
+            ctxt.reportCommsLoss();
+        }
+
+    evEmergencyStop
+        SafeStop
+        {
+            ctxt.stopAllMotors();
+            ctxt.reportEmergencyStopInit();
+        }
+}
+
+// ============================================================
+// Traversing
+// ============================================================
+Traversing
+    Entry
+    {
+        ctxt.enableLineTracking();
+        ctxt.setTargetSpeedCruise();
+    }
+    Exit
+    {
+        ctxt.disableLineTracking();
+    }
+{
+    evTick
+        [ctxt.isObstacleDetected()]
+        ObstacleDetected
+        {
+            ctxt.setTargetSpeedZero();
+            ctxt.logObstacleFound();
+        }
+
+    evTick
+        [ctxt.isObstacleNotDetected()]
+        nil
+        {
+            ctxt.updateLineTrackingControl();
+            ctxt.sendDriveCommand();
+        }
+
+    evAutoRunPause
+        Idle
+        {
+            ctxt.stopAllMotors();
+            ctxt.logTraversingPause();
+        }
+
+    evCommsLost
+        CommsLoss
+        {
+            ctxt.stopAllMotors();
+            ctxt.reportCommsLoss();
+        }
+
+    evEmergencyStop
+        SafeStop
+        {
+            ctxt.stopAllMotors();
+            ctxt.reportEmergencyStopTraversal();
+        }
+}
+
+// ============================================================
+// ObstacleDetected
+// ============================================================
+ObstacleDetected
+    Entry
+    {
+        ctxt.stopAllMotors();
+        ctxt.startObstacleClassification();
+    }
+    Exit
+    {
+        ctxt.finalizeObstacleClass();
+    }
+{
+    evTick
+        [ctxt.isClassifiedAsLineClamp()]
+        Approaching
+        {
+            ctxt.setStrategyLineClamp();
+            ctxt.logDetectedLineClamp();
+        }
+
+    evTick
+        [ctxt.isClassifiedAsDamper()]
+        Approaching
+        {
+            ctxt.setStrategyDamper();
+            ctxt.logDetectedDamper();
+        }
+
+    evTick
+        [ctxt.isClassifiedAsUnknown()]
+        SafeStop
+        {
+            ctxt.reportErrorUnknownObstacle();
+            ctxt.stopAllMotors();
+        }
+
+    evClassifyTimeout
+        SafeStop
+        {
+            ctxt.reportErrorClassifyTimeout();
+            ctxt.stopAllMotors();
+        }
+
+    evCommsLost
+        CommsLoss
+        {
+            ctxt.stopAllMotors();
+            ctxt.reportCommsLoss();
+        }
+
+    evEmergencyStop
+        SafeStop
+        {
+            ctxt.stopAllMotors();
+            ctxt.reportEmergencyStopClassify();
+        }
+}
+
+// ============================================================
+// Approaching
+// ============================================================
+Approaching
+    Entry
+    {
+        ctxt.setTargetSpeedApproach();
+        ctxt.enableObstacleRanging();
+    }
+    Exit
+    {
+        ctxt.disableObstacleRanging();
+    }
+{
+    evTick
+        [ctxt.isAtCrossingPosition()]
+        PreObstacleStop
+        {
+            ctxt.logApproachingToPreStop();
+        }
+
+    evTick
+        [ctxt.isNotAtCrossingPosition()]
+        nil
+        {
+            ctxt.updateApproachControl();
+            ctxt.sendDriveCommand();
+        }
+
+    evApproachTimeout
+        SafeStop
+        {
+            ctxt.reportErrorApproachTimeout();
+            ctxt.stopAllMotors();
+        }
+
+    evCommsLost
+        CommsLoss
+        {
+            ctxt.stopAllMotors();
+            ctxt.reportCommsLoss();
+        }
+
+    evEmergencyStop
+        SafeStop
+        {
+            ctxt.stopAllMotors();
+            ctxt.reportEmergencyStopApproach();
+        }
+}
+
+// ============================================================
+// PreObstacleStop
+// ============================================================
+PreObstacleStop
+    Entry
+    {
+        ctxt.stopAllMotors();
+        ctxt.startPostureAlignment();
+        ctxt.loadCrossingPresetFromStrategy();
+    }
+    Exit
+    {
+        ctxt.confirmCrossingReady();
+    }
+{
+    evTick
+        [ctxt.isReadyForLineClamp()]
+        CrossingLineClamp
+        {
+            ctxt.logPreStopToLineClamp();
+        }
+
+    evTick
+        [ctxt.isReadyForDamper()]
+        CrossingDamper
+        {
+            ctxt.logPreStopToDamper();
+        }
+
+    evAlignTimeout
+        SafeStop
+        {
+            ctxt.reportErrorAlignTimeout();
+            ctxt.stopAllMotors();
+        }
+
+    evCommsLost
+        CommsLoss
+        {
+            ctxt.stopAllMotors();
+            ctxt.reportCommsLoss();
+        }
+
+    evEmergencyStop
+        SafeStop
+        {
+            ctxt.stopAllMotors();
+            ctxt.reportEmergencyStopPreStop();
+        }
+}
+
+// ============================================================
+// CrossingLineClamp
+// ============================================================
+CrossingLineClamp
+    Entry
+    {
+        ctxt.startCrossingLineClamp();
+        ctxt.enableJointMonitor();
+    }
+    Exit
+    {
+        ctxt.disableJointMonitor();
+        ctxt.endCrossingSequence();
+    }
+{
+    evTick
+        [ctxt.isCrossingStepPending()]
+        nil
+        {
+            ctxt.advanceCrossingStep();
+            ctxt.sendJointAngleCommand();
+            ctxt.sendDriveCommand();
+        }
+
+    evTick
+        [ctxt.isCrossingComplete()]
+        PostObstacleCheck
+        {
+            ctxt.logLineClampToPostCheck();
+        }
+
+    evJointFault
+        SafeStop
+        {
+            ctxt.stopAllMotors();
+            ctxt.freezeAllJoints();
+            ctxt.reportErrorJointFaultLineClamp();
+        }
+
+    evImuFault
+        SafeStop
+        {
+            ctxt.stopAllMotors();
+            ctxt.freezeAllJoints();
+            ctxt.reportErrorImuFaultLineClamp();
+        }
+
+    evCrossingTimeout
+        SafeStop
+        {
+            ctxt.stopAllMotors();
+            ctxt.freezeAllJoints();
+            ctxt.reportErrorCrossingTimeoutLineClamp();
+        }
+
+    evCommsLost
+        CommsLoss
+        {
+            ctxt.stopAllMotors();
+            ctxt.freezeAllJoints();
+            ctxt.reportCommsLoss();
+        }
+
+    evEmergencyStop
+        SafeStop
+        {
+            ctxt.stopAllMotors();
+            ctxt.freezeAllJoints();
+            ctxt.reportEmergencyStopLineClamp();
+        }
+}
+
+// ============================================================
+// CrossingDamper
+// ============================================================
+CrossingDamper
+    Entry
+    {
+        ctxt.startCrossingDamper();
+        ctxt.enableJointMonitor();
+        ctxt.setTargetSpeedDamper();
+    }
+    Exit
+    {
+        ctxt.disableJointMonitor();
+        ctxt.endCrossingSequence();
+    }
+{
+    evTick
+        [ctxt.isCrossingStepPending()]
+        nil
+        {
+            ctxt.advanceCrossingStep();
+            ctxt.sendJointAngleCommand();
+            ctxt.sendDriveCommand();
+            ctxt.checkGripForce();
+        }
+
+    evTick
+        [ctxt.isCrossingComplete()]
+        PostObstacleCheck
+        {
+            ctxt.logDamperToPostCheck();
+        }
+
+    evJointFault
+        SafeStop
+        {
+            ctxt.stopAllMotors();
+            ctxt.freezeAllJoints();
+            ctxt.reportErrorJointFaultDamper();
+        }
+
+    evImuFault
+        SafeStop
+        {
+            ctxt.stopAllMotors();
+            ctxt.freezeAllJoints();
+            ctxt.reportErrorImuFaultDamper();
+        }
+
+    evGripFault
+        SafeStop
+        {
+            ctxt.stopAllMotors();
+            ctxt.freezeAllJoints();
+            ctxt.reportErrorGripFault();
+        }
+
+    evCrossingTimeout
+        SafeStop
+        {
+            ctxt.stopAllMotors();
+            ctxt.freezeAllJoints();
+            ctxt.reportErrorCrossingTimeoutDamper();
+        }
+
+    evCommsLost
+        CommsLoss
+        {
+            ctxt.stopAllMotors();
+            ctxt.freezeAllJoints();
+            ctxt.reportCommsLoss();
+        }
+
+    evEmergencyStop
+        SafeStop
+        {
+            ctxt.stopAllMotors();
+            ctxt.freezeAllJoints();
+            ctxt.reportEmergencyStopDamper();
+        }
+}
+
+// ============================================================
+// PostObstacleCheck
+// ============================================================
+PostObstacleCheck
+    Entry
+    {
+        ctxt.startPostCrossCheck();
+    }
+    Exit
+    {
+        ctxt.clearObstacleState();
+    }
+{
+    evTick
+        [ctxt.isPostCheckPassed()]
+        Traversing
+        {
+            ctxt.logPostCheckToTraversing();
+            ctxt.setDriveModeForward();
+        }
+
+    evTick
+        [ctxt.isPostCheckFailed()]
+        SafeStop
+        {
+            ctxt.reportErrorPostCheckFailed();
+            ctxt.stopAllMotors();
+        }
+
+    evPostCheckTimeout
+        SafeStop
+        {
+            ctxt.reportErrorPostCheckTimeout();
+            ctxt.stopAllMotors();
+        }
+
+    evCommsLost
+        CommsLoss
+        {
+            ctxt.stopAllMotors();
+            ctxt.reportCommsLoss();
+        }
+
+    evEmergencyStop
+        SafeStop
+        {
+            ctxt.stopAllMotors();
+            ctxt.reportEmergencyStopPostCheck();
+        }
+}
+
+// ============================================================
+// CommsLoss
+// ============================================================
+CommsLoss
+    Entry
+    {
+        ctxt.stopAllMotors();
+        ctxt.startReconnectTimer();
+        ctxt.alertCommsLoss();
+    }
+    Exit
+    {
+        ctxt.stopReconnectTimer();
+    }
+{
+    evCommsRestored
+        Idle
+        {
+            ctxt.logCommsRestored();
+            ctxt.alertCommsRestored();
+        }
+
+    evReconnectTimeout
+        SafeStop
+        {
+            ctxt.reportErrorReconnectTimeout();
+        }
+}
+
+// ============================================================
+// SafeStop
+// ============================================================
+SafeStop
+    Entry
+    {
+        ctxt.stopAllMotors();
+        ctxt.freezeAllJoints();
+        ctxt.disableAutoMode();
+        ctxt.alertSafeStop();
+        ctxt.logSafeStopEntry();
+    }
+{
+    evManualReset
+        Idle
+        {
+            ctxt.resetFaultFlags();
+            ctxt.logSafeStopToIdle();
+        }
+
+    evManualEnable
+        ManualCtrl
+        {
+            ctxt.resetFaultFlags();
+            ctxt.enableManualPassthrough();
+        }
+}
+
+%%
