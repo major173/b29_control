@@ -1,0 +1,7 @@
+<library path="lib/libb29_smc_auto_controller">
+  <class name="b29_smc_auto_controller/B29SmcAutoController"
+         type="b29_smc_auto_controller::B29SmcAutoController"
+         base_class_type="controller_interface::ControllerBase">
+    <description>Auto controller skeleton for B29 SMC control.</description>
+  </class>
+</library>

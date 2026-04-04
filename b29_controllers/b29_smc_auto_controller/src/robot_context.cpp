@@ -1,0 +1,436 @@
+// SPDX-License-Identifier: BSD-3-Clause
+#include <b29_smc_auto_controller/robot_context.h>
+
+#include <utility>
+
+namespace
+{
+constexpr double kCruiseSpeedMps = 0.10;
+constexpr double kApproachSpeedMps = 0.03;
+}
+
+RobotContext::RobotContext() : fsm_(*this)
+{
+}
+
+void RobotContext::start()
+{
+  if (started_)
+  {
+    return;
+  }
+
+  started_ = true;
+  fsm_.enterStartState();
+}
+
+void RobotContext::tick50Hz()
+{
+  if (!started_)
+  {
+    start();
+  }
+
+  const int current_state_id = fsm_.getState().getId();
+
+  if (input_.emergency_stop)
+  {
+    auto_start_requested_ = false;
+    fsm_.evEmergencyStop();
+    return;
+  }
+
+  if (current_state_id == RobotFSM::CommsLoss.getId())
+  {
+    auto_start_requested_ = false;
+
+    if (input_.lower_alive)
+    {
+      fsm_.evCommsRestored();
+      return;
+    }
+
+    fsm_.evTick();
+    return;
+  }
+
+  if (!input_.lower_alive)
+  {
+    auto_start_requested_ = false;
+    fsm_.evCommsLost();
+    return;
+  }
+
+  if (current_state_id == RobotFSM::SafeStop.getId())
+  {
+    auto_start_requested_ = false;
+
+    if (input_.manual_reset_requested)
+    {
+      fsm_.evManualReset();
+      return;
+    }
+
+    fsm_.evTick();
+    return;
+  }
+
+  if (current_state_id == RobotFSM::Idle.getId() && auto_start_requested_)
+  {
+    fsm_.evAutoStart();
+    auto_start_requested_ = (fsm_.getState().getId() == RobotFSM::Idle.getId());
+    return;
+  }
+
+  fsm_.evTick();
+}
+
+void RobotContext::setInputSnapshot(const b29_smc_auto_controller::AutoInputSnapshot& input)
+{
+  const bool allow_auto_start_latch =
+      !started_ || (fsm_.getState().getId() == RobotFSM::Idle.getId());
+
+  if (allow_auto_start_latch && input.auto_start_requested && !last_input_auto_start_requested_)
+  {
+    auto_start_requested_ = true;
+  }
+
+  last_input_auto_start_requested_ = input.auto_start_requested;
+  input_ = input;
+}
+
+void RobotContext::requestAutoStart()
+{
+  auto_start_requested_ = true;
+}
+
+const b29_smc_auto_controller::AutoControlCommand& RobotContext::currentCommand() const
+{
+  return command_;
+}
+
+std::string RobotContext::currentStateName() const
+{
+  if (!started_)
+  {
+    return "Unstarted";
+  }
+
+  const std::string state_name = const_cast<RobotFSMContext&>(fsm_).getState().getName();
+  const std::size_t pos = state_name.rfind("::");
+  if (pos == std::string::npos)
+  {
+    return state_name;
+  }
+
+  return state_name.substr(pos + 2);
+}
+
+b29_smc_auto_controller::AutoStateTrace RobotContext::buildTraceMessage(const ros::Time& stamp) const
+{
+  b29_smc_auto_controller::AutoStateTrace trace;
+  trace.header.stamp = stamp;
+  trace.current_state = currentStateName();
+  trace.command_reason = command_.command_reason;
+  trace.stop_all = command_.stop_all;
+  trace.freeze_joints = command_.freeze_joints;
+  trace.left_wheel_speed = command_.left_wheel_speed;
+  trace.right_wheel_speed = command_.right_wheel_speed;
+
+  if (!last_transition_.empty())
+  {
+    trace.transition_reason = last_transition_;
+    const std::size_t arrow_pos = last_transition_.find("->");
+    if (arrow_pos != std::string::npos)
+    {
+      trace.previous_state = last_transition_.substr(0, arrow_pos);
+    }
+  }
+
+  if (!last_error_.empty())
+  {
+    trace.last_event = last_error_;
+  }
+  else if (!last_alert_.empty())
+  {
+    trace.last_event = last_alert_;
+  }
+
+  switch (command_.crossing_strategy)
+  {
+    case b29_smc_auto_controller::CrossingStrategy::LineClamp:
+      trace.crossing_strategy = b29_smc_auto_controller::AutoStateTrace::CROSSING_LINE_CLAMP;
+      break;
+    case b29_smc_auto_controller::CrossingStrategy::Damper:
+      trace.crossing_strategy = b29_smc_auto_controller::AutoStateTrace::CROSSING_DAMPER;
+      break;
+    case b29_smc_auto_controller::CrossingStrategy::None:
+    default:
+      trace.crossing_strategy = b29_smc_auto_controller::AutoStateTrace::CROSSING_NONE;
+      break;
+  }
+
+  return trace;
+}
+
+bool RobotContext::isLowerAlive() const
+{
+  return input_.lower_alive;
+}
+
+bool RobotContext::isImuReady() const
+{
+  return input_.imu_ready;
+}
+
+bool RobotContext::isPostureReady() const
+{
+  return input_.posture_ready;
+}
+
+bool RobotContext::isGripConfirmed() const
+{
+  return input_.grip_confirmed;
+}
+
+bool RobotContext::isObstacleDetected() const
+{
+  return input_.obstacle_detected;
+}
+
+void RobotContext::setCruiseCommand()
+{
+  setDriveMode(robot_fsm::DriveMode::Forward);
+  setTargetSpeed(getCruiseSpeed());
+  command_.freeze_joints = false;
+  setCommandReason("cruise_command");
+}
+
+void RobotContext::setApproachCommand()
+{
+  setDriveMode(robot_fsm::DriveMode::Forward);
+  setTargetSpeed(getApproachSpeed());
+  command_.freeze_joints = false;
+  setCommandReason("approach_command");
+}
+
+void RobotContext::setSafeStopCommand(const std::string& reason)
+{
+  stopAllMotors();
+  command_.freeze_joints = true;
+  setCommandReason(reason);
+}
+
+void RobotContext::initAutoMode()
+{
+  command_.stop_all = false;
+  command_.freeze_joints = false;
+  setCommandReason("auto_mode_initialized");
+}
+
+void RobotContext::disableAutoMode()
+{
+  command_.freeze_joints = true;
+}
+
+void RobotContext::startInitSequence()
+{
+  command_.stop_all = false;
+  command_.freeze_joints = false;
+  setCommandReason("auto_init_started");
+}
+
+void RobotContext::clearInitFlags()
+{
+  setCommandReason("auto_init_flags_cleared");
+}
+
+void RobotContext::startReconnectTimer()
+{
+  reconnect_timer_active_ = true;
+  setCommandReason("reconnect_timer_started");
+}
+
+void RobotContext::stopReconnectTimer()
+{
+  reconnect_timer_active_ = false;
+  setCommandReason("reconnect_timer_stopped");
+}
+
+void RobotContext::reportError(std::string_view reason)
+{
+  last_error_ = std::string(reason);
+  setCommandReason(reason);
+}
+
+void RobotContext::reportCommsLoss()
+{
+  setSafeStopCommand("comms_lost");
+  reportError("comms_lost");
+}
+
+void RobotContext::reportEmergencyStop(std::string_view reason)
+{
+  last_error_ = std::string(reason);
+  setSafeStopCommand(std::string(reason));
+  setCommandReason(reason);
+}
+
+void RobotContext::alertOperator(robot_fsm::AlertType type)
+{
+  switch (type)
+  {
+    case robot_fsm::AlertType::CommsLoss:
+      last_alert_ = "comms_loss";
+      break;
+    case robot_fsm::AlertType::CommsRestored:
+      last_alert_ = "comms_restored";
+      break;
+    case robot_fsm::AlertType::SafeStop:
+      last_alert_ = "safe_stop";
+      break;
+  }
+}
+
+void RobotContext::logTransition(std::string_view info)
+{
+  last_transition_ = std::string(info);
+}
+
+void RobotContext::resetFaultFlags()
+{
+  last_error_.clear();
+}
+
+bool RobotContext::canStartAuto() const
+{
+  return isLowerAlive() && isImuReady() && isPostureReady() && isGripConfirmed();
+}
+
+bool RobotContext::isReadyToTraverse() const
+{
+  return canStartAuto();
+}
+
+bool RobotContext::isObstacleNotDetected() const
+{
+  return !isObstacleDetected();
+}
+
+void RobotContext::reportEmergencyStopIdle()
+{
+  reportEmergencyStop("emergency_stop_idle");
+}
+
+void RobotContext::reportEmergencyStopInit()
+{
+  reportEmergencyStop("emergency_stop_init");
+}
+
+void RobotContext::reportEmergencyStopTraversal()
+{
+  reportEmergencyStop("emergency_stop_traversal");
+}
+
+void RobotContext::reportEmergencyStopCommsLoss()
+{
+  reportEmergencyStop("emergency_stop_comms_loss");
+}
+
+void RobotContext::reportErrorAutoInitFailed()
+{
+  setSafeStopCommand("auto_init_failed");
+  reportError("auto_init_failed");
+}
+
+void RobotContext::alertCommsLoss()
+{
+  alertOperator(robot_fsm::AlertType::CommsLoss);
+}
+
+void RobotContext::alertCommsRestored()
+{
+  alertOperator(robot_fsm::AlertType::CommsRestored);
+}
+
+void RobotContext::alertSafeStop()
+{
+  alertOperator(robot_fsm::AlertType::SafeStop);
+}
+
+void RobotContext::logIdleToAutoInit()
+{
+  logTransition("Idle->AutoInit");
+}
+
+void RobotContext::logAutoInitToTraversing()
+{
+  logTransition("AutoInit->Traversing");
+}
+
+void RobotContext::logCommsRestored()
+{
+  logTransition("CommsLoss->Idle");
+}
+
+void RobotContext::logSafeStopEntry()
+{
+  logTransition("EnterSafeStop");
+}
+
+void RobotContext::logSafeStopToIdle()
+{
+  logTransition("SafeStop->Idle");
+}
+
+double RobotContext::getCruiseSpeed() const
+{
+  return kCruiseSpeedMps;
+}
+
+double RobotContext::getApproachSpeed() const
+{
+  return kApproachSpeedMps;
+}
+
+void RobotContext::stopAllMotors()
+{
+  command_.drive_mode = b29_smc_auto_controller::DriveMode::Stop;
+  command_.left_wheel_speed = 0.0;
+  command_.right_wheel_speed = 0.0;
+  command_.stop_all = true;
+}
+
+void RobotContext::freezeAllJoints()
+{
+  command_.freeze_joints = true;
+}
+
+void RobotContext::setTargetSpeed(double speed_mps)
+{
+  command_.left_wheel_speed = speed_mps;
+  command_.right_wheel_speed = speed_mps;
+  command_.stop_all = false;
+}
+
+void RobotContext::setDriveMode(robot_fsm::DriveMode mode)
+{
+  command_.drive_mode = toAutoDriveMode(mode);
+}
+
+void RobotContext::setCommandReason(std::string_view reason)
+{
+  command_.command_reason = std::string(reason);
+}
+
+b29_smc_auto_controller::DriveMode RobotContext::toAutoDriveMode(robot_fsm::DriveMode mode)
+{
+  switch (mode)
+  {
+    case robot_fsm::DriveMode::Forward:
+      return b29_smc_auto_controller::DriveMode::Forward;
+    case robot_fsm::DriveMode::Stop:
+    default:
+      return b29_smc_auto_controller::DriveMode::Stop;
+  }
+}

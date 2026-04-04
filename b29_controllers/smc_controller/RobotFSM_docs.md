@@ -106,8 +106,14 @@ isPostCheckFailed()   以上任一项明确失败（非超时）
 ## SMC编译命令
 
 ```bash
-# 生成C++代码（-graph同时生成GraphViz状态图）
+# 下面这条命令是旧版 Smc.jar 的写法，仅适用于当前目录这套历史 smc_controller 草稿：
 java -jar Smc.jar -lang c++ -graph -glevel 1 RobotFSM.sm
+
+# 对于当前实际维护中的新包 b29_smc_auto_controller，
+# 请在 src/b29_control/b29_controllers/b29_smc_auto_controller/ 目录执行：
+# java -jar ../../../../smc_7_6_0/bin/Smc.jar -c++ -d gen/src -headerd gen/include sm/RobotFSM.sm
+# 如果只需要 dot 状态图：
+# java -jar ../../../../smc_7_6_0/bin/Smc.jar -graph -glevel 1 -d gen sm/RobotFSM.sm
 
 # 生成文件：
 #   RobotFSM_sm.h    — 状态机类头文件（自动生成，勿手改）
