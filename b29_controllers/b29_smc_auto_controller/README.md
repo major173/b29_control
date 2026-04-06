@@ -1,10 +1,8 @@
 # b29_smc_auto_controller
 
-## 目标
+> 提供 B29 SMC 自动控制器的新包入口，先完成包骨架、插件导出和构建入口，后续再逐步补齐控制器实现、消息接口和测试。
 
-提供 B29 SMC 自动控制器的新包入口，先完成包骨架、插件导出和构建入口，后续再逐步补齐控制器实现、消息接口和测试。
-
-## 当前范围
+**当前范围**
 
 - 可加载的最小 controller stub
 - 统一输入输出消息定义
@@ -14,6 +12,14 @@
 - 最小命令执行层 `CommandDispatcher`
 - 基础测试覆盖默认安全值与 mask 常量
 - 状态流转最小验证：`Idle -> AutoInit`、`* -> SafeStop`
+
+**开发约束**
+
+- 输入优先复用 `b29_control` 已注册接口
+- 额外业务输入通过统一输入适配层接入
+- 修改状态、输入、调试方式时必须同步更新本 README
+
+
 
 ## 数据面对齐
 
@@ -39,7 +45,11 @@
 - 控制器壳把硬件读数整理成 `sensor_msgs::JointState` 和 `sensor_msgs::Imu`
 - `AutoInputMux` 负责把这些缓存与 `AutoSensorInput / AutoDebugOverride / AutoControlRequest` 合并成 `AutoInputSnapshot`
 
-## AutoInputMux
+
+
+## 模块说明
+
+### AutoInputMux
 
 `AutoInputMux` 只负责输入缓存与合并，不负责 ROS 订阅和控制器调度：
 
@@ -61,7 +71,7 @@
 - `joint state` 当前先承担已注册硬件接口对齐与时间戳合并，不额外引入业务语义
 - `AutoDebugOverride` 只覆盖 `field_mask` 标记字段，未标记字段保持原合并结果
 
-## CommandDispatcher
+### CommandDispatcher
 
 `CommandDispatcher` 负责把 `AutoControlCommand` 写入硬件句柄：
 
@@ -80,11 +90,141 @@
 当前仍不包含业务订阅器，因此控制器默认保持安全闭环，不在 Task 5 提前引入外部请求链路。
 - 作为公共接口时，`AutoInputMux` 依赖本包导出的消息头，外部工程应通过 catkin 依赖本包而不是手工拼 include 路径
 
-## 开发约束
 
-- 输入优先复用 `b29_control` 已注册接口
-- 额外业务输入通过统一输入适配层接入
-- 修改状态、输入、调试方式时必须同步更新本 README
+
+### 状态说明
+
+以下说明以当前 `sm/RobotFSM.sm` 与 `RobotContext::tick50Hz()` 的已实现语义为准。
+
+#### `Idle`
+
+- 自动运行空闲态，也是默认启动态
+- 机器人在该状态下不主动推进自动任务，等待自动启动条件满足
+- 只有在 `Idle` 下，`auto_start_requested` 才会被消费为一次真正的启动请求
+- 收到 `evAutoStart` 且 `canStartAuto()` 成立时，转入 `AutoInit`
+- 收到 `evCommsLost` 时，转入 `CommsLoss`
+- 收到 `evEmergencyStop` 时，转入 `SafeStop`
+
+#### `AutoInit`
+
+- 自动模式初始化态，用于在真正进入巡航前完成自动链路初始化
+- 进入状态时执行 `startInitSequence()`
+- 离开状态时执行 `clearInitFlags()`
+- 当前最小实现里，当 `isReadyToTraverse()` 成立时，通过 `evTick` 转入 `Traversing`
+- 收到 `evCommsLost` 时，转入 `CommsLoss`
+- 收到 `evEmergencyStop` 时，转入 `SafeStop`
+
+#### `Traversing`
+
+- 自动巡航前进态，表示机器人已经进入自动运行主链
+- 进入状态时执行 `setCruiseCommand()`，给出向前巡航命令
+- 当前最小实现中：
+  - 若未检测到障碍，`evTick` 会继续刷新巡航命令
+  - 若检测到障碍，当前仍停留在 `Traversing`，只是不额外刷新巡航动作
+- 这意味着“识别到障碍后的细分停障/接近/越障状态”还没有在当前版本展开
+- 收到 `evCommsLost` 时，转入 `CommsLoss`
+- 收到 `evEmergencyStop` 时，转入 `SafeStop`
+
+#### `CommsLoss`
+
+- 下位机通信丢失保护态
+- 进入状态时执行：
+  - `startReconnectTimer()`
+  - `alertCommsLoss()`
+- 离开状态时执行 `stopReconnectTimer()`
+- 该状态不会自动恢复自动运行，只等待通信恢复
+- 收到 `evCommsRestored` 时，回到 `Idle`
+- 收到 `evEmergencyStop` 时，转入 `SafeStop`
+
+#### `SafeStop`
+
+- 安全停机态，用于承接急停或严重异常
+- 进入状态时执行：
+  - `disableAutoMode()`
+  - `alertSafeStop()`
+  - `logSafeStopEntry()`
+- 该状态下不会自动恢复，必须人工确认后复位
+- 收到 `evManualReset` 时，清理故障标志并回到 `Idle`
+- 在 `SafeStop` 中再次收到 `evEmergencyStop` 或 `evCommsLost`，当前实现均保持原地不动
+
+### 事件说明
+
+所有事件都由 `RobotContext::tick50Hz()` 或 `SMC` 状态表消费，当前已实现事件如下。
+
+#### `evAutoStart`
+
+- 含义：请求进入自动模式
+- 来源：`Idle` 状态下检测到 `auto_start_requested`
+- 作用：若 `canStartAuto()` 成立，则从 `Idle` 转入 `AutoInit`
+- 在其他状态下，当前实现中该事件要么不会主动发出，要么即使发出也会被状态表忽略
+
+#### `evTick`
+
+- 含义：50Hz 周期推进事件，是状态机的基础驱动事件
+- 来源：控制器每周期调用 `tick50Hz()` 时，在没有更高优先级事件要处理时发出
+- 作用：
+  - 驱动 `AutoInit -> Traversing`
+  - 驱动 `Traversing` 内的巡航命令刷新
+  - 在 `CommsLoss` 和 `SafeStop` 中维持原状态等待恢复条件
+
+#### `evCommsLost`
+
+- 含义：判定下位机通信丢失
+- 来源：当前周期检测到 `lower_alive == false`
+- 作用：从普通运行态切到 `CommsLoss`
+- 当前优先级高于自动启动和普通 `evTick`
+
+#### `evCommsRestored`
+
+- 含义：判定下位机通信恢复
+- 来源：当前处于 `CommsLoss` 且检测到 `lower_alive == true`
+- 作用：从 `CommsLoss` 回到 `Idle`
+- 当前设计明确要求“恢复后回空闲态，不自动续跑”
+
+#### `evEmergencyStop`
+
+- 含义：急停事件
+- 来源：当前周期检测到 `emergency_stop == true`
+- 作用：无论当前是否在自动链路中，优先转入 `SafeStop`
+- 这是当前状态机中的最高优先级事件
+
+#### `evManualReset`
+
+- 含义：人工复位事件
+- 来源：当前处于 `SafeStop` 且检测到 `manual_reset_requested == true`
+- 作用：清理故障标志并从 `SafeStop` 回到 `Idle`
+- 当前不会恢复到故障前状态，也不会自动重新启动自动模式
+
+### 判定函数说明
+
+这些判定函数虽然不是 SMC 事件名，但直接决定事件是否触发或状态是否转移。
+
+#### `canStartAuto()`
+
+- 含义：自动启动前的最小就绪判定
+- 当前要求同时满足：
+  - `lower_alive`
+  - `imu_ready`
+  - `posture_ready`
+  - `grip_confirmed`
+
+#### `isReadyToTraverse()`
+
+- 含义：是否可以从 `AutoInit` 进入 `Traversing`
+- 当前实现直接复用 `canStartAuto()`，后续可以单独细化
+
+#### `isObstacleDetected()`
+
+- 含义：当前是否检测到障碍
+- 当前只影响 `Traversing` 中 `evTick` 的分支选择
+- 还没有展开成独立的“停障/接近/越障”状态
+
+#### `isObstacleNotDetected()`
+
+- 含义：`isObstacleDetected()` 的反条件
+- 当前用于在 `Traversing` 中持续刷新巡航命令
+
+
 
 ## 运行与调试
 
@@ -110,6 +250,8 @@ roslaunch b29_control start.launch
 - 最近一次错误/告警摘要
 - 当前命令原因与轮速/冻结标志
 
+
+
 ## SMC 最小落地
 
 - 状态机定义位于 `sm/RobotFSM.sm`
@@ -128,7 +270,8 @@ roslaunch b29_control start.launch
   - `SafeStop && manual_reset_requested -> evManualReset`
   - `Idle && auto_start_requested`
   - 其余进入 `evTick`
-- 当前不接控制器执行层，动作实现只更新内存态 `AutoControlCommand`
+
+
 
 ## SMC 代码生成
 
