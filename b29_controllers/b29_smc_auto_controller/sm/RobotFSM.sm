@@ -90,6 +90,12 @@ Traversing
         {
         }
 
+    evAutoRunPause
+        Idle
+        {
+            reportAutoRunPause();
+        }
+
     evTick
         [ctxt.isObstacleDetected()]
         nil

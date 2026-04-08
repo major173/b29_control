@@ -17,6 +17,11 @@ RobotFSM_Traversing RobotFSM::Traversing("RobotFSM::Traversing", 2);
 RobotFSM_CommsLoss RobotFSM::CommsLoss("RobotFSM::CommsLoss", 3);
 RobotFSM_SafeStop RobotFSM::SafeStop("RobotFSM::SafeStop", 4);
 
+void RobotContextState::evAutoRunPause(RobotFSMContext& context)
+{
+    Default(context);
+}
+
 void RobotContextState::evAutoStart(RobotFSMContext& context)
 {
     Default(context);
@@ -229,6 +234,27 @@ void RobotFSM_Traversing::Entry(RobotFSMContext& context)
     RobotContext& ctxt = context.getOwner();
 
     ctxt.setCruiseCommand();
+}
+
+void RobotFSM_Traversing::evAutoRunPause(RobotFSMContext& context)
+{
+    RobotContext& ctxt = context.getOwner();
+
+    context.getState().Exit(context);
+    context.clearState();
+    try
+    {
+        ctxt.reportAutoRunPause();
+        context.setState(RobotFSM::Idle);
+    }
+    catch (...)
+    {
+        context.setState(RobotFSM::Idle);
+        throw;
+    }
+    context.getState().Entry(context);
+
+
 }
 
 void RobotFSM_Traversing::evAutoStart(RobotFSMContext& context)

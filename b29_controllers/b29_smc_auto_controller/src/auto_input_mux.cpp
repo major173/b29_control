@@ -66,6 +66,7 @@ AutoInputSnapshot AutoInputMux::buildSnapshot() const
     snapshot.at_crossing_position = sensor_input_.at_crossing_position;
     snapshot.post_check_passed = sensor_input_.post_check_passed;
     snapshot.post_check_failed = sensor_input_.post_check_failed;
+    snapshot.auto_run_pause = false;
     snapshot.stamp = sensor_input_.header.stamp;
   }
 
@@ -220,6 +221,10 @@ void AutoInputMux::applyDebugOverride(AutoInputSnapshot& snapshot) const
   if (debug_override_.field_mask & AutoDebugOverride::FIELD_POST_CHECK_FAILED)
   {
     snapshot.post_check_failed = debug_override_.post_check_failed;
+  }
+  if (debug_override_.field_mask & AutoDebugOverride::FIELD_AUTO_RUN_PAUSE)
+  {
+    snapshot.auto_run_pause = debug_override_.auto_run_pause;
   }
 }
 }  // namespace b29_smc_auto_controller

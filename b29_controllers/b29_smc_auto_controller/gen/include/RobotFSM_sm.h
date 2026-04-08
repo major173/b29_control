@@ -37,6 +37,7 @@ public:
     virtual void Entry(RobotFSMContext&) {};
     virtual void Exit(RobotFSMContext&) {};
 
+    virtual void evAutoRunPause(RobotFSMContext& context);
     virtual void evAutoStart(RobotFSMContext& context);
     virtual void evCommsLost(RobotFSMContext& context);
     virtual void evCommsRestored(RobotFSMContext& context);
@@ -111,6 +112,7 @@ public:
     {};
 
     virtual void Entry(RobotFSMContext&);
+    virtual void evAutoRunPause(RobotFSMContext& context);
     virtual void evAutoStart(RobotFSMContext& context);
     virtual void evCommsLost(RobotFSMContext& context);
     virtual void evEmergencyStop(RobotFSMContext& context);
@@ -185,6 +187,11 @@ public:
         }
 
         return dynamic_cast<RobotContextState&>(*_state);
+    };
+
+    inline void evAutoRunPause()
+    {
+        getState().evAutoRunPause(*this);
     };
 
     inline void evAutoStart()

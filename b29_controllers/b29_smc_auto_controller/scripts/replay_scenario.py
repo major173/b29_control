@@ -26,6 +26,7 @@ FIELD_MAP = {
     "crossing_complete": AutoDebugOverride.FIELD_CROSSING_COMPLETE,
     "post_check_passed": AutoDebugOverride.FIELD_POST_CHECK_PASSED,
     "post_check_failed": AutoDebugOverride.FIELD_POST_CHECK_FAILED,
+    "auto_run_pause": AutoDebugOverride.FIELD_AUTO_RUN_PAUSE,
 }
 
 
@@ -69,6 +70,7 @@ def build_message(event: dict) -> AutoDebugOverride:
     msg.crossing_complete = event.get("crossing_complete", False)
     msg.post_check_passed = event.get("post_check_passed", False)
     msg.post_check_failed = event.get("post_check_failed", False)
+    msg.auto_run_pause = event.get("auto_run_pause", False)
     return msg
 
 

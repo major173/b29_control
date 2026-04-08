@@ -49,6 +49,7 @@ struct DebugOverrideMask
   static constexpr uint32_t CrossingComplete = 1u << 15;
   static constexpr uint32_t PostCheckPassed = 1u << 16;
   static constexpr uint32_t PostCheckFailed = 1u << 17;
+  static constexpr uint32_t AutoRunPause = 1u << 18;
 };
 
 struct DebugOverrideData
@@ -74,6 +75,7 @@ struct DebugOverrideData
   bool crossing_complete{false};
   bool post_check_passed{false};
   bool post_check_failed{false};
+  bool auto_run_pause{false};
 };
 
 struct AutoControlRequest
@@ -111,6 +113,7 @@ struct AutoInputSnapshot
   bool crossing_complete{false};
   bool post_check_passed{false};
   bool post_check_failed{false};
+  bool auto_run_pause{false};
 };
 
 struct AutoControlCommand

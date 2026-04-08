@@ -20,6 +20,7 @@ uint32 FIELD_CROSSING_STEP_DONE=16384
 uint32 FIELD_CROSSING_COMPLETE=32768
 uint32 FIELD_POST_CHECK_PASSED=65536
 uint32 FIELD_POST_CHECK_FAILED=131072
+uint32 FIELD_AUTO_RUN_PAUSE=262144
 
 std_msgs/Header header
 bool enabled
@@ -42,3 +43,4 @@ bool crossing_step_done
 bool crossing_complete
 bool post_check_passed
 bool post_check_failed
+bool auto_run_pause

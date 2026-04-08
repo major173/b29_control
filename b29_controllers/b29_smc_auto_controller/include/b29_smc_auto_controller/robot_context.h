@@ -69,6 +69,7 @@ public:
   void reportEmergencyStopCommsLoss();
   void reportReconnectTimeout();
   void reportErrorAutoInitFailed();
+  void reportAutoRunPause();
 
   void alertCommsLoss();
   void alertCommsRestored();

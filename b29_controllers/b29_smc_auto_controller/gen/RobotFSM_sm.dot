@@ -51,6 +51,9 @@ digraph RobotFSM {
         "RobotFSM::AutoInit" -> "RobotFSM::SafeStop"
             [label="evEmergencyStop/\lreportEmergencyStopInit;\l"];
 
+        "RobotFSM::Traversing" -> "RobotFSM::Idle"
+            [label="evAutoRunPause/\lreportAutoRunPause;\l"];
+
         "RobotFSM::Traversing" -> "RobotFSM::CommsLoss"
             [label="evCommsLost/\lreportCommsLoss;\l"];
 

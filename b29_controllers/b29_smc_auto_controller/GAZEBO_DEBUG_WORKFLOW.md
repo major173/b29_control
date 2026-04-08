@@ -13,7 +13,7 @@
 当前文档只覆盖已经实现的状态机范围：
 
 - 状态：`Idle`、`AutoInit`、`Traversing`、`CommsLoss`、`SafeStop`
-- 事件：`evAutoStart`、`evTick`、`evCommsLost`、`evCommsRestored`、`evReconnectTimeout`、`evEmergencyStop`、`evManualReset`
+- 事件：`evAutoStart`、`evTick`、`evCommsLost`、`evCommsRestored`、`evReconnectTimeout`、`evAutoRunPause`、`evEmergencyStop`、`evManualReset`
 
 当前不覆盖的状态：
 
@@ -107,6 +107,7 @@ rostopic echo /b29_controller/b29_smc_auto_controller/state_trace
 - `auto_start_requested`
 - `manual_reset_requested`
 - `emergency_stop`
+- `auto_run_pause`
 - `posture_ready`
 - 以及任何需要临时强制覆盖的字段
 
@@ -114,7 +115,7 @@ rostopic echo /b29_controller/b29_smc_auto_controller/state_trace
 
 - `debug_override` 不是“一次性事件总线”，而是“当前覆盖配置”。
 - 你发布一次 `enabled=true` 的覆盖后，这个覆盖会一直保留，直到你下一次发布新覆盖把它改掉或关闭。
-- 所以对 `auto_start_requested`、`manual_reset_requested`、`emergency_stop` 这种事件型字段，必须显式发“释放脉冲”的消息。
+- 所以对 `auto_start_requested`、`manual_reset_requested`、`emergency_stop`、`auto_run_pause` 这种事件型字段，必须显式发“释放脉冲”的消息。
 
 ## 当前常用 `field_mask`
 
@@ -129,6 +130,7 @@ rostopic echo /b29_controller/b29_smc_auto_controller/state_trace
 - `FIELD_GRIP_CONFIRMED = 64`
 - `FIELD_OBSTACLE_DETECTED = 512`
 - `FIELD_OBSTACLE_TYPE = 1024`
+- `FIELD_AUTO_RUN_PAUSE = 262144`
 
 ## 推荐的基础命令
 
@@ -431,11 +433,54 @@ rostopic pub -1 "$OVERRIDE_TOPIC" b29_smc_auto_controller/AutoDebugOverride \
 - `transition_reason == "AutoInit->Traversing"` 或至少观察到状态从 `AutoInit` 进入 `Traversing`
 - `command_reason` 会切到巡航相关命令
 
+### 步骤 5b：验证 `evAutoRunPause`
+
+#### 触发方式
+
+在 `Traversing` 状态下，发布暂停覆盖：
+
+```bash
+rostopic pub -1 "$OVERRIDE_TOPIC" b29_smc_auto_controller/AutoDebugOverride \
+'{
+  enabled: true,
+  field_mask: 262144,
+  auto_run_pause: true
+}'
+```
+
+随后立即释放：
+
+```bash
+rostopic pub -1 "$OVERRIDE_TOPIC" b29_smc_auto_controller/AutoDebugOverride \
+'{
+  enabled: true,
+  field_mask: 262144,
+  auto_run_pause: false
+}'
+```
+
+#### 对应事件
+
+- `evAutoRunPause`
+
+#### 预期状态
+
+- `Idle`
+
+#### 验收标准
+
+- `current_state == "Idle"`
+- `transition_reason == "Traversing->Idle"`
+- `command_reason == "auto_run_pause"`
+- `last_event == "auto_run_pause"`
+- 不会进入 `SafeStop`
+
 ### 步骤 6：验证 `Traversing`
 
 #### 触发方式
 
-- 保持步骤 5 后的输入，不要再发故障或复位类指令
+- 如果刚完成步骤 5b，此时状态已经回到 `Idle`，需要重新执行一次步骤 4 的启动脉冲
+- 重新进入 `Traversing` 后，不要再发故障、暂停或复位类指令
 
 #### 预期状态
 

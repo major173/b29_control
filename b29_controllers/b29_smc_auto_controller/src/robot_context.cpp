@@ -121,6 +121,13 @@ void RobotContext::tick50Hz()
     return;
   }
 
+  if (current_state_id == RobotFSM::Traversing.getId() && input_.auto_run_pause)
+  {
+    auto_start_requested_ = false;
+    fsm_.evAutoRunPause();
+    return;
+  }
+
   fsm_.evTick();
 }
 
@@ -377,6 +384,14 @@ void RobotContext::reportErrorAutoInitFailed()
 {
   setSafeStopCommand("auto_init_failed");
   reportError("auto_init_failed");
+}
+
+void RobotContext::reportAutoRunPause()
+{
+  last_error_.clear();
+  last_alert_ = "auto_run_pause";
+  setSafeStopCommand("auto_run_pause");
+  logTransition("Traversing->Idle");
 }
 
 void RobotContext::alertCommsLoss()

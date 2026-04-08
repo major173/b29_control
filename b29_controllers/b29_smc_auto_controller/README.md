@@ -11,7 +11,7 @@
 - 最小输入适配层 `AutoInputMux`
 - 最小命令执行层 `CommandDispatcher`
 - 基础测试覆盖默认安全值与 mask 常量
-- 状态流转最小验证：`Idle -> AutoInit`、`* -> SafeStop`
+- 状态流转最小验证：`Idle -> AutoInit`、`Traversing -> Idle (evAutoRunPause)`、`* -> SafeStop`
 
 **开发约束**
 
@@ -37,6 +37,7 @@
 - `obstacle_detected / obstacle_type / classification_stable / range_to_obstacle`
 - `at_crossing_position`
 - `post_check_passed / post_check_failed`
+- `auto_run_pause`
 
 这些字段由统一输入输出模型承载，不在本包内直接假设其他业务 handle 已经可用。
 当前边界是：
@@ -70,6 +71,7 @@
 - `posture_ready` 由 roll/pitch 阈值直接判定
 - `joint state` 当前先承担已注册硬件接口对齐与时间戳合并，不额外引入业务语义
 - `AutoDebugOverride` 只覆盖 `field_mask` 标记字段，未标记字段保持原合并结果
+- `auto_run_pause` 当前通过 `AutoDebugOverride` / `AutoInputMux` 注入，用于恢复最小暂停链路
 
 ### CommandDispatcher
 
@@ -128,6 +130,7 @@
 - 这意味着“识别到障碍后的细分停障/接近/越障状态”还没有在当前版本展开
 - 收到 `evCommsLost` 时，转入 `CommsLoss`
 - 收到 `evEmergencyStop` 时，转入 `SafeStop`
+- 收到 `evAutoRunPause` 时，转入 `Idle`，并停止当前自动运行输出
 
 #### `CommsLoss`
 
@@ -195,6 +198,14 @@
 - `transition_reason` 记录为 `CommsLoss->SafeStop`
 - `command_reason` 和 `last_event` 记录为 `reconnect_timeout`
 - 当前设计明确要求“超时后不再自动回 `Idle`，必须人工复位”
+
+#### `evAutoRunPause`
+
+- 含义：暂停当前自动运行，并回到 `Idle`
+- 来源：当前处于 `Traversing` 且检测到 `auto_run_pause == true`
+- 当前输入来源：仅通过 `AutoDebugOverride -> AutoInputMux -> AutoInputSnapshot` 注入，尚未扩展到 `AutoControlRequest`
+- 作用：停止当前巡航输出，返回 `Idle`
+- 当前不会进入 `SafeStop`，也不会展开越障细分状态
 
 #### `evEmergencyStop`
 
@@ -332,6 +343,7 @@ roslaunch b29_control start.launch
   - `!lower_alive`
   - `CommsLoss && lower_alive -> evCommsRestored`
   - `CommsLoss && reconnect timeout -> evReconnectTimeout`
+  - `Traversing && auto_run_pause -> evAutoRunPause`
   - `SafeStop && manual_reset_requested -> evManualReset`
   - `Idle && auto_start_requested`
   - 其余进入 `evTick`
