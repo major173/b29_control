@@ -42,6 +42,7 @@ public:
     virtual void evCommsLost(RobotFSMContext& context);
     virtual void evCommsRestored(RobotFSMContext& context);
     virtual void evEmergencyStop(RobotFSMContext& context);
+    virtual void evInitFailed(RobotFSMContext& context);
     virtual void evManualReset(RobotFSMContext& context);
     virtual void evReconnectTimeout(RobotFSMContext& context);
     virtual void evTick(RobotFSMContext& context);
@@ -100,6 +101,7 @@ public:
     virtual void evAutoStart(RobotFSMContext& context);
     virtual void evCommsLost(RobotFSMContext& context);
     virtual void evEmergencyStop(RobotFSMContext& context);
+    virtual void evInitFailed(RobotFSMContext& context);
     virtual void evTick(RobotFSMContext& context);
 };
 
@@ -212,6 +214,11 @@ public:
     inline void evEmergencyStop()
     {
         getState().evEmergencyStop(*this);
+    };
+
+    inline void evInitFailed()
+    {
+        getState().evInitFailed(*this);
     };
 
     inline void evManualReset()

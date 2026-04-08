@@ -99,6 +99,8 @@ private:
   bool last_input_auto_start_requested_{false};
   bool reconnect_timer_active_{false};
   std::uint32_t reconnect_timer_ticks_{0};
+  bool auto_init_timer_active_{false};
+  std::uint32_t auto_init_timer_ticks_{0};
   b29_smc_auto_controller::CommandDispatcher::OutputMode trace_output_mode_{
       b29_smc_auto_controller::CommandDispatcher::OutputMode::kNormal};
   std::string last_error_;

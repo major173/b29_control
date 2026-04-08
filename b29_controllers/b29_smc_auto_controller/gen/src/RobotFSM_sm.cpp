@@ -42,6 +42,11 @@ void RobotContextState::evEmergencyStop(RobotFSMContext& context)
     Default(context);
 }
 
+void RobotContextState::evInitFailed(RobotFSMContext& context)
+{
+    Default(context);
+}
+
 void RobotContextState::evManualReset(RobotFSMContext& context)
 {
     Default(context);
@@ -192,6 +197,27 @@ void RobotFSM_AutoInit::evEmergencyStop(RobotFSMContext& context)
     try
     {
         ctxt.reportEmergencyStopInit();
+        context.setState(RobotFSM::SafeStop);
+    }
+    catch (...)
+    {
+        context.setState(RobotFSM::SafeStop);
+        throw;
+    }
+    context.getState().Entry(context);
+
+
+}
+
+void RobotFSM_AutoInit::evInitFailed(RobotFSMContext& context)
+{
+    RobotContext& ctxt = context.getOwner();
+
+    context.getState().Exit(context);
+    context.clearState();
+    try
+    {
+        ctxt.reportErrorAutoInitFailed();
         context.setState(RobotFSM::SafeStop);
     }
     catch (...)

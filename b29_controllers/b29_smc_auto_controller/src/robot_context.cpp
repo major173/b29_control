@@ -10,6 +10,7 @@ namespace
 constexpr double kCruiseSpeedMps = 0.10;
 constexpr double kApproachSpeedMps = 0.03;
 constexpr std::uint32_t kReconnectTimeoutTicks = 250;
+constexpr std::uint32_t kAutoInitTimeoutTicks = 100;
 }
 
 namespace b29_smc_auto_controller
@@ -85,6 +86,28 @@ void RobotContext::tick50Hz()
       if (reconnect_timer_ticks_ >= kReconnectTimeoutTicks)
       {
         fsm_.evReconnectTimeout();
+        return;
+      }
+    }
+
+    fsm_.evTick();
+    return;
+  }
+
+  if (current_state_id == RobotFSM::AutoInit.getId())
+  {
+    if (isReadyToTraverse())
+    {
+      fsm_.evTick();
+      return;
+    }
+
+    if (auto_init_timer_active_)
+    {
+      ++auto_init_timer_ticks_;
+      if (auto_init_timer_ticks_ >= kAutoInitTimeoutTicks)
+      {
+        fsm_.evInitFailed();
         return;
       }
     }
@@ -271,11 +294,15 @@ void RobotContext::startInitSequence()
 {
   command_.stop_all = false;
   command_.freeze_joints = false;
+  auto_init_timer_active_ = true;
+  auto_init_timer_ticks_ = 0;
   setCommandReason("auto_init_started");
 }
 
 void RobotContext::clearInitFlags()
 {
+  auto_init_timer_active_ = false;
+  auto_init_timer_ticks_ = 0;
   setCommandReason("auto_init_flags_cleared");
 }
 
@@ -384,6 +411,7 @@ void RobotContext::reportErrorAutoInitFailed()
 {
   setSafeStopCommand("auto_init_failed");
   reportError("auto_init_failed");
+  logTransition("AutoInit->SafeStop");
 }
 
 void RobotContext::reportAutoRunPause()
@@ -427,7 +455,7 @@ void RobotContext::logCommsRestored()
 
 void RobotContext::logSafeStopEntry()
 {
-  if (last_error_ != "reconnect_timeout")
+  if (last_error_ != "reconnect_timeout" && last_error_ != "auto_init_failed")
   {
     logTransition("EnterSafeStop");
   }

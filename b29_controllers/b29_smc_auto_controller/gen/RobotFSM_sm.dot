@@ -45,6 +45,9 @@ digraph RobotFSM {
         "RobotFSM::AutoInit" -> "RobotFSM::Traversing"
             [label="evTick\l\[ctxt.isReadyToTraverse()\]/\llogAutoInitToTraversing;\lsetCruiseCommand;\l"];
 
+        "RobotFSM::AutoInit" -> "RobotFSM::SafeStop"
+            [label="evInitFailed/\lreportErrorAutoInitFailed;\l"];
+
         "RobotFSM::AutoInit" -> "RobotFSM::CommsLoss"
             [label="evCommsLost/\lreportCommsLoss;\l"];
 

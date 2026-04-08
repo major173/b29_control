@@ -11,7 +11,7 @@
 - 最小输入适配层 `AutoInputMux`
 - 最小命令执行层 `CommandDispatcher`
 - 基础测试覆盖默认安全值与 mask 常量
-- 状态流转最小验证：`Idle -> AutoInit`、`Traversing -> Idle (evAutoRunPause)`、`* -> SafeStop`
+- 状态流转最小验证：`Idle -> AutoInit -> Traversing`、`AutoInit -> SafeStop (evInitFailed)`、`Traversing -> Idle (evAutoRunPause)`、`* -> SafeStop`
 
 **开发约束**
 
@@ -117,6 +117,7 @@
 - 进入状态时执行 `startInitSequence()`
 - 离开状态时执行 `clearInitFlags()`
 - 当前最小实现里，当 `isReadyToTraverse()` 成立时，通过 `evTick` 转入 `Traversing`
+- 当前最小实现里，如果 `AutoInit` 持续 100 个 `tick50Hz()` 周期仍未满足 `isReadyToTraverse()`，会触发 `evInitFailed` 转入 `SafeStop`
 - 收到 `evCommsLost` 时，转入 `CommsLoss`
 - 收到 `evEmergencyStop` 时，转入 `SafeStop`
 
@@ -172,6 +173,7 @@
 - 来源：控制器每周期调用 `tick50Hz()` 时，在没有更高优先级事件要处理时发出
 - 作用：
   - 驱动 `AutoInit -> Traversing`
+  - 驱动 `AutoInit -> SafeStop` 的初始化失败闭环
   - 驱动 `Traversing` 内的巡航命令刷新
   - 在 `CommsLoss` 中推进通信恢复计时
   - 在 `SafeStop` 中维持原状态等待人工复位
@@ -198,6 +200,15 @@
 - `transition_reason` 记录为 `CommsLoss->SafeStop`
 - `command_reason` 和 `last_event` 记录为 `reconnect_timeout`
 - 当前设计明确要求“超时后不再自动回 `Idle`，必须人工复位”
+
+#### `evInitFailed`
+
+- 含义：`AutoInit` 初始化等待超时，无法继续进入 `Traversing`
+- 来源：当前处于 `AutoInit`，且连续 `100 tick50Hz()` 周期未满足 `isReadyToTraverse()`
+- 作用：从 `AutoInit` 转入 `SafeStop`
+- `transition_reason` 记录为 `AutoInit->SafeStop`
+- `command_reason` 和 `last_event` 记录为 `auto_init_failed`
+- 当前设计明确要求“超时后不再自动回到 `AutoInit`，必须人工复位”
 
 #### `evAutoRunPause`
 
@@ -381,5 +392,6 @@ rosrun b29_smc_auto_controller replay_scenario.py \
 
 - `line_clamp_nominal.yaml`
 - `comms_loss_during_approach.yaml`
+- `auto_init_timeout.yaml`
 
 其中第二个场景文件名沿用计划命名，但当前实际覆盖的是 `Traversing -> CommsLoss -> Idle` 这条已实现链路。

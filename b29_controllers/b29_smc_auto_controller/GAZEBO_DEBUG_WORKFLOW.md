@@ -13,7 +13,7 @@
 当前文档只覆盖已经实现的状态机范围：
 
 - 状态：`Idle`、`AutoInit`、`Traversing`、`CommsLoss`、`SafeStop`
-- 事件：`evAutoStart`、`evTick`、`evCommsLost`、`evCommsRestored`、`evReconnectTimeout`、`evAutoRunPause`、`evEmergencyStop`、`evManualReset`
+- 事件：`evAutoStart`、`evTick`、`evCommsLost`、`evCommsRestored`、`evReconnectTimeout`、`evInitFailed`、`evAutoRunPause`、`evEmergencyStop`、`evManualReset`
 
 当前不覆盖的状态：
 
@@ -432,6 +432,35 @@ rostopic pub -1 "$OVERRIDE_TOPIC" b29_smc_auto_controller/AutoDebugOverride \
 - `current_state == "Traversing"`
 - `transition_reason == "AutoInit->Traversing"` 或至少观察到状态从 `AutoInit` 进入 `Traversing`
 - `command_reason` 会切到巡航相关命令
+
+### 步骤 5a：验证 `evInitFailed`
+
+#### 触发方式
+
+这个链路对时序有要求，不建议手动连续发 `rostopic pub`。直接回放内置场景更稳妥：
+
+```bash
+rosrun b29_smc_auto_controller replay_scenario.py \
+  _scenario:=$(find b29_smc_auto_controller)/scenarios/auto_init_timeout.yaml
+```
+
+该场景会先用一拍满足条件的启动脉冲进入 `AutoInit`，随后把 `posture_ready` 拉低并保持其他基础条件成立，直到 watchdog 超时。
+
+#### 对应事件
+
+- `evInitFailed`
+
+#### 预期状态
+
+- `SafeStop`
+
+#### 验收标准
+
+- `current_state == "SafeStop"`
+- `transition_reason == "AutoInit->SafeStop"`
+- `command_reason == "auto_init_failed"`
+- `last_event == "auto_init_failed"`
+- 不会回到 `AutoInit`
 
 ### 步骤 5b：验证 `evAutoRunPause`
 
