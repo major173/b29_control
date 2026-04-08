@@ -13,6 +13,12 @@ namespace b29_smc_auto_controller
 class CommandDispatcher
 {
 public:
+  enum class OutputMode
+  {
+    kNormal,
+    kSafeHold,
+  };
+
   static constexpr std::size_t kPositionJointCount = 6;
   static constexpr std::size_t kWheelJointCount = 2;
 
@@ -23,11 +29,16 @@ public:
 
   void configure(const PositionJointHandles& position_joint_handles, const WheelJointHandles& wheel_joint_handles);
   bool isConfigured() const;
+  void setOutputMode(OutputMode mode);
+  OutputMode outputMode() const;
   void dispatch(const AutoControlCommand& command);
 
 private:
   PositionJointHandles position_joint_handles_{};
   WheelJointHandles wheel_joint_handles_{};
+  std::array<double, kPositionJointCount> held_joint_targets_{};
+  OutputMode output_mode_{OutputMode::kNormal};
+  bool hold_latched_{false};
   bool configured_{false};
 };
 }  // namespace b29_smc_auto_controller

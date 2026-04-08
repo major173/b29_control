@@ -1,5 +1,6 @@
 #include "b29_smc_auto_controller/b29_smc_auto_controller.h"
 
+#include <b29_smc_auto_controller/output_mode.h>
 #include <pluginlib/class_list_macros.hpp>
 
 namespace b29_smc_auto_controller
@@ -18,9 +19,15 @@ bool B29SmcAutoController::init(hardware_interface::RobotHW* robot_hw, ros::Node
     return false;
   }
 
-  loadParameters(controller_nh);
+  if (!loadParameters(controller_nh))
+  {
+    return false;
+  }
+
   buildHandles();
   command_dispatcher_.configure(position_joint_handles_, wheel_joint_handles_);
+  command_dispatcher_.setOutputMode(output_mode_);
+  robot_context_.setTraceOutputMode(output_mode_);
   sensor_input_sub_ =
       controller_nh.subscribe("sensor_input", 1, &B29SmcAutoController::sensorInputCallback, this);
   debug_override_sub_ =
@@ -64,7 +71,7 @@ void B29SmcAutoController::update(const ros::Time& time, const ros::Duration& /*
   state_trace_pub_.publish(robot_context_.buildTraceMessage(time));
 }
 
-void B29SmcAutoController::stopping(const ros::Time& /*time*/)
+void B29SmcAutoController::stopping(const ros::Time& time)
 {
   if (!initialized_)
   {
@@ -73,7 +80,9 @@ void B29SmcAutoController::stopping(const ros::Time& /*time*/)
 
   AutoControlCommand safe_stop;
   command_dispatcher_.dispatch(safe_stop);
-  state_trace_pub_.publish(robot_context_.buildTraceMessage(ros::Time::now()));
+  AutoStateTrace trace = robot_context_.buildTraceMessage(time);
+  applyCommandToTrace(safe_stop, trace);
+  state_trace_pub_.publish(trace);
 }
 
 bool B29SmcAutoController::initInterfaces(hardware_interface::RobotHW* robot_hw)
@@ -86,7 +95,7 @@ bool B29SmcAutoController::initInterfaces(hardware_interface::RobotHW* robot_hw)
   return joint_state_interface_ && position_joint_interface_ && velocity_joint_interface_ && imu_sensor_interface_;
 }
 
-void B29SmcAutoController::loadParameters(ros::NodeHandle& controller_nh)
+bool B29SmcAutoController::loadParameters(ros::NodeHandle& controller_nh)
 {
   controller_nh.param<std::string>("joint_names/left_first_leg_joint", position_joint_names_[0], position_joint_names_[0]);
   controller_nh.param<std::string>("joint_names/left_second_leg_joint", position_joint_names_[1], position_joint_names_[1]);
@@ -97,6 +106,20 @@ void B29SmcAutoController::loadParameters(ros::NodeHandle& controller_nh)
   controller_nh.param<std::string>("joint_names/left_friction_wheel_joint", wheel_joint_names_[0], wheel_joint_names_[0]);
   controller_nh.param<std::string>("joint_names/right_friction_wheel_joint", wheel_joint_names_[1], wheel_joint_names_[1]);
   controller_nh.param<std::string>("imu_names", base_imu_name_, base_imu_name_);
+  std::string output_mode_name = toString(output_mode_);
+  controller_nh.param<std::string>("output_mode", output_mode_name, output_mode_name);
+
+  try
+  {
+    output_mode_ = parseOutputMode(output_mode_name);
+  }
+  catch (const std::invalid_argument&)
+  {
+    ROS_ERROR_STREAM("Unsupported output_mode: " << output_mode_name);
+    return false;
+  }
+
+  return true;
 }
 
 void B29SmcAutoController::buildHandles()

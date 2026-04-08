@@ -5,9 +5,15 @@
 
 #include <b29_smc_auto_controller/AutoStateTrace.h>
 #include <b29_smc_auto_controller/auto_types.h>
+#include <b29_smc_auto_controller/command_dispatcher.h>
 #include <b29_smc_auto_controller/robot_actions.h>
 
 #include <RobotFSM_sm.h>
+
+namespace b29_smc_auto_controller
+{
+void applyCommandToTrace(const AutoControlCommand& command, AutoStateTrace& trace);
+}
 
 class RobotContext : public robot_fsm::RobotActions
 {
@@ -22,6 +28,7 @@ public:
   void tick50Hz();
   void setInputSnapshot(const b29_smc_auto_controller::AutoInputSnapshot& input);
   void requestAutoStart();
+  void setTraceOutputMode(b29_smc_auto_controller::CommandDispatcher::OutputMode mode);
   const b29_smc_auto_controller::AutoControlCommand& currentCommand() const;
   std::string currentStateName() const;
   b29_smc_auto_controller::AutoStateTrace buildTraceMessage(const ros::Time& stamp) const;
@@ -88,6 +95,8 @@ private:
   bool auto_start_requested_{false};
   bool last_input_auto_start_requested_{false};
   bool reconnect_timer_active_{false};
+  b29_smc_auto_controller::CommandDispatcher::OutputMode trace_output_mode_{
+      b29_smc_auto_controller::CommandDispatcher::OutputMode::kNormal};
   std::string last_error_;
   std::string last_alert_;
   std::string last_transition_;

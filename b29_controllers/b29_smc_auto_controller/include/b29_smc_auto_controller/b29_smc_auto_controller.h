@@ -41,7 +41,7 @@ private:
   static constexpr std::size_t kWheelJointCount = CommandDispatcher::kWheelJointCount;
 
   bool initInterfaces(hardware_interface::RobotHW* robot_hw);
-  void loadParameters(ros::NodeHandle& controller_nh);
+  bool loadParameters(ros::NodeHandle& controller_nh);
   void buildHandles();
   void sensorInputCallback(const AutoSensorInput::ConstPtr& msg);
   void debugOverrideCallback(const AutoDebugOverride::ConstPtr& msg);
@@ -67,6 +67,7 @@ private:
   AutoInputMux input_mux_{};
   RobotContext robot_context_{};
   CommandDispatcher command_dispatcher_{};
+  CommandDispatcher::OutputMode output_mode_{CommandDispatcher::OutputMode::kNormal};
   AutoSensorInput sensor_input_{};
   AutoDebugOverride debug_override_{};
   ros::Subscriber sensor_input_sub_;

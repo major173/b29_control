@@ -1,0 +1,44 @@
+<?xml version="1.0"?>
+<launch>
+
+    <!-- Arguments -->
+    <arg name="use_sim_time" default="true"/>
+
+    <!-- Set use_sim_time parameter -->
+    <param name="use_sim_time" value="$(arg use_sim_time)"/>
+
+    <arg name="model" default="$(find b29_control)/urdf/b29/b29.urdf.xacro"/>
+    <param name="robot_description"
+           command="xacro $(arg model) use_simulation:=$(arg use_sim_time)"/>
+
+    <rosparam file="$(find b29_control)/config/gazebo_ros_control.yaml" command="load"/>
+
+    <!-- gazebo -->
+    <include file="$(find gazebo_ros)/launch/empty_world.launch">
+        <arg name="world_name" value="$(find rm_gazebo)/worlds/empty.world"/>
+        <arg name="paused" value="false"/>
+        <arg name="use_sim_time" value="$(arg use_sim_time)"/>
+        <arg name="gui" value="true"/>
+        <arg name="headless" value="false"/>
+        <arg name="debug" value="false"/>
+    </include>
+
+    <!-- spawn model -->
+    <node name="spawn_urdf" pkg="gazebo_ros" type="spawn_model"
+          args="-x 0.0 -y 0.0 -z 1.0
+                -R 0.0 -P 0.0 -Y 0.0
+                -param robot_description -urdf -model b29"/>
+
+    <!-- load controller yaml -->
+    <rosparam file="$(find b29_control)/config/controller.yaml" command="load"/>
+    <rosparam file="$(find b29_control)/config/controller_gazebo_smc.yaml" command="load"/>
+
+    <!-- controller manager -->
+    <node name="controller_manager" pkg="controller_manager" type="controller_manager" output="screen"
+          args="spawn
+         b29_controller/joint_state_controller
+         b29_controller/robot_state_controller
+         b29_controller/b29_smc_auto_controller
+      "/>
+
+</launch>

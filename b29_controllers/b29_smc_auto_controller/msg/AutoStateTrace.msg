@@ -8,6 +8,7 @@ string previous_state
 string last_event
 string transition_reason
 string command_reason
+string output_mode
 bool stop_all
 bool freeze_joints
 float64 left_wheel_speed

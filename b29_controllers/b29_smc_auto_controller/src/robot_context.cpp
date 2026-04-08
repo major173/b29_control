@@ -3,11 +3,39 @@
 
 #include <utility>
 
+#include <b29_smc_auto_controller/output_mode.h>
+
 namespace
 {
 constexpr double kCruiseSpeedMps = 0.10;
 constexpr double kApproachSpeedMps = 0.03;
 }
+
+namespace b29_smc_auto_controller
+{
+void applyCommandToTrace(const AutoControlCommand& command, AutoStateTrace& trace)
+{
+  trace.command_reason = command.command_reason;
+  trace.stop_all = command.stop_all;
+  trace.freeze_joints = command.freeze_joints;
+  trace.left_wheel_speed = command.left_wheel_speed;
+  trace.right_wheel_speed = command.right_wheel_speed;
+
+  switch (command.crossing_strategy)
+  {
+    case CrossingStrategy::LineClamp:
+      trace.crossing_strategy = AutoStateTrace::CROSSING_LINE_CLAMP;
+      break;
+    case CrossingStrategy::Damper:
+      trace.crossing_strategy = AutoStateTrace::CROSSING_DAMPER;
+      break;
+    case CrossingStrategy::None:
+    default:
+      trace.crossing_strategy = AutoStateTrace::CROSSING_NONE;
+      break;
+  }
+}
+}  // namespace b29_smc_auto_controller
 
 RobotContext::RobotContext() : fsm_(*this)
 {
@@ -104,6 +132,11 @@ void RobotContext::requestAutoStart()
   auto_start_requested_ = true;
 }
 
+void RobotContext::setTraceOutputMode(b29_smc_auto_controller::CommandDispatcher::OutputMode mode)
+{
+  trace_output_mode_ = mode;
+}
+
 const b29_smc_auto_controller::AutoControlCommand& RobotContext::currentCommand() const
 {
   return command_;
@@ -131,11 +164,8 @@ b29_smc_auto_controller::AutoStateTrace RobotContext::buildTraceMessage(const ro
   b29_smc_auto_controller::AutoStateTrace trace;
   trace.header.stamp = stamp;
   trace.current_state = currentStateName();
-  trace.command_reason = command_.command_reason;
-  trace.stop_all = command_.stop_all;
-  trace.freeze_joints = command_.freeze_joints;
-  trace.left_wheel_speed = command_.left_wheel_speed;
-  trace.right_wheel_speed = command_.right_wheel_speed;
+  trace.output_mode = b29_smc_auto_controller::toString(trace_output_mode_);
+  b29_smc_auto_controller::applyCommandToTrace(command_, trace);
 
   if (!last_transition_.empty())
   {
@@ -154,20 +184,6 @@ b29_smc_auto_controller::AutoStateTrace RobotContext::buildTraceMessage(const ro
   else if (!last_alert_.empty())
   {
     trace.last_event = last_alert_;
-  }
-
-  switch (command_.crossing_strategy)
-  {
-    case b29_smc_auto_controller::CrossingStrategy::LineClamp:
-      trace.crossing_strategy = b29_smc_auto_controller::AutoStateTrace::CROSSING_LINE_CLAMP;
-      break;
-    case b29_smc_auto_controller::CrossingStrategy::Damper:
-      trace.crossing_strategy = b29_smc_auto_controller::AutoStateTrace::CROSSING_DAMPER;
-      break;
-    case b29_smc_auto_controller::CrossingStrategy::None:
-    default:
-      trace.crossing_strategy = b29_smc_auto_controller::AutoStateTrace::CROSSING_NONE;
-      break;
   }
 
   return trace;

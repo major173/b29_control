@@ -79,6 +79,10 @@
 - 位置输出写入 6 个机构关节 `PositionJointInterface`
 - `stop_all=true` 时强制清零轮速
 - `freeze_joints=true` 时强制用当前位置锁住关节，而不是发送新的目标位姿
+- `output_mode=normal` 时按状态机命令执行
+- `output_mode=safe_hold` 时忽略运动请求，强制输出安全保持命令：
+  - 左右轮速度为 `0.0`
+  - 6 个位置关节锁当前位置
 
 当前 `B29SmcAutoController` 已切到 `MultiInterfaceController`，最小闭环为：
 
@@ -243,12 +247,61 @@ roslaunch b29_control start.launch
 
 - `/b29_controller/b29_smc_auto_controller/state_trace`
 
+## 输出模式
+
+控制器通过参数 `output_mode` 控制执行层语义。
+
+- `normal`
+  - 默认模式
+  - `CommandDispatcher` 直接执行状态机产出的轮速和关节目标
+- `safe_hold`
+  - 状态机、输入适配层和 `state_trace` 发布继续正常运行
+  - 执行层不放行动作请求，而是显式输出安全保持命令
+  - 左右轮速度强制为 `0.0`
+  - 6 个位置关节目标强制为当前位置
+
+`safe_hold` 的设计目的不是“什么都不做”，而是提供一个对 Gazebo 和实机早期联调都更可控的安全模式。这样即使状态机已经进入 `AutoInit` 或 `Traversing`，执行层也不会真正推动机构动作。
+
+当前未实现 `dry_run`。如果后续需要完全不写句柄的纯离线联调，再单独扩展，不在本包当前范围内。
+
 当前 `state_trace` 会发布：
 
 - 当前状态
 - 最近一次状态转移摘要
 - 最近一次错误/告警摘要
 - 当前命令原因与轮速/冻结标志
+
+建议在命令摘要或调试日志中同时带出当前 `output_mode`，避免现场误判“状态机没出命令”和“命令被安全保持覆盖”为同一种问题。
+
+## Gazebo 状态机验证
+
+如果目标是先验证状态机而不是验证执行层，建议使用 Gazebo 专用启动链路，并将控制器参数设为 `output_mode: safe_hold`。
+
+验证重点：
+
+- `Idle -> AutoInit -> Traversing`
+- `Idle -> CommsLoss -> Idle`
+- `* -> SafeStop -> Idle`
+
+这条链路当前验证的是：
+
+- 关节和 `base_imu` 接口是否能正常初始化
+- `debug_override` / `sensor_input` 是否能驱动状态转移
+- `state_trace` 是否能稳定反映当前状态和命令摘要
+
+这条链路当前不验证：
+
+- 真实轮速执行
+- 真实关节轨迹执行
+- 完整的停障 / 接近 / 越障细分状态链
+
+## 实机早期调试建议
+
+后续进入实机联调时，也可以先使用 `output_mode: safe_hold` 做第一阶段验证，但需要遵守以下约束：
+
+- 同一时刻只加载 `b29_smc_auto_controller`，不要与旧动作控制器并行抢占同一组关节接口
+- 先确认 `state_trace`、输入快照和事件优先级行为正确
+- 确认状态机逻辑无误后，再切回 `output_mode: normal` 验证真实执行
 
 
 
