@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 #pragma once
 
+#include <cstdint>
 #include <string>
 
 #include <b29_smc_auto_controller/AutoStateTrace.h>
@@ -66,6 +67,7 @@ public:
   void reportEmergencyStopInit();
   void reportEmergencyStopTraversal();
   void reportEmergencyStopCommsLoss();
+  void reportReconnectTimeout();
   void reportErrorAutoInitFailed();
 
   void alertCommsLoss();
@@ -95,6 +97,7 @@ private:
   bool auto_start_requested_{false};
   bool last_input_auto_start_requested_{false};
   bool reconnect_timer_active_{false};
+  std::uint32_t reconnect_timer_ticks_{0};
   b29_smc_auto_controller::CommandDispatcher::OutputMode trace_output_mode_{
       b29_smc_auto_controller::CommandDispatcher::OutputMode::kNormal};
   std::string last_error_;

@@ -13,7 +13,7 @@
 当前文档只覆盖已经实现的状态机范围：
 
 - 状态：`Idle`、`AutoInit`、`Traversing`、`CommsLoss`、`SafeStop`
-- 事件：`evAutoStart`、`evTick`、`evCommsLost`、`evCommsRestored`、`evEmergencyStop`、`evManualReset`
+- 事件：`evAutoStart`、`evTick`、`evCommsLost`、`evCommsRestored`、`evReconnectTimeout`、`evEmergencyStop`、`evManualReset`
 
 当前不覆盖的状态：
 
@@ -257,6 +257,7 @@ rostopic pub -1 "$SENSOR_TOPIC" b29_smc_auto_controller/AutoSensorInput \
 - `output_mode == "safe_hold"`
 - `stop_all == true`
 - `freeze_joints == true`
+- `CommsLoss` 进入后就开始累计重连超时计数
 
 ### 步骤 2：验证 `evCommsRestored`
 
@@ -295,6 +296,29 @@ rostopic pub -1 "$SENSOR_TOPIC" b29_smc_auto_controller/AutoSensorInput \
 - `current_state == "Idle"`
 - `transition_reason == "CommsLoss->Idle"` 或至少观察到状态从 `CommsLoss` 回到 `Idle`
 - 状态恢复后不会自动重新进入 `AutoInit` 或 `Traversing`
+- 这个恢复路径必须在 `evReconnectTimeout` 触发之前完成；一旦超时进入 `SafeStop`，仅靠 `lower_alive=true` 不会自动回到 `Idle`
+
+### 步骤 2b：验证 `evReconnectTimeout`
+
+#### 触发方式
+
+保持 `lower_alive=false`，不要发送恢复输入，等待超过 5 秒。50Hz 下对应约 250 个 tick。
+
+#### 对应事件
+
+- `evReconnectTimeout`
+
+#### 预期状态
+
+- `SafeStop`
+
+#### 验收标准
+
+- `current_state == "SafeStop"`
+- `transition_reason == "CommsLoss->SafeStop"`
+- `command_reason == "reconnect_timeout"`
+- `last_event == "reconnect_timeout"`
+- 超时后再把 `lower_alive` 拉回 `true`，状态仍应停留在 `SafeStop`，直到人工复位
 
 ### 步骤 3：验证 `Idle`
 

@@ -149,6 +149,12 @@ CommsLoss
             alertCommsRestored();
         }
 
+    evReconnectTimeout
+        SafeStop
+        {
+            reportReconnectTimeout();
+        }
+
     evEmergencyStop
         SafeStop
         {

@@ -136,8 +136,9 @@
   - `startReconnectTimer()`
   - `alertCommsLoss()`
 - 离开状态时执行 `stopReconnectTimer()`
-- 该状态不会自动恢复自动运行，只等待通信恢复
+- 该状态先等待通信恢复；如果连续 5 秒都没有恢复，则转入 `SafeStop`
 - 收到 `evCommsRestored` 时，回到 `Idle`
+- 收到 `evReconnectTimeout` 时，转入 `SafeStop`
 - 收到 `evEmergencyStop` 时，转入 `SafeStop`
 
 #### `SafeStop`
@@ -169,7 +170,8 @@
 - 作用：
   - 驱动 `AutoInit -> Traversing`
   - 驱动 `Traversing` 内的巡航命令刷新
-  - 在 `CommsLoss` 和 `SafeStop` 中维持原状态等待恢复条件
+  - 在 `CommsLoss` 中推进通信恢复计时
+  - 在 `SafeStop` 中维持原状态等待人工复位
 
 #### `evCommsLost`
 
@@ -184,6 +186,15 @@
 - 来源：当前处于 `CommsLoss` 且检测到 `lower_alive == true`
 - 作用：从 `CommsLoss` 回到 `Idle`
 - 当前设计明确要求“恢复后回空闲态，不自动续跑”
+
+#### `evReconnectTimeout`
+
+- 含义：通信恢复等待超时
+- 来源：当前处于 `CommsLoss`，且 50Hz 计时达到 5 秒仍未检测到 `lower_alive == true`
+- 作用：从 `CommsLoss` 转入 `SafeStop`
+- `transition_reason` 记录为 `CommsLoss->SafeStop`
+- `command_reason` 和 `last_event` 记录为 `reconnect_timeout`
+- 当前设计明确要求“超时后不再自动回 `Idle`，必须人工复位”
 
 #### `evEmergencyStop`
 
@@ -320,6 +331,7 @@ roslaunch b29_control start.launch
   - `emergency_stop`
   - `!lower_alive`
   - `CommsLoss && lower_alive -> evCommsRestored`
+  - `CommsLoss && reconnect timeout -> evReconnectTimeout`
   - `SafeStop && manual_reset_requested -> evManualReset`
   - `Idle && auto_start_requested`
   - 其余进入 `evTick`

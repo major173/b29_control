@@ -9,6 +9,7 @@ namespace
 {
 constexpr double kCruiseSpeedMps = 0.10;
 constexpr double kApproachSpeedMps = 0.03;
+constexpr std::uint32_t kReconnectTimeoutTicks = 250;
 }
 
 namespace b29_smc_auto_controller
@@ -76,6 +77,16 @@ void RobotContext::tick50Hz()
     {
       fsm_.evCommsRestored();
       return;
+    }
+
+    if (reconnect_timer_active_)
+    {
+      ++reconnect_timer_ticks_;
+      if (reconnect_timer_ticks_ >= kReconnectTimeoutTicks)
+      {
+        fsm_.evReconnectTimeout();
+        return;
+      }
     }
 
     fsm_.evTick();
@@ -264,12 +275,14 @@ void RobotContext::clearInitFlags()
 void RobotContext::startReconnectTimer()
 {
   reconnect_timer_active_ = true;
+  reconnect_timer_ticks_ = 0;
   setCommandReason("reconnect_timer_started");
 }
 
 void RobotContext::stopReconnectTimer()
 {
   reconnect_timer_active_ = false;
+  reconnect_timer_ticks_ = 0;
   setCommandReason("reconnect_timer_stopped");
 }
 
@@ -353,6 +366,13 @@ void RobotContext::reportEmergencyStopCommsLoss()
   reportEmergencyStop("emergency_stop_comms_loss");
 }
 
+void RobotContext::reportReconnectTimeout()
+{
+  setSafeStopCommand("reconnect_timeout");
+  reportError("reconnect_timeout");
+  logTransition("CommsLoss->SafeStop");
+}
+
 void RobotContext::reportErrorAutoInitFailed()
 {
   setSafeStopCommand("auto_init_failed");
@@ -386,12 +406,16 @@ void RobotContext::logAutoInitToTraversing()
 
 void RobotContext::logCommsRestored()
 {
+  last_error_.clear();
   logTransition("CommsLoss->Idle");
 }
 
 void RobotContext::logSafeStopEntry()
 {
-  logTransition("EnterSafeStop");
+  if (last_error_ != "reconnect_timeout")
+  {
+    logTransition("EnterSafeStop");
+  }
 }
 
 void RobotContext::logSafeStopToIdle()

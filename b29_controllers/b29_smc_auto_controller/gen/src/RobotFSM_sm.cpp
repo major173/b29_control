@@ -42,6 +42,11 @@ void RobotContextState::evManualReset(RobotFSMContext& context)
     Default(context);
 }
 
+void RobotContextState::evReconnectTimeout(RobotFSMContext& context)
+{
+    Default(context);
+}
+
 void RobotContextState::evTick(RobotFSMContext& context)
 {
     Default(context);
@@ -369,6 +374,27 @@ void RobotFSM_CommsLoss::evEmergencyStop(RobotFSMContext& context)
     try
     {
         ctxt.reportEmergencyStopCommsLoss();
+        context.setState(RobotFSM::SafeStop);
+    }
+    catch (...)
+    {
+        context.setState(RobotFSM::SafeStop);
+        throw;
+    }
+    context.getState().Entry(context);
+
+
+}
+
+void RobotFSM_CommsLoss::evReconnectTimeout(RobotFSMContext& context)
+{
+    RobotContext& ctxt = context.getOwner();
+
+    context.getState().Exit(context);
+    context.clearState();
+    try
+    {
+        ctxt.reportReconnectTimeout();
         context.setState(RobotFSM::SafeStop);
     }
     catch (...)

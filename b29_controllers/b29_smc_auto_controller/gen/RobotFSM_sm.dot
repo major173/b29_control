@@ -61,6 +61,9 @@ digraph RobotFSM {
             [label="evCommsRestored/\llogCommsRestored;\lalertCommsRestored;\l"];
 
         "RobotFSM::CommsLoss" -> "RobotFSM::SafeStop"
+            [label="evReconnectTimeout/\lreportReconnectTimeout;\l"];
+
+        "RobotFSM::CommsLoss" -> "RobotFSM::SafeStop"
             [label="evEmergencyStop/\lreportEmergencyStopCommsLoss;\l"];
 
         "RobotFSM::SafeStop" -> "RobotFSM::Idle"

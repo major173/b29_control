@@ -42,6 +42,7 @@ public:
     virtual void evCommsRestored(RobotFSMContext& context);
     virtual void evEmergencyStop(RobotFSMContext& context);
     virtual void evManualReset(RobotFSMContext& context);
+    virtual void evReconnectTimeout(RobotFSMContext& context);
     virtual void evTick(RobotFSMContext& context);
 
 protected:
@@ -130,6 +131,7 @@ public:
     virtual void evCommsLost(RobotFSMContext& context);
     virtual void evCommsRestored(RobotFSMContext& context);
     virtual void evEmergencyStop(RobotFSMContext& context);
+    virtual void evReconnectTimeout(RobotFSMContext& context);
     virtual void evTick(RobotFSMContext& context);
 };
 
@@ -208,6 +210,11 @@ public:
     inline void evManualReset()
     {
         getState().evManualReset(*this);
+    };
+
+    inline void evReconnectTimeout()
+    {
+        getState().evReconnectTimeout(*this);
     };
 
     inline void evTick()
