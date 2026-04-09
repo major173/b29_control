@@ -1,0 +1,14 @@
+<library path="src">
+  <class name="B29 SMC Console" type="rqt_b29_smc_console.console_plugin.B29SmcConsolePlugin" base_class_type="rqt_gui_py::Plugin">
+    <description>
+      Standalone B29 SMC console plugin.
+    </description>
+    <qtgui>
+      <group>
+        <label>B29 Tools</label>
+      </group>
+      <label>B29 SMC Console</label>
+      <statustip>Standalone B29 SMC console plugin.</statustip>
+    </qtgui>
+  </class>
+</library>

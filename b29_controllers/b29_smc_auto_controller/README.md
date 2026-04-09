@@ -19,6 +19,19 @@
 - 额外业务输入通过统一输入适配层接入
 - 修改状态、输入、调试方式时必须同步更新本 README
 
+## 推荐调试方式
+
+当前联调优先使用 [`rqt_b29_smc_console`](/home/yuchen/usetest/B29/src/b29_control/b29_tools/rqt_b29_smc_console/README.md)，而不是手写 `rostopic pub`。
+
+这个插件可以直接完成以下工作：
+
+- 通过 `Sensor Input` 预设快速构造基础态、失联态和障碍态
+- 通过 `Override Composer` 发送单次触发、持续覆盖或取消覆盖
+- 通过 `Workflow` 执行预置场景，验证状态机链路
+- 通过 `Trace` 观察 `state_trace`、状态迁移和命令原因
+
+`scripts/replay_scenario.py` 仍然保留，适合作为场景回放补充，但不作为日常调试主入口。
+
 
 
 ## 数据面对齐
