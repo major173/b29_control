@@ -14,10 +14,11 @@ find_package(catkin REQUIRED COMPONENTS
         smclib
         std_msgs)
 
-set(SMC_REPO_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../smc_7_6_0/lib/C++")
+set(SMC_VENDOR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/smc")
+set(SMC_VENDOR_INCLUDE_DIR "${SMC_VENDOR_DIR}/include")
 
-if (EXISTS "${SMC_REPO_INCLUDE_DIR}/statemap.h")
-    set(SMCLIB_INCLUDE_DIR "${SMC_REPO_INCLUDE_DIR}" CACHE PATH "Directory containing statemap.h" FORCE)
+if (EXISTS "${SMC_VENDOR_INCLUDE_DIR}/statemap.h")
+    set(SMCLIB_INCLUDE_DIR "${SMC_VENDOR_INCLUDE_DIR}" CACHE PATH "Directory containing statemap.h" FORCE)
 else()
     unset(SMCLIB_INCLUDE_DIR CACHE)
     find_path(SMCLIB_INCLUDE_DIR
@@ -26,7 +27,7 @@ else()
 endif()
 
 if (NOT SMCLIB_INCLUDE_DIR)
-    message(FATAL_ERROR "statemap.h not found. Expected in a smclib include directory.")
+    message(FATAL_ERROR "statemap.h not found. Expected in third_party/smc/include or a smclib include directory.")
 endif()
 
 add_message_files(

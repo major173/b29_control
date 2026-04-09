@@ -366,15 +366,15 @@ roslaunch b29_control start.launch
 在包目录 `src/b29_control/b29_controllers/b29_smc_auto_controller/` 执行：
 
 ```bash
-java -jar ../../../../smc_7_6_0/bin/Smc.jar -c++ -d gen/src -headerd gen/include sm/RobotFSM.sm
+java -jar third_party/smc/bin/Smc.jar -c++ -d gen/src -headerd gen/include sm/RobotFSM.sm
 ```
 
-当前生成使用仓库自带 `smc_7_6_0/bin/Smc.jar`。本地这个版本使用 `-c++`，不是旧文档里的 `-lang c++`。如果仓库内存在 `smc_7_6_0/lib/C++/statemap.h`，构建会强制优先使用这份头文件；否则再回退到宿主环境中的 `smclib`。本包会同时导出 `gen/include/RobotFSM_sm.h` 与 `include/statemap.h`，保证下游通过 catkin 依赖时公共头链路可用。
+当前生成使用包内 vendored 的 `third_party/smc/bin/Smc.jar`。本地这个版本使用 `-c++`，不是旧文档里的 `-lang c++`。如果包内存在 `third_party/smc/include/statemap.h`，构建会优先使用这份头文件；否则再回退到宿主环境中的 `smclib`。本包会同时导出 `gen/include/RobotFSM_sm.h` 与 `include/statemap.h`，保证下游通过 catkin 依赖时公共头链路可用。
 
 如果需要 dot 状态图，单独执行：
 
 ```bash
-java -jar ../../../../smc_7_6_0/bin/Smc.jar -graph -glevel 1 -d gen sm/RobotFSM.sm
+java -jar third_party/smc/bin/Smc.jar -graph -glevel 1 -d gen sm/RobotFSM.sm
 ```
 
 生成后的 `RobotFSM_sm.h/.cpp` 应直接覆盖 `gen/` 目录中的同名文件，并重新构建。
