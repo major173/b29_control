@@ -64,18 +64,152 @@ except ImportError:  # pragma: no cover - fallback for non-catkin smoke tests
 _PACKAGE_NAME = 'rqt_b29_smc_console'
 _UI_FILENAME = 'console.ui'
 DEFAULT_NAMESPACE = '/b29_controller/b29_smc_auto_controller'
+_LANGUAGE_EN = 'en'
+_LANGUAGE_ZH = 'zh'
+_LANGUAGE_ITEMS = (
+    ('English', _LANGUAGE_EN),
+    ('中文', _LANGUAGE_ZH),
+)
 
 _ACTION_PULSE = 'pulse'
 _ACTION_LATCH = 'latch'
 _ACTION_CLEAR = 'clear'
-_ACTION_ITEMS = (
-    ('触发一次', _ACTION_PULSE),
-    ('持续覆盖', _ACTION_LATCH),
-    ('取消覆盖', _ACTION_CLEAR),
-)
 _TRACE_HIGHLIGHTS = {
     'SafeStop': QColor('#fde8e8'),
     'CommsLoss': QColor('#fff4cc'),
+}
+_GROUP_TRANSLATIONS = {
+    _LANGUAGE_EN: {
+        '启动/复位': 'Start',
+        '基础运行': 'Base',
+        '安全保护': 'Safety',
+        '障碍相关': 'Obstacle',
+        '运动阶段': 'Stage',
+        '后检': 'Post Check',
+    },
+    _LANGUAGE_ZH: {
+        '启动/复位': '启动/复位',
+        '基础运行': '基础运行',
+        '安全保护': '安全保护',
+        '障碍相关': '障碍相关',
+        '运动阶段': '运动阶段',
+        '后检': '后检',
+    },
+}
+_ENUM_TRANSLATIONS = {
+    _LANGUAGE_EN: {
+        'Unknown': 'Unknown',
+        'Line Clamp': 'Line Clamp',
+        'Damper': 'Damper',
+    },
+    _LANGUAGE_ZH: {
+        'Unknown': '未知',
+        'Line Clamp': '线夹',
+        'Damper': '阻尼器',
+        '未知': '未知',
+        '线夹': '线夹',
+        '阻尼器': '阻尼器',
+    },
+}
+_TEXTS = {
+    _LANGUAGE_EN: {
+        'header_subtitle': 'Monitor state, organize sensor input, send override commands, and run the default workflow.',
+        'language': 'Language',
+        'namespace': 'Namespace',
+        'overview_title': 'Overview',
+        'overview_namespace': 'namespace',
+        'current_state': 'current_state',
+        'previous_state': 'previous_state',
+        'last_event': 'last_event',
+        'output_mode': 'output_mode',
+        'reason': 'reason',
+        'sensor_inputs_title': 'Sensor Input',
+        'preset_base_ready': 'Base Ready',
+        'preset_comms_loss': 'Comms Loss',
+        'preset_obstacle': 'Obstacle Detected',
+        'preset_clear': 'Clear All',
+        'publish_sensor_input': 'Publish Sensor Input',
+        'override_title': 'Override Composer',
+        'override_field': 'Field',
+        'override_action': 'Action',
+        'override_value': 'Value',
+        'override_bool': 'Active',
+        'override_action_pulse': 'Pulse once',
+        'override_action_latch': 'Latch',
+        'override_action_clear': 'Clear override',
+        'override_hint_pulse': 'The current field supports pulse once or latch.',
+        'override_hint_no_pulse': 'The current field does not support pulse once; latch or clear will be used.',
+        'override_send': 'Send Override',
+        'workflow_title': 'Workflow',
+        'workflow_run': 'Run Workflow',
+        'workflow_idle': 'Ready to run workflow.',
+        'workflow_sensor_failed': 'Sensor publish failed: {message}',
+        'trace_title': 'Trace',
+        'workflow_queued': 'Workflow queued: {name}',
+        'workflow_failed': 'Workflow failed: {message}',
+        'workflow_succeeded': 'Workflow complete: {name}, waiting for state result.',
+        'override_publish_failed': 'Override publish failed: {message}',
+        'offline_hint': 'Offline mode: runtime dependencies are missing or ROS is not ready. {message}',
+        'reason_transition': 'transition',
+        'reason_command': 'command',
+        'trace_current': 'current',
+        'trace_event': 'event',
+        'trace_previous': 'prev',
+        'trace_mode': 'mode',
+        'trace_empty_summary': 'none',
+        'trace_mask_decimal': 'Decimal: {mask}',
+        'trace_mask_hex': 'Hex: 0x{mask:04X}',
+        'trace_mask_fields': 'Fields: {summary}',
+    },
+    _LANGUAGE_ZH: {
+        'header_subtitle': '监控状态、组织传感器输入、发送覆盖命令并执行默认 workflow。',
+        'language': '语言',
+        'namespace': '命名空间',
+        'overview_title': '概览',
+        'overview_namespace': 'namespace',
+        'current_state': 'current_state',
+        'previous_state': 'previous_state',
+        'last_event': 'last_event',
+        'output_mode': 'output_mode',
+        'reason': 'reason',
+        'sensor_inputs_title': '传感器输入',
+        'preset_base_ready': '基础可启动',
+        'preset_comms_loss': '通信丢失',
+        'preset_obstacle': '障碍出现',
+        'preset_clear': '全部清空',
+        'publish_sensor_input': '发布当前传感器输入',
+        'override_title': 'Override 组合器',
+        'override_field': '字段',
+        'override_action': '动作',
+        'override_value': '值',
+        'override_bool': '激活',
+        'override_action_pulse': '触发一次',
+        'override_action_latch': '持续覆盖',
+        'override_action_clear': '取消覆盖',
+        'override_hint_pulse': '当前字段支持一次触发或持续覆盖。',
+        'override_hint_no_pulse': '当前字段不支持“触发一次”，将使用持续覆盖或取消覆盖。',
+        'override_send': '发送覆盖',
+        'workflow_title': '流程',
+        'workflow_run': '执行流程',
+        'workflow_idle': '等待执行流程。',
+        'workflow_sensor_failed': '传感器发布失败: {message}',
+        'trace_title': '轨迹',
+        'workflow_queued': '已触发流程: {name}',
+        'workflow_failed': '流程执行失败: {message}',
+        'workflow_succeeded': '流程已执行: {name}，等待状态结果。',
+        'override_publish_failed': '覆盖发布失败: {message}',
+        'offline_hint': '离线模式: 运行时依赖缺失或 ROS 未就绪。{message}',
+        'reason_transition': 'transition',
+        'reason_command': 'command',
+        'trace_current': '当前',
+        'trace_event': '事件',
+        'trace_previous': '上一个',
+        'trace_mode': '模式',
+        'trace_empty_summary': '无',
+        'trace_mask_decimal': '十进制: {mask}',
+        'trace_mask_hex': '十六进制: 0x{mask:04X}',
+        'trace_mask_fields': '字段: {summary}',
+    },
 }
 
 
@@ -123,16 +257,56 @@ def _resolve_ui_file():
     )
 
 
-def build_override_choices(registry):
+def _language_key(language):
+    return language if language in _TEXTS else _LANGUAGE_EN
+
+
+def _text(language, key, **kwargs):
+    template = _TEXTS[_language_key(language)][key]
+    return template.format(**kwargs) if kwargs else template
+
+
+def _translate_group(language, group_name):
+    return _GROUP_TRANSLATIONS[_language_key(language)].get(group_name, group_name)
+
+
+def _translate_enum_label(language, label):
+    return _ENUM_TRANSLATIONS[_language_key(language)].get(label, label)
+
+
+def _translate_field_label(language, descriptor):
+    if _language_key(language) == _LANGUAGE_ZH:
+        return descriptor.label
+    return descriptor.name
+
+
+def _override_choice_text(language, descriptor):
+    return '{group} / {label}'.format(
+        group=_translate_group(language, descriptor.group),
+        label=_translate_field_label(language, descriptor),
+    )
+
+
+def _translated_enum_options(language, enum_options):
+    return tuple(
+        {
+            'value': option.value,
+            'label': _translate_enum_label(language, option.label),
+        }
+        for option in enum_options
+    )
+
+
+def build_override_choices(registry, language=_LANGUAGE_EN):
     return [
         {
             'field_name': descriptor.name,
-            'text': '{group} / {label}'.format(group=descriptor.group, label=descriptor.label),
-            'group': descriptor.group,
-            'label': descriptor.label,
+            'text': _override_choice_text(language, descriptor),
+            'group': _translate_group(language, descriptor.group),
+            'label': _translate_field_label(language, descriptor),
             'value_type': descriptor.value_type.value,
             'supports_pulse': descriptor.supports_pulse,
-            'enum_options': tuple(descriptor.enum_options),
+            'enum_options': _translated_enum_options(language, descriptor.enum_options),
         }
         for descriptor in registry
     ]
@@ -142,7 +316,7 @@ def build_workflow_choices(workflows_map):
     return [{'name': workflow_name, 'text': workflow_name} for workflow_name in workflows_map.keys()]
 
 
-def format_mask_preview(active_values, registry):
+def format_mask_preview(active_values, registry, language=_LANGUAGE_EN):
     active_field_names = []
     mask = 0
     for descriptor in registry:
@@ -150,8 +324,12 @@ def format_mask_preview(active_values, registry):
             continue
         mask |= descriptor.bit
         active_field_names.append(descriptor.name)
-    summary = ', '.join(active_field_names) if active_field_names else '无'
-    return '十进制: {mask} | 十六进制: 0x{mask:04X} | 字段: {summary}'.format(mask=mask, summary=summary)
+    summary = ', '.join(active_field_names) if active_field_names else _text(language, 'trace_empty_summary')
+    return '{decimal} | {hex_value} | {fields}'.format(
+        decimal=_text(language, 'trace_mask_decimal', mask=mask),
+        hex_value=_text(language, 'trace_mask_hex', mask=mask),
+        fields=_text(language, 'trace_mask_fields', summary=summary),
+    )
 
 
 def _build_field_map(registry):
@@ -204,12 +382,12 @@ def _obstacle_detected_preset(sensor_registry, base_ready_sensor_payload):
     return payload
 
 
-def _format_reason(entry):
+def _format_reason(entry, language=_LANGUAGE_EN):
     details = []
     if entry.transition_reason:
-        details.append('transition: {value}'.format(value=entry.transition_reason))
+        details.append('{label}: {value}'.format(label=_text(language, 'reason_transition'), value=entry.transition_reason))
     if entry.command_reason:
-        details.append('command: {value}'.format(value=entry.command_reason))
+        details.append('{label}: {value}'.format(label=_text(language, 'reason_command'), value=entry.command_reason))
     return ' | '.join(details) if details else '-'
 
 
@@ -256,6 +434,7 @@ class B29SmcConsolePlugin(Plugin):
         self._widget.setObjectName('B29SmcConsoleWidget')
         self._widget.setWindowTitle('B29 SMC Console')
 
+        self._language = _LANGUAGE_EN
         self._runtime_note = ''
         runtime = {}
         try:
@@ -275,8 +454,9 @@ class B29SmcConsolePlugin(Plugin):
         self._trace_model = trace_model or TraceModel()
         self._override_active_values = {}
         self._sensor_widgets = {}
+        self._sensor_labels = {}
+        self._sensor_groups = {}
         self._override_descriptor_map = _build_field_map(self._override_registry)
-        self._override_choices = build_override_choices(self._override_registry)
         self._trace_signal_proxy = _TraceSignalProxy()
         self._trace_signal_proxy.received.connect(self._apply_trace_message)
 
@@ -285,6 +465,7 @@ class B29SmcConsolePlugin(Plugin):
         self._configure_override_controls()
         self._configure_workflow_controls()
         self._bind_actions()
+        self._apply_language(self._language)
         self._refresh_overview(None)
 
         topic_facade_factory = topic_facade_factory or (
@@ -305,40 +486,64 @@ class B29SmcConsolePlugin(Plugin):
         except Exception:
             self._workflow_runner = _NullWorkflowRunner()
         if self._connection_note:
-            self.overrideActionHintLabel.setText('离线模式: 运行时依赖缺失或 ROS 未就绪。{message}'.format(message=self._connection_note))
+            self._set_offline_hint(self._connection_note)
 
         add_widget = getattr(context, 'add_widget', None)
         if callable(add_widget):
             add_widget(self._widget)
 
     def _bind_static_widgets(self):
+        self.languageLabel = self._widget.findChild(QLabel, 'languageLabel')
+        self.languageComboBox = self._widget.findChild(QComboBox, 'languageComboBox')
+        self.headerSubtitleLabel = self._widget.findChild(QLabel, 'headerSubtitleLabel')
         self.namespaceValueLineEdit = self._widget.findChild(QLineEdit, 'namespaceValueLineEdit')
+        self.namespaceLabel = self._widget.findChild(QLabel, 'namespaceLabel')
+        self.overviewTitleLabel = self._widget.findChild(QLabel, 'overviewTitleLabel')
+        self.overviewNamespaceTitleLabel = self._widget.findChild(QLabel, 'overviewNamespaceTitleLabel')
+        self.currentStateTitleLabel = self._widget.findChild(QLabel, 'currentStateTitleLabel')
         self.overviewNamespaceValueLabel = self._widget.findChild(QLabel, 'overviewNamespaceValueLabel')
         self.currentStateValueLabel = self._widget.findChild(QLabel, 'currentStateValueLabel')
+        self.previousStateTitleLabel = self._widget.findChild(QLabel, 'previousStateTitleLabel')
         self.previousStateValueLabel = self._widget.findChild(QLabel, 'previousStateValueLabel')
+        self.lastEventTitleLabel = self._widget.findChild(QLabel, 'lastEventTitleLabel')
         self.lastEventValueLabel = self._widget.findChild(QLabel, 'lastEventValueLabel')
+        self.outputModeTitleLabel = self._widget.findChild(QLabel, 'outputModeTitleLabel')
         self.outputModeValueLabel = self._widget.findChild(QLabel, 'outputModeValueLabel')
+        self.reasonTitleLabel = self._widget.findChild(QLabel, 'reasonTitleLabel')
         self.reasonValueLabel = self._widget.findChild(QLabel, 'reasonValueLabel')
+        self.sensorInputsTitleLabel = self._widget.findChild(QLabel, 'sensorInputsTitleLabel')
+        self.presetBaseReadyButton = self._widget.findChild(QPushButton, 'presetBaseReadyButton')
+        self.presetCommsLossButton = self._widget.findChild(QPushButton, 'presetCommsLossButton')
+        self.presetObstacleButton = self._widget.findChild(QPushButton, 'presetObstacleButton')
+        self.presetClearButton = self._widget.findChild(QPushButton, 'presetClearButton')
+        self.publishSensorInputButton = self._widget.findChild(QPushButton, 'publishSensorInputButton')
+        self.overrideComposerTitleLabel = self._widget.findChild(QLabel, 'overrideComposerTitleLabel')
+        self.overrideFieldLabel = self._widget.findChild(QLabel, 'overrideFieldLabel')
         self.overrideFieldComboBox = self._widget.findChild(QComboBox, 'overrideFieldComboBox')
+        self.overrideActionLabel = self._widget.findChild(QLabel, 'overrideActionLabel')
         self.overrideActionComboBox = self._widget.findChild(QComboBox, 'overrideActionComboBox')
+        self.overrideValueLabel = self._widget.findChild(QLabel, 'overrideValueLabel')
         self.overrideValueStackedWidget = self._widget.findChild(QStackedWidget, 'overrideValueStackedWidget')
         self.overrideBoolValueCheckBox = self._widget.findChild(QCheckBox, 'overrideBoolValueCheckBox')
         self.overrideEnumValueComboBox = self._widget.findChild(QComboBox, 'overrideEnumValueComboBox')
         self.overrideFloatValueSpinBox = self._widget.findChild(QDoubleSpinBox, 'overrideFloatValueSpinBox')
         self.overrideActionHintLabel = self._widget.findChild(QLabel, 'overrideActionHintLabel')
         self.overrideMaskPreviewLabel = self._widget.findChild(QLabel, 'overrideMaskPreviewLabel')
+        self.sendOverrideButton = self._widget.findChild(QPushButton, 'sendOverrideButton')
+        self.workflowTitleLabel = self._widget.findChild(QLabel, 'workflowTitleLabel')
         self.workflowComboBox = self._widget.findChild(QComboBox, 'workflowComboBox')
         self.workflowStatusLabel = self._widget.findChild(QLabel, 'workflowStatusLabel')
-        self.traceListWidget = self._widget.findChild(QWidget, 'traceListWidget')
-        self.publishSensorInputButton = self._widget.findChild(QPushButton, 'publishSensorInputButton')
-        self.sendOverrideButton = self._widget.findChild(QPushButton, 'sendOverrideButton')
         self.runWorkflowButton = self._widget.findChild(QPushButton, 'runWorkflowButton')
-        self.presetBaseReadyButton = self._widget.findChild(QPushButton, 'presetBaseReadyButton')
-        self.presetCommsLossButton = self._widget.findChild(QPushButton, 'presetCommsLossButton')
-        self.presetObstacleButton = self._widget.findChild(QPushButton, 'presetObstacleButton')
-        self.presetClearButton = self._widget.findChild(QPushButton, 'presetClearButton')
+        self.traceTitleLabel = self._widget.findChild(QLabel, 'traceTitleLabel')
+        self.traceListWidget = self._widget.findChild(QWidget, 'traceListWidget')
         self.sensorGroupsLayout = self._widget.findChild(QWidget, 'sensorScrollAreaContents').layout()
         self.namespaceValueLineEdit.setText(self._namespace)
+        self.languageComboBox.blockSignals(True)
+        self.languageComboBox.clear()
+        for text, value in _LANGUAGE_ITEMS:
+            self.languageComboBox.addItem(text, value)
+        self.languageComboBox.blockSignals(False)
+        self.languageComboBox.currentIndexChanged.connect(self._handle_language_change)
 
     def _build_sensor_inputs(self):
         grouped_descriptors = {}
@@ -350,12 +555,14 @@ class B29SmcConsolePlugin(Plugin):
             group_layout = QGridLayout(group_box)
             group_layout.setHorizontalSpacing(12)
             group_layout.setVerticalSpacing(8)
+            self._sensor_groups[group_name] = group_box
             for row, descriptor in enumerate(descriptors):
                 label = QLabel(descriptor.label)
                 control = self._create_input_widget(descriptor, 'sensorInput__{name}'.format(name=descriptor.name))
                 group_layout.addWidget(label, row, 0)
                 group_layout.addWidget(control, row, 1)
                 self._sensor_widgets[descriptor.name] = control
+                self._sensor_labels[descriptor.name] = label
             self.sensorGroupsLayout.addWidget(group_box)
         self.sensorGroupsLayout.addStretch(1)
 
@@ -378,13 +585,9 @@ class B29SmcConsolePlugin(Plugin):
         return widget
 
     def _configure_override_controls(self):
-        for choice in self._override_choices:
-            self.overrideFieldComboBox.addItem(choice['text'], choice['field_name'])
-
-        for text, value in _ACTION_ITEMS:
-            self.overrideActionComboBox.addItem(text, value)
-
         self.overrideFloatValueSpinBox.setSingleStep(0.05)
+        self._populate_override_fields()
+        self._populate_override_actions()
         self._sync_override_editor()
 
     def _configure_workflow_controls(self):
@@ -409,36 +612,118 @@ class B29SmcConsolePlugin(Plugin):
         self.sendOverrideButton.clicked.connect(self._send_override)
         self.runWorkflowButton.clicked.connect(self._run_workflow)
 
-    def _apply_sensor_preset(self, payload):
+    def _populate_override_fields(self):
+        current_field_name = self.overrideFieldComboBox.currentData()
+        self.overrideFieldComboBox.blockSignals(True)
+        self.overrideFieldComboBox.clear()
+        for choice in build_override_choices(self._override_registry, self._language):
+            self.overrideFieldComboBox.addItem(choice['text'], choice['field_name'])
+        self._set_combo_current_data(self.overrideFieldComboBox, current_field_name)
+        self.overrideFieldComboBox.blockSignals(False)
+
+    def _populate_override_actions(self):
+        current_action = self.overrideActionComboBox.currentData()
+        self.overrideActionComboBox.blockSignals(True)
+        self.overrideActionComboBox.clear()
+        self.overrideActionComboBox.addItem(_text(self._language, 'override_action_pulse'), _ACTION_PULSE)
+        self.overrideActionComboBox.addItem(_text(self._language, 'override_action_latch'), _ACTION_LATCH)
+        self.overrideActionComboBox.addItem(_text(self._language, 'override_action_clear'), _ACTION_CLEAR)
+        self._set_combo_current_data(self.overrideActionComboBox, current_action)
+        self.overrideActionComboBox.blockSignals(False)
+
+    def _handle_language_change(self, *_args):
+        language = self.languageComboBox.currentData() if self.languageComboBox is not None else _LANGUAGE_EN
+        self._apply_language(language)
+
+    def _apply_language(self, language):
+        self._language = _language_key(language)
+        self._apply_static_texts()
+        self._apply_sensor_language()
+        self._populate_override_fields()
+        self._populate_override_actions()
+        self._apply_override_language()
+        self._apply_workflow_language()
+        self._apply_overview_titles()
+        self._apply_trace_history_language()
+        self._apply_workflow_status()
+
+    def _apply_static_texts(self):
+        self.languageLabel.setText(_text(self._language, 'language'))
+        self.headerSubtitleLabel.setText(_text(self._language, 'header_subtitle'))
+        self.namespaceLabel.setText(_text(self._language, 'namespace'))
+        self.overviewTitleLabel.setText(_text(self._language, 'overview_title'))
+        self.overviewNamespaceTitleLabel.setText(_text(self._language, 'overview_namespace'))
+        self.currentStateTitleLabel.setText(_text(self._language, 'current_state'))
+        self.previousStateTitleLabel.setText(_text(self._language, 'previous_state'))
+        self.lastEventTitleLabel.setText(_text(self._language, 'last_event'))
+        self.outputModeTitleLabel.setText(_text(self._language, 'output_mode'))
+        self.reasonTitleLabel.setText(_text(self._language, 'reason'))
+        self.sensorInputsTitleLabel.setText(_text(self._language, 'sensor_inputs_title'))
+        self.presetBaseReadyButton.setText(_text(self._language, 'preset_base_ready'))
+        self.presetCommsLossButton.setText(_text(self._language, 'preset_comms_loss'))
+        self.presetObstacleButton.setText(_text(self._language, 'preset_obstacle'))
+        self.presetClearButton.setText(_text(self._language, 'preset_clear'))
+        self.publishSensorInputButton.setText(_text(self._language, 'publish_sensor_input'))
+        self.overrideComposerTitleLabel.setText(_text(self._language, 'override_title'))
+        self.overrideFieldLabel.setText(_text(self._language, 'override_field'))
+        self.overrideActionLabel.setText(_text(self._language, 'override_action'))
+        self.overrideValueLabel.setText(_text(self._language, 'override_value'))
+        self.overrideBoolValueCheckBox.setText(_text(self._language, 'override_bool'))
+        self.sendOverrideButton.setText(_text(self._language, 'override_send'))
+        self.workflowTitleLabel.setText(_text(self._language, 'workflow_title'))
+        self.runWorkflowButton.setText(_text(self._language, 'workflow_run'))
+        self.traceTitleLabel.setText(_text(self._language, 'trace_title'))
+
+    def _apply_sensor_language(self):
         for descriptor in self._sensor_registry:
-            self._set_widget_value(self._sensor_widgets[descriptor.name], descriptor, payload.get(descriptor.name, descriptor.default_value))
+            group_box = self._sensor_groups.get(descriptor.group)
+            if group_box is not None:
+                group_box.setTitle(_translate_group(self._language, descriptor.group))
+            label = self._sensor_labels.get(descriptor.name)
+            if label is not None:
+                label.setText(_translate_field_label(self._language, descriptor))
+            widget = self._sensor_widgets.get(descriptor.name)
+            if widget is not None and descriptor.value_type == FieldValueType.ENUM:
+                current_value = widget.currentData()
+                widget.blockSignals(True)
+                widget.clear()
+                for option in descriptor.enum_options:
+                    widget.addItem(_translate_enum_label(self._language, option.label), option.value)
+                self._set_combo_current_data(widget, current_value)
+                widget.blockSignals(False)
 
-    def _publish_sensor_input(self):
-        self._topic_facade.publish_sensor_input(self._collect_sensor_values())
+    def _apply_override_language(self):
+        descriptor = self._current_override_descriptor()
+        if descriptor is not None:
+            self._configure_override_value_widget(descriptor)
+        self._sync_override_action_text()
+        self._refresh_override_preview()
 
-    def _configure_override_value_widget(self, descriptor):
-        current_value = self._override_active_values.get(descriptor.name, descriptor.default_value)
-        if descriptor.value_type == FieldValueType.BOOL:
-            self.overrideValueStackedWidget.setCurrentWidget(self.overrideBoolValueCheckBox.parentWidget())
-            self.overrideBoolValueCheckBox.setChecked(bool(self._override_active_values.get(descriptor.name, True)))
-        elif descriptor.value_type == FieldValueType.ENUM:
-            self.overrideValueStackedWidget.setCurrentWidget(self.overrideEnumValueComboBox.parentWidget())
-            self.overrideEnumValueComboBox.blockSignals(True)
-            self.overrideEnumValueComboBox.clear()
-            for option in descriptor.enum_options:
-                self.overrideEnumValueComboBox.addItem(option.label, option.value)
-            self._set_combo_to_value(self.overrideEnumValueComboBox, current_value)
-            self.overrideEnumValueComboBox.blockSignals(False)
-        else:
-            self.overrideValueStackedWidget.setCurrentWidget(self.overrideFloatValueSpinBox.parentWidget())
-            self.overrideFloatValueSpinBox.setValue(float(current_value or 0.0))
+    def _apply_workflow_language(self):
+        self.workflowComboBox.blockSignals(True)
+        current_workflow = self.workflowComboBox.currentData()
+        self.workflowComboBox.clear()
+        for choice in build_workflow_choices(self._workflows_map):
+            self.workflowComboBox.addItem(choice['text'], choice['name'])
+        self._set_combo_current_data(self.workflowComboBox, current_workflow)
+        self.workflowComboBox.blockSignals(False)
 
-    def _sync_override_editor(self):
+    def _apply_overview_titles(self):
+        self.overviewNamespaceTitleLabel.setText(_text(self._language, 'overview_namespace'))
+        self.currentStateTitleLabel.setText(_text(self._language, 'current_state'))
+        self.previousStateTitleLabel.setText(_text(self._language, 'previous_state'))
+        self.lastEventTitleLabel.setText(_text(self._language, 'last_event'))
+        self.outputModeTitleLabel.setText(_text(self._language, 'output_mode'))
+        self.reasonTitleLabel.setText(_text(self._language, 'reason'))
+
+    def _apply_trace_history_language(self):
+        self._refresh_overview(self._trace_model.latest())
+        self._refresh_trace_history()
+
+    def _sync_override_action_text(self):
         descriptor = self._current_override_descriptor()
         if descriptor is None:
             return
-
-        self._configure_override_value_widget(descriptor)
         pulse_index = self.overrideActionComboBox.findData(_ACTION_PULSE)
         pulse_item = self.overrideActionComboBox.model().item(pulse_index) if pulse_index >= 0 else None
         if pulse_item is not None:
@@ -446,12 +731,77 @@ class B29SmcConsolePlugin(Plugin):
         if not descriptor.supports_pulse and self._current_override_action() == _ACTION_PULSE:
             latch_index = self.overrideActionComboBox.findData(_ACTION_LATCH)
             self.overrideActionComboBox.setCurrentIndex(latch_index)
-
         if descriptor.supports_pulse:
-            self.overrideActionHintLabel.setText('当前字段支持一次触发或持续覆盖。')
+            self.overrideActionHintLabel.setText(_text(self._language, 'override_hint_pulse'))
         else:
-            self.overrideActionHintLabel.setText('当前字段不支持“触发一次”，将使用持续覆盖或取消覆盖。')
+            self.overrideActionHintLabel.setText(_text(self._language, 'override_hint_no_pulse'))
+
+    def _apply_workflow_status(self):
+        if getattr(self, '_workflow_status_kind', None) == 'queued':
+            self.workflowStatusLabel.setText(_text(self._language, 'workflow_queued', name=self._workflow_status_name))
+        elif getattr(self, '_workflow_status_kind', None) == 'failed':
+            self.workflowStatusLabel.setText(_text(self._language, 'workflow_failed', message=self._workflow_status_message))
+        elif getattr(self, '_workflow_status_kind', None) == 'succeeded':
+            self.workflowStatusLabel.setText(_text(self._language, 'workflow_succeeded', name=self._workflow_status_name))
+        elif getattr(self, '_workflow_status_kind', None) == 'sensor_failed':
+            self.workflowStatusLabel.setText(_text(self._language, 'workflow_sensor_failed', message=self._workflow_status_message))
+        elif getattr(self, '_workflow_status_kind', None) == 'offline':
+            self.overrideActionHintLabel.setText(_text(self._language, 'offline_hint', message=self._workflow_status_message))
+            self.workflowStatusLabel.setText(_text(self._language, 'workflow_idle'))
+        else:
+            self.workflowStatusLabel.setText(_text(self._language, 'workflow_idle'))
+
+    def _set_offline_hint(self, message):
+        self._workflow_status_kind = 'offline'
+        self._workflow_status_message = message
+        self._workflow_status_name = ''
+        self.overrideActionHintLabel.setText(_text(self._language, 'offline_hint', message=message))
+
+    def _set_workflow_status(self, kind, name='', message=''):
+        self._workflow_status_kind = kind
+        self._workflow_status_name = name
+        self._workflow_status_message = message
+        self._apply_workflow_status()
+
+    def _sync_override_editor(self):
+        descriptor = self._current_override_descriptor()
+        if descriptor is None:
+            return
+
+        self._configure_override_value_widget(descriptor)
+        self._sync_override_action_text()
         self._refresh_override_preview()
+
+    def _apply_sensor_preset(self, payload):
+        for descriptor in self._sensor_registry:
+            self._set_widget_value(self._sensor_widgets[descriptor.name], descriptor, payload.get(descriptor.name, descriptor.default_value))
+
+    def _publish_sensor_input(self):
+        try:
+            self._topic_facade.publish_sensor_input(self._collect_sensor_values())
+        except Exception as exc:
+            self._set_workflow_status('sensor_failed', message=str(exc))
+
+    def _configure_override_value_widget(self, descriptor):
+        current_value = self._override_active_values.get(descriptor.name, descriptor.default_value)
+        if descriptor.value_type == FieldValueType.BOOL:
+            self.overrideValueStackedWidget.setCurrentWidget(self.overrideBoolValueCheckBox.parentWidget())
+            bool_value = current_value
+            if descriptor.name not in self._override_active_values:
+                if descriptor.supports_pulse and self._current_override_action() == _ACTION_PULSE:
+                    bool_value = True
+            self.overrideBoolValueCheckBox.setChecked(bool(bool_value))
+        elif descriptor.value_type == FieldValueType.ENUM:
+            self.overrideValueStackedWidget.setCurrentWidget(self.overrideEnumValueComboBox.parentWidget())
+            self.overrideEnumValueComboBox.blockSignals(True)
+            self.overrideEnumValueComboBox.clear()
+            for option in descriptor.enum_options:
+                self.overrideEnumValueComboBox.addItem(_translate_enum_label(self._language, option.label), option.value)
+            self._set_combo_to_value(self.overrideEnumValueComboBox, current_value)
+            self.overrideEnumValueComboBox.blockSignals(False)
+        else:
+            self.overrideValueStackedWidget.setCurrentWidget(self.overrideFloatValueSpinBox.parentWidget())
+            self.overrideFloatValueSpinBox.setValue(float(current_value or 0.0))
 
     def _refresh_override_preview(self):
         descriptor = self._current_override_descriptor()
@@ -465,7 +815,7 @@ class B29SmcConsolePlugin(Plugin):
             projected[descriptor.name] = self._read_widget_value(self._current_override_value_widget(), descriptor)
         elif action == _ACTION_CLEAR:
             projected.pop(descriptor.name, None)
-        self.overrideMaskPreviewLabel.setText(format_mask_preview(projected, self._override_registry))
+        self.overrideMaskPreviewLabel.setText(format_mask_preview(projected, self._override_registry, self._language))
 
     def _send_override(self):
         descriptor = self._current_override_descriptor()
@@ -474,26 +824,36 @@ class B29SmcConsolePlugin(Plugin):
 
         action = self._current_override_action()
         value = self._read_widget_value(self._current_override_value_widget(), descriptor)
-        if action == _ACTION_PULSE:
-            self._topic_facade.pulse_override(descriptor.name, value)
-        elif action == _ACTION_LATCH:
+        try:
+            if action == _ACTION_PULSE:
+                self._topic_facade.pulse_override(descriptor.name, value)
+            elif action == _ACTION_LATCH:
+                self._topic_facade.latch_override(descriptor.name, value)
+            else:
+                self._topic_facade.clear_override(descriptor.name)
+        except Exception as exc:
+            self.overrideActionHintLabel.setText(_text(self._language, 'override_publish_failed', message=str(exc)))
+            self.overrideMaskPreviewLabel.setText(
+                format_mask_preview(self._override_active_values, self._override_registry, self._language)
+            )
+            return
+
+        if action == _ACTION_LATCH:
             self._override_active_values[descriptor.name] = value
-            self._topic_facade.latch_override(descriptor.name, value)
-        else:
+        elif action == _ACTION_CLEAR:
             self._override_active_values.pop(descriptor.name, None)
-            self._topic_facade.clear_override(descriptor.name)
         self._refresh_override_preview()
 
     def _run_workflow(self):
         workflow_name = self.workflowComboBox.currentData()
         if workflow_name:
-            self.workflowStatusLabel.setText('已触发 workflow: {name}'.format(name=workflow_name))
+            self._set_workflow_status('queued', name=workflow_name)
             try:
                 self._workflow_runner.run(workflow_name)
             except Exception as exc:
-                self.workflowStatusLabel.setText('Workflow 执行失败: {message}'.format(message=str(exc)))
+                self._set_workflow_status('failed', name=workflow_name, message=str(exc))
             else:
-                self.workflowStatusLabel.setText('Workflow 已执行: {name}，等待状态结果。'.format(name=workflow_name))
+                self._set_workflow_status('succeeded', name=workflow_name)
 
     def _collect_sensor_values(self):
         values = {}
@@ -534,6 +894,14 @@ class B29SmcConsolePlugin(Plugin):
         combo_box.setCurrentIndex(index if index >= 0 else 0)
 
     @staticmethod
+    def _set_combo_current_data(combo_box, value):
+        if value is None:
+            return
+        index = combo_box.findData(value)
+        if index >= 0:
+            combo_box.setCurrentIndex(index)
+
+    @staticmethod
     def _read_widget_value(widget, descriptor):
         if descriptor.value_type == FieldValueType.BOOL:
             return widget.isChecked()
@@ -555,7 +923,7 @@ class B29SmcConsolePlugin(Plugin):
         self.previousStateValueLabel.setText(entry.previous_state or '-')
         self.lastEventValueLabel.setText(entry.last_event or '-')
         self.outputModeValueLabel.setText(entry.output_mode or '-')
-        self.reasonValueLabel.setText(_format_reason(entry))
+        self.reasonValueLabel.setText(_format_reason(entry, self._language))
 
     def _handle_trace_message(self, message):
         self._trace_signal_proxy.received.emit(message)
@@ -569,12 +937,16 @@ class B29SmcConsolePlugin(Plugin):
         self.traceListWidget.clear()
         for entry in self._trace_model.history():
             item = QListWidgetItem(
-                '{current} | {event} | prev: {previous} | mode: {mode} | {reason}'.format(
+                '{current_label}: {current} | {event_label}: {event} | {previous_label}: {previous} | {mode_label}: {mode} | {reason}'.format(
                     current=entry.current_state or '-',
                     event=entry.last_event or '-',
                     previous=entry.previous_state or '-',
                     mode=entry.output_mode or '-',
-                    reason=_format_reason(entry),
+                    current_label=_text(self._language, 'trace_current'),
+                    event_label=_text(self._language, 'trace_event'),
+                    previous_label=_text(self._language, 'trace_previous'),
+                    mode_label=_text(self._language, 'trace_mode'),
+                    reason=_format_reason(entry, self._language),
                 )
             )
             if entry.current_state in _TRACE_HIGHLIGHTS:

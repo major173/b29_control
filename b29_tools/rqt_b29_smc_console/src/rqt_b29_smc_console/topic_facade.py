@@ -1,3 +1,4 @@
+import threading
 from typing import Callable, Dict, Optional, Tuple
 
 try:
@@ -106,12 +107,17 @@ class TopicFacade:
         trace_callback: Optional[Callable[[AutoStateTrace], None]] = None,
         publisher_factory: Callable = None,
         subscriber_factory: Callable = None,
+        release_scheduler: Callable[[float, Callable[[], None]], object] = None,
+        pulse_hold_sec: float = 0.05,
     ):
         self._namespace = namespace
         self._composer = OverrideComposer()
         self._trace_callback = trace_callback or (lambda _message: None)
         self._publisher_factory = publisher_factory or rospy.Publisher
         self._subscriber_factory = subscriber_factory or rospy.Subscriber
+        self._release_scheduler = release_scheduler or self._default_release_scheduler
+        self._pulse_hold_sec = float(pulse_hold_sec)
+        self._pending_release_handles = []
         self._sensor_publisher = self._publisher_factory(
             _namespace_topic(namespace, 'sensor_input'),
             AutoSensorInput,
@@ -127,6 +133,29 @@ class TopicFacade:
             AutoStateTrace,
             self._trace_callback,
         )
+
+    @staticmethod
+    def _default_release_scheduler(delay_sec: float, callback: Callable[[], None]):
+        timer = threading.Timer(delay_sec, callback)
+        timer.daemon = True
+        timer.start()
+        return timer
+
+    def _schedule_release_publish(self, released: AutoDebugOverride) -> None:
+        handle_box = {}
+
+        def publish_released():
+            try:
+                self._override_publisher.publish(released)
+            finally:
+                handle = handle_box.get('handle')
+                if handle in self._pending_release_handles:
+                    self._pending_release_handles.remove(handle)
+
+        handle = self._release_scheduler(self._pulse_hold_sec, publish_released)
+        handle_box['handle'] = handle
+        if handle is not None:
+            self._pending_release_handles.append(handle)
 
     def publish_sensor_input(self, values: Dict[str, object]) -> AutoSensorInput:
         message = compose_sensor_input_message(values)
@@ -146,5 +175,5 @@ class TopicFacade:
     def pulse_override(self, field_name: str, value: object = True) -> Tuple[AutoDebugOverride, AutoDebugOverride]:
         pressed, released = self._composer.pulse(field_name, value)
         self._override_publisher.publish(pressed)
-        self._override_publisher.publish(released)
+        self._schedule_release_publish(released)
         return pressed, released
