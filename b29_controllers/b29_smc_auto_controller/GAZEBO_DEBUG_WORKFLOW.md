@@ -245,6 +245,8 @@ rostopic pub -1 "$SENSOR_TOPIC" b29_smc_auto_controller/AutoSensorInput \
 }'
 ```
 
+当进入CommsLoss时间超过阈值后会进入`envManualReset`,此时进入步骤10重置回Idle
+
 #### 对应事件
 
 - `evCommsLost`
