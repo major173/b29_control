@@ -388,6 +388,9 @@ java -jar third_party/smc/bin/Smc.jar -c++ -d gen/src -headerd gen/include sm/Ro
 
 ```bash
 java -jar third_party/smc/bin/Smc.jar -graph -glevel 1 -d gen sm/RobotFSM.sm
+
+# 转化为PNG图片
+dot -Tpng gen/RobotFSM_sm.dot -o gen/RobotFSM_sm.png
 ```
 
 生成后的 `RobotFSM_sm.h/.cpp` 应直接覆盖 `gen/` 目录中的同名文件，并重新构建。
