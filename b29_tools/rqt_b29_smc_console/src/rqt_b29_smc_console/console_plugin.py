@@ -22,7 +22,7 @@ except ImportError:  # pragma: no cover - fallback for smoke imports without ful
 
 try:
     from python_qt_binding import loadUi
-    from python_qt_binding.QtCore import QObject, Signal
+    from python_qt_binding.QtCore import QObject, Qt, Signal
     from python_qt_binding.QtGui import QColor
     from python_qt_binding.QtWidgets import (
         QApplication,
@@ -40,7 +40,7 @@ try:
     )
 except ImportError:  # pragma: no cover - fallback for non-catkin smoke tests
     from PyQt5 import uic
-    from PyQt5.QtCore import QObject, pyqtSignal as Signal
+    from PyQt5.QtCore import QObject, Qt, pyqtSignal as Signal
     from PyQt5.QtGui import QColor
     from PyQt5.QtWidgets import (
         QApplication,
@@ -74,6 +74,8 @@ _LANGUAGE_ITEMS = (
 _ACTION_PULSE = 'pulse'
 _ACTION_LATCH = 'latch'
 _ACTION_CLEAR = 'clear'
+_TRACE_MODE_KEY = 'key'
+_TRACE_MODE_RAW = 'raw'
 _TRACE_HIGHLIGHTS = {
     'SafeStop': QColor('#fde8e8'),
     'CommsLoss': QColor('#fff4cc'),
@@ -145,6 +147,13 @@ _TEXTS = {
         'workflow_idle': 'Ready to run workflow.',
         'workflow_sensor_failed': 'Sensor publish failed: {message}',
         'trace_title': 'Trace',
+        'trace_mode_label': 'View',
+        'trace_mode_key': 'Key Events',
+        'trace_mode_raw': 'Raw',
+        'trace_pause': 'Pause',
+        'trace_resume': 'Resume',
+        'trace_clear': 'Clear',
+        'trace_repeat': 'x{count} · {duration:.2f}s',
         'workflow_queued': 'Workflow queued: {name}',
         'workflow_failed': 'Workflow failed: {message}',
         'workflow_succeeded': 'Workflow complete: {name}, waiting for state result.',
@@ -194,6 +203,13 @@ _TEXTS = {
         'workflow_idle': '等待执行流程。',
         'workflow_sensor_failed': '传感器发布失败: {message}',
         'trace_title': '轨迹',
+        'trace_mode_label': '视图',
+        'trace_mode_key': '关键事件',
+        'trace_mode_raw': '原始流',
+        'trace_pause': '暂停',
+        'trace_resume': '继续',
+        'trace_clear': '清空',
+        'trace_repeat': 'x{count} · {duration:.2f}s',
         'workflow_queued': '已触发流程: {name}',
         'workflow_failed': '流程执行失败: {message}',
         'workflow_succeeded': '流程已执行: {name}，等待状态结果。',
@@ -314,6 +330,13 @@ def build_override_choices(registry, language=_LANGUAGE_EN):
 
 def build_workflow_choices(workflows_map):
     return [{'name': workflow_name, 'text': workflow_name} for workflow_name in workflows_map.keys()]
+
+
+def build_trace_mode_choices(language=_LANGUAGE_EN):
+    return [
+        {'name': _TRACE_MODE_KEY, 'text': _text(language, 'trace_mode_key')},
+        {'name': _TRACE_MODE_RAW, 'text': _text(language, 'trace_mode_raw')},
+    ]
 
 
 def format_mask_preview(active_values, registry, language=_LANGUAGE_EN):
@@ -452,6 +475,7 @@ class B29SmcConsolePlugin(Plugin):
         self._workflows_map = workflows_map or (runtime.get('build_default_workflows', lambda: {})())
         self._base_ready_sensor_payload = dict(runtime.get('base_ready_sensor_payload', {}))
         self._trace_model = trace_model or TraceModel()
+        self._trace_paused = False
         self._override_active_values = {}
         self._sensor_widgets = {}
         self._sensor_labels = {}
@@ -464,6 +488,7 @@ class B29SmcConsolePlugin(Plugin):
         self._build_sensor_inputs()
         self._configure_override_controls()
         self._configure_workflow_controls()
+        self._configure_trace_controls()
         self._bind_actions()
         self._apply_language(self._language)
         self._refresh_overview(None)
@@ -535,6 +560,10 @@ class B29SmcConsolePlugin(Plugin):
         self.workflowStatusLabel = self._widget.findChild(QLabel, 'workflowStatusLabel')
         self.runWorkflowButton = self._widget.findChild(QPushButton, 'runWorkflowButton')
         self.traceTitleLabel = self._widget.findChild(QLabel, 'traceTitleLabel')
+        self.traceModeLabel = self._widget.findChild(QLabel, 'traceModeLabel')
+        self.traceModeComboBox = self._widget.findChild(QComboBox, 'traceModeComboBox')
+        self.tracePauseButton = self._widget.findChild(QPushButton, 'tracePauseButton')
+        self.traceClearButton = self._widget.findChild(QPushButton, 'traceClearButton')
         self.traceListWidget = self._widget.findChild(QWidget, 'traceListWidget')
         self.sensorGroupsLayout = self._widget.findChild(QWidget, 'sensorScrollAreaContents').layout()
         self.namespaceValueLineEdit.setText(self._namespace)
@@ -594,6 +623,10 @@ class B29SmcConsolePlugin(Plugin):
         for choice in build_workflow_choices(self._workflows_map):
             self.workflowComboBox.addItem(choice['text'], choice['name'])
 
+    def _configure_trace_controls(self):
+        self._populate_trace_modes()
+        self.traceListWidget.setAlternatingRowColors(True)
+
     def _bind_actions(self):
         self.presetBaseReadyButton.clicked.connect(
             lambda: self._apply_sensor_preset(dict(self._base_ready_sensor_payload or _fallback_sensor_preset(self._sensor_registry)))
@@ -611,6 +644,9 @@ class B29SmcConsolePlugin(Plugin):
         self.overrideFloatValueSpinBox.valueChanged.connect(self._refresh_override_preview)
         self.sendOverrideButton.clicked.connect(self._send_override)
         self.runWorkflowButton.clicked.connect(self._run_workflow)
+        self.traceModeComboBox.currentIndexChanged.connect(self._handle_trace_mode_change)
+        self.tracePauseButton.clicked.connect(self._toggle_trace_pause)
+        self.traceClearButton.clicked.connect(self._clear_trace_history)
 
     def _populate_override_fields(self):
         current_field_name = self.overrideFieldComboBox.currentData()
@@ -631,6 +667,15 @@ class B29SmcConsolePlugin(Plugin):
         self._set_combo_current_data(self.overrideActionComboBox, current_action)
         self.overrideActionComboBox.blockSignals(False)
 
+    def _populate_trace_modes(self):
+        current_mode = self.traceModeComboBox.currentData() or _TRACE_MODE_KEY
+        self.traceModeComboBox.blockSignals(True)
+        self.traceModeComboBox.clear()
+        for choice in build_trace_mode_choices(self._language):
+            self.traceModeComboBox.addItem(choice['text'], choice['name'])
+        self._set_combo_current_data(self.traceModeComboBox, current_mode)
+        self.traceModeComboBox.blockSignals(False)
+
     def _handle_language_change(self, *_args):
         language = self.languageComboBox.currentData() if self.languageComboBox is not None else _LANGUAGE_EN
         self._apply_language(language)
@@ -644,7 +689,7 @@ class B29SmcConsolePlugin(Plugin):
         self._apply_override_language()
         self._apply_workflow_language()
         self._apply_overview_titles()
-        self._apply_trace_history_language()
+        self._apply_trace_language()
         self._apply_workflow_status()
 
     def _apply_static_texts(self):
@@ -716,7 +761,12 @@ class B29SmcConsolePlugin(Plugin):
         self.outputModeTitleLabel.setText(_text(self._language, 'output_mode'))
         self.reasonTitleLabel.setText(_text(self._language, 'reason'))
 
-    def _apply_trace_history_language(self):
+    def _apply_trace_language(self):
+        self.traceTitleLabel.setText(_text(self._language, 'trace_title'))
+        self.traceModeLabel.setText(_text(self._language, 'trace_mode_label'))
+        self._populate_trace_modes()
+        self.tracePauseButton.setText(_text(self._language, 'trace_resume' if self._trace_paused else 'trace_pause'))
+        self.traceClearButton.setText(_text(self._language, 'trace_clear'))
         self._refresh_overview(self._trace_model.latest())
         self._refresh_trace_history()
 
@@ -931,27 +981,95 @@ class B29SmcConsolePlugin(Plugin):
     def _apply_trace_message(self, message):
         entry = self._trace_model.update(message)
         self._refresh_overview(entry)
-        self._refresh_trace_history()
+        if self._trace_paused:
+            return
+        self._apply_trace_update()
 
     def _refresh_trace_history(self):
         self.traceListWidget.clear()
-        for entry in self._trace_model.history():
-            item = QListWidgetItem(
-                '{current_label}: {current} | {event_label}: {event} | {previous_label}: {previous} | {mode_label}: {mode} | {reason}'.format(
-                    current=entry.current_state or '-',
-                    event=entry.last_event or '-',
-                    previous=entry.previous_state or '-',
-                    mode=entry.output_mode or '-',
-                    current_label=_text(self._language, 'trace_current'),
-                    event_label=_text(self._language, 'trace_event'),
-                    previous_label=_text(self._language, 'trace_previous'),
-                    mode_label=_text(self._language, 'trace_mode'),
-                    reason=_format_reason(entry, self._language),
-                )
-            )
-            if entry.current_state in _TRACE_HIGHLIGHTS:
-                item.setBackground(_TRACE_HIGHLIGHTS[entry.current_state])
-            self.traceListWidget.addItem(item)
+        for history_entry in self._visible_trace_history():
+            self.traceListWidget.addItem(self._build_trace_item(history_entry))
+
+    def _apply_trace_update(self):
+        delta = self._trace_model.last_update_delta()
+        if delta is None:
+            return
+
+        if self._current_trace_mode() == _TRACE_MODE_RAW:
+            self.traceListWidget.insertItem(0, self._build_trace_item(delta.raw_entry))
+        elif delta.key_appended or self.traceListWidget.count() == 0:
+            self.traceListWidget.insertItem(0, self._build_trace_item(delta.key_entry))
+        else:
+            self._replace_trace_item(0, delta.key_entry)
+
+        visible_count = len(self._visible_trace_history())
+        while self.traceListWidget.count() > visible_count:
+            self.traceListWidget.takeItem(self.traceListWidget.count() - 1)
+
+    def _build_trace_item(self, history_entry):
+        item = QListWidgetItem(self._format_trace_row(history_entry))
+        self._apply_trace_item_background(item, history_entry.entry.current_state)
+        return item
+
+    def _replace_trace_item(self, row, history_entry):
+        item = self.traceListWidget.item(row)
+        if item is None:
+            self.traceListWidget.insertItem(row, self._build_trace_item(history_entry))
+            return
+        item.setText(self._format_trace_row(history_entry))
+        self._apply_trace_item_background(item, history_entry.entry.current_state)
+
+    def _format_trace_row(self, history_entry):
+        entry = history_entry.entry
+        segments = [
+            '{current_label}: {current}'.format(
+                current_label=_text(self._language, 'trace_current'),
+                current=entry.current_state or '-',
+            ),
+            '{event_label}: {event}'.format(
+                event_label=_text(self._language, 'trace_event'),
+                event=entry.last_event or '-',
+            ),
+            '{previous_label}: {previous}'.format(
+                previous_label=_text(self._language, 'trace_previous'),
+                previous=entry.previous_state or '-',
+            ),
+            '{mode_label}: {mode}'.format(
+                mode_label=_text(self._language, 'trace_mode'),
+                mode=entry.output_mode or '-',
+            ),
+            _format_reason(entry, self._language),
+        ]
+        return ' | '.join(segments)
+
+    @staticmethod
+    def _apply_trace_item_background(item, current_state):
+        highlight = _TRACE_HIGHLIGHTS.get(current_state)
+        if highlight is None:
+            item.setData(Qt.BackgroundRole, None)
+            return
+        item.setBackground(highlight)
+
+    def _visible_trace_history(self):
+        if self._current_trace_mode() == _TRACE_MODE_RAW:
+            return self._trace_model.raw_history()
+        return self._trace_model.key_history()
+
+    def _handle_trace_mode_change(self, *_args):
+        self._refresh_trace_history()
+
+    def _toggle_trace_pause(self):
+        self._trace_paused = not self._trace_paused
+        self.tracePauseButton.setText(_text(self._language, 'trace_resume' if self._trace_paused else 'trace_pause'))
+        if not self._trace_paused:
+            self._refresh_trace_history()
+
+    def _clear_trace_history(self):
+        self._trace_model.clear_history()
+        self._refresh_trace_history()
+
+    def _current_trace_mode(self):
+        return self.traceModeComboBox.currentData() or _TRACE_MODE_KEY
 
     def _wait_for_state(self, expected_state, timeout_sec):
         deadline = time.time() + float(timeout_sec or 0.0)

@@ -44,6 +44,24 @@ class TraceEntry:
 
 
 @dataclass(frozen=True)
+class TraceHistoryEntry:
+    entry: TraceEntry
+    repeat_count: int = 1
+    duration_sec: float = 0.0
+    first_seen_sec: float = 0.0
+    last_seen_sec: float = 0.0
+
+
+@dataclass(frozen=True)
+class TraceUpdateDelta:
+    latest: TraceEntry
+    raw_entry: TraceHistoryEntry
+    raw_appended: bool
+    key_entry: TraceHistoryEntry
+    key_appended: bool
+
+
+@dataclass(frozen=True)
 class WorkflowStep:
     action: str
     description: str
