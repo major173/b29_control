@@ -99,7 +99,6 @@ public:
 
   void setKDLSegment();
   void addChildren(const KDL::SegmentMap::const_iterator segment);
-  void updateTf(const ros::Time &time);
 
   bool loadProtocolConfig(ros::NodeHandle &root_nh);
   void jointSpeedTargetCallback(const std_msgs::Float64::ConstPtr &msg);
