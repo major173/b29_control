@@ -29,7 +29,6 @@ int main(int argc, char **argv) {
     hardware.read(current_time, dt);
     hardware.updateControllerManager(current_time, dt);
     hardware.write(current_time, dt);
-    //hardware.updateTf(current_time);
 
     previous_time = current_time;
     loop_rate.sleep();

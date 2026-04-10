@@ -11,12 +11,12 @@ namespace steering_engine_hw {
 bool StRobotHW::init(ros::NodeHandle &root_nh, ros::NodeHandle &robot_hw_nh) {
   //**series**//
 
-  serial::Timeout to = serial::Timeout::simpleTimeout(100); //创建timeout
-  serial::parity_t pt = serial::parity_t::parity_none; //创建校验位为0位
-  serial::bytesize_t bt = serial::bytesize_t::eightbits; //创建发送字节数为8位
+  serial::Timeout to = serial::Timeout::simpleTimeout(100);
+  serial::parity_t pt = serial::parity_t::parity_none;
+  serial::bytesize_t bt = serial::bytesize_t::eightbits;
   serial::flowcontrol_t ft =
-      serial::flowcontrol_t::flowcontrol_none; //创建数据流控制，不使用
-  serial::stopbits_t st = serial::stopbits_t::stopbits_one; //创建终止位为1位
+      serial::flowcontrol_t::flowcontrol_none;
+  serial::stopbits_t st = serial::stopbits_t::stopbits_one;
 
   std::string port_name = "/dev/usbSteering";
   int baudrate = 115200;
@@ -25,10 +25,10 @@ bool StRobotHW::init(ros::NodeHandle &root_nh, ros::NodeHandle &robot_hw_nh) {
   serial_.setPort(port_name);
   ROS_INFO("%s", port_name.c_str());
   serial_.setBaudrate(baudrate);
-  serial_.setParity(pt);      //设置校验位
-  serial_.setBytesize(bt);    //设置发送字节数
-  serial_.setFlowcontrol(ft); //设置数据流控制
-  serial_.setStopbits(st);    //设置终止位
+  serial_.setParity(pt);
+  serial_.setBytesize(bt);
+  serial_.setFlowcontrol(ft);
+  serial_.setStopbits(st);
   serial_.setTimeout(to);
   setInterface();
 
@@ -440,36 +440,6 @@ void StRobotHW::addChildren(const KDL::SegmentMap::const_iterator segment) {
   }
 }
 
-void StRobotHW::updateTf(const ros::Time &time) {
-  //  std::vector<std::string> link_names;
-  //  for (const auto &link : urdf_model_->links_) {
-  //    link_names.push_back(link.first);
-
-  std::vector<geometry_msgs::TransformStamped> tf_transforms;
-  geometry_msgs::TransformStamped tf_transform;
-  // Loop over all float segments
-  for (auto &item : segments_) {
-    auto jnt_iter = joint_states_segment_.find(item.first);
-    if (jnt_iter != joint_states_segment_.end())
-      tf_transform = tf2::kdlToTransform(
-          item.second.segment.pose(jnt_iter->second.getPosition()));
-    else {
-      ROS_WARN_THROTTLE(
-          10,
-          "Joint state with name: \"%s\" was received but not found in URDF",
-          item.first.c_str());
-      continue;
-    }
-    tf_transform.header.stamp = time;
-    tf_transform.header.frame_id = stripSlash(item.second.root);
-    tf_transform.child_frame_id = stripSlash(item.second.tip);
-    tf_transforms.push_back(tf_transform);
-  }
-  tf_broadcaster_.sendTransform(tf_transforms);
-
-  tf_transforms.clear();
-}
-
 void StRobotHW::pack(unsigned char *tx_buffer, unsigned char ctrl,
                      unsigned char *data) {
   memset(tx_buffer, 0, k_frame_length_);
@@ -488,7 +458,7 @@ void StRobotHW::pack(unsigned char *tx_buffer, unsigned char ctrl,
   // set crc
   frame->crc_ = getCrc8(tx_buffer, k_header_length_ + k_ctrl_length_ +
                                        k_length_ + k_data_length_);
-  // ser ender
+  // set ender
   for (int i = 0; i < 2; i++) {
     frame->ender_[i] = ender[i];
   }
