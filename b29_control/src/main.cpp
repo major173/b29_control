@@ -21,17 +21,14 @@ int main(int argc, char **argv) {
   ros::AsyncSpinner spinner(1);
   spinner.start();
 
-  static ros::Time previous_time = ros::Time::now();
+  ros::Time previous_time = ros::Time::now();
   while (ros::ok()) {
-    ros::spinOnce();
     ros::Time current_time = ros::Time::now();
     ros::Duration dt = current_time - previous_time;
 
-    hardware.read(ros::Time::now(), ros::Duration(1.0 / 200));
-    // In order real time ,this function maybe move into command sender
-    hardware.write(ros::Time::now(), ros::Duration(1.0 / 200));
-
+    hardware.read(current_time, dt);
     hardware.updateControllerManager(current_time, dt);
+    hardware.write(current_time, dt);
     hardware.updateTf(current_time);
 
     previous_time = current_time;
