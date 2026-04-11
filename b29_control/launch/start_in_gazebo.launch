@@ -57,5 +57,4 @@
 
     <!--    &lt;!&ndash; rviz &ndash;&gt;-->
     <!--    <node name="rviz" pkg="rviz" args="-d $(arg rvizconfig)" type="rviz"/>-->
-
 </launch>

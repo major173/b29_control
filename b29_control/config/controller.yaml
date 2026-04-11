@@ -8,6 +8,10 @@ b29_controller:
     type: robot_state_controller/RobotStateController
     publish_rate: 100
 
+  imu_sensor_controller:
+    type: imu_sensor_controller/ImuSensorController
+    publish_rate: 50
+
   # Position Controllers --------------------------------------
   b29_joint_controller:
     type: b29_controllers/B29JointController
@@ -23,9 +27,9 @@ b29_controller:
 
     clamp_try_vel_: 3.0;    # 尝试夹紧时给摩擦轮的速度 (rad/s)
     clamp_stall_vel_th_: 0.3    # 认为堵转的速度阈值
-    clamp_stall_duration_: 0.4;    # 堵转需要持续的时间（防抖）
-    clamp_step_size_: 0.001;  # 每次推杆推进的步长（m），建议 0.5~1mm
-    clamp_backoff_: 0.001;  # 夹紧成功后回退一点点距离，释放应力
+    clamp_stall_duration_: 0.4    # 堵转需要持续的时间（防抖）
+    clamp_step_size_: 0.001  # 每次推杆推进的步长（m），建议 0.5~1mm
+    clamp_backoff_: 0.001  # 夹紧成功后回退一点点距离，释放应力
 
     joint_names:
       left_first_leg_joint: "left_first_leg_joint"
@@ -36,6 +40,3 @@ b29_controller:
       right_rod_joint: "right_rod_joint"
       left_friction_wheel_joint: "left_friction_wheel_joint"
       right_friction_wheel_joint: "right_friction_wheel_joint"
-
-
-
