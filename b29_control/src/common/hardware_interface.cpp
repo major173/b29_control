@@ -30,6 +30,7 @@ bool StRobotHW::init(ros::NodeHandle &root_nh, ros::NodeHandle &robot_hw_nh) {
   serial_.setFlowcontrol(ft);
   serial_.setStopbits(st);
   serial_.setTimeout(to);
+  loadImuCovarianceParams(root_nh);
   setInterface();
 
   if (!loadUrdf(root_nh)) {
@@ -222,6 +223,58 @@ bool StRobotHW::setupTransmission(ros::NodeHandle &root_nh) {
   return true;
 }
 
+void StRobotHW::loadImuCovarianceParams(ros::NodeHandle &root_nh) {
+  auto toDouble = [](const XmlRpc::XmlRpcValue &value) -> double {
+    if (value.getType() == XmlRpc::XmlRpcValue::TypeInt) {
+      return static_cast<int>(value);
+    }
+    return static_cast<double>(value);
+  };
+
+  auto loadCovarianceDiagonal =
+      [&](const std::string &param_name, std::array<double, 9> &covariance,
+          const std::array<double, 3> &defaults) {
+        covariance = {defaults[0], 0.0, 0.0,
+                      0.0, defaults[1], 0.0,
+                      0.0, 0.0, defaults[2]};
+
+        XmlRpc::XmlRpcValue diag;
+        if (!root_nh.getParam(param_name, diag)) {
+          ROS_WARN_STREAM("Missing " << param_name << ", using defaults.");
+          return;
+        }
+        if (diag.getType() != XmlRpc::XmlRpcValue::TypeArray || diag.size() != 3) {
+          ROS_WARN_STREAM(param_name << " should be a 3-element array, using defaults.");
+          return;
+        }
+
+        for (int i = 0; i < 3; ++i) {
+          if (diag[i].getType() != XmlRpc::XmlRpcValue::TypeDouble &&
+              diag[i].getType() != XmlRpc::XmlRpcValue::TypeInt) {
+            ROS_WARN_STREAM(param_name << "[" << i << "] is not numeric, using defaults.");
+            return;
+          }
+        }
+
+        covariance = {toDouble(diag[0]), 0.0, 0.0,
+                      0.0, toDouble(diag[1]), 0.0,
+                      0.0, 0.0, toDouble(diag[2])};
+      };
+
+  loadCovarianceDiagonal("/steering_engine_hw/imu/orientation_covariance_diagonal",
+                         imu_orientation_covariance_,
+                         {0.0012, 0.0012, 0.0012});
+
+  loadCovarianceDiagonal("/steering_engine_hw/imu/angular_velocity_covariance_diagonal",
+                         imu_angular_velocity_covariance_,
+                         {0.0004, 0.0004, 0.0004});
+
+  loadCovarianceDiagonal("/steering_engine_hw/imu/linear_acceleration_covariance_diagonal",
+                         imu_linear_acceleration_covariance_,
+                         {0.01, 0.01, 0.01});
+}
+
+
 void StRobotHW::setInterface() {
   struct ActuatorSpec {
     const char *name;
@@ -241,15 +294,19 @@ void StRobotHW::setInterface() {
   };
 
   for (const auto &spec : actuator_specs) {
-    hardware_interface::ActuatorStateHandle state_handle(
+    hardware_interface::ActuatorStateHandle state_handle(   
         spec.name, &angle_[spec.index], &vel_[spec.index],
         &effort_[spec.index]);
+
     act_state_interface_.registerHandle(state_handle);
+
     hardware_interface::ActuatorHandle cmd_handle(
         act_state_interface_.getHandle(spec.name), &cmd_[spec.index]);
+
     if (spec.velocity_interface) {
-      velocity_act_interface_.registerHandle(cmd_handle);
-    } else {
+      velocity_act_interface_.registerHandle(cmd_handle);   
+    } 
+    else {
       position_act_interface_.registerHandle(cmd_handle);
     }
   }
@@ -465,15 +522,6 @@ void StRobotHW::pack(unsigned char *tx_buffer, unsigned char ctrl,
 }
 
 void StRobotHW::unpack(std::vector<uint8_t> rx_buffer) {
-  const size_t min_frame_length =
-      k_header_length_ + k_ctrl_length_ + k_length_ + k_crc_length_ +
-      k_tail_length_;
-  if (rx_buffer.size() < min_frame_length) {
-    ROS_WARN_THROTTLE(10, "Received message length %zu is too short",
-                      rx_buffer.size());
-    return;
-  }
-
   // check header and ender
   if (rx_buffer[0] != header[0] || rx_buffer[1] != header[1]) {
     return;
@@ -516,37 +564,64 @@ void StRobotHW::unpack(std::vector<uint8_t> rx_buffer) {
     return;
   }
 
-  const size_t entry_size = 1 + 4 + 4 + 4;
-  if (length % entry_size != 0) {
+  auto unpackFloat = [&rx_buffer](size_t &offset) -> float {
+    float value = 0.0f;
+    std::memcpy(&value, &rx_buffer[offset], sizeof(float));
+    offset += sizeof(float);
+    return value;
+  };
+
+  constexpr size_t kImuFloatCount = 10;
+  constexpr size_t kImuPayloadSize = kImuFloatCount * sizeof(float);
+  const size_t motor_id_length = 1;
+  const size_t entry_size = motor_id_length + 3 * sizeof(float);
+
+  const size_t motor_payload_size = static_cast<size_t>(length) - kImuPayloadSize;
+  if (motor_payload_size % entry_size != 0) {
     ROS_WARN_THROTTLE(10, "Received message data length %u is invalid", length);
     return;
   }
 
-  const size_t motor_count = length / entry_size;
+  const size_t motor_count = motor_payload_size / entry_size;
   size_t index = payload_start;
   for (size_t i = 0; i < motor_count; ++i) {
     const int id = rx_buffer[index++];
+    const float pos = unpackFloat(index);
+    const float vel = unpackFloat(index);
+    const float tor = unpackFloat(index);
+
     auto it = id_to_actuator_.find(id);
     if (it == id_to_actuator_.end()) {
-      index += 12;
       continue;
     }
 
     ActuatorIndex actuator_index = it->second;
-    float pos = 0.0f;
-    float vel = 0.0f;
-    float tor = 0.0f;
-    std::memcpy(&pos, &rx_buffer[index], sizeof(float));
-    index += sizeof(float);
-    std::memcpy(&vel, &rx_buffer[index], sizeof(float));
-    index += sizeof(float);
-    std::memcpy(&tor, &rx_buffer[index], sizeof(float));
-    index += sizeof(float);
-
-    angle_[actuator_index] = static_cast<double>(pos) - offset_vector_[actuator_index];
-    vel_[actuator_index] = static_cast<double>(vel);
+    angle_[actuator_index]  = static_cast<double>(pos) - offset_vector_[actuator_index];
+    vel_[actuator_index]    = static_cast<double>(vel);
     effort_[actuator_index] = static_cast<double>(tor);
   }
+
+  if (index + kImuPayloadSize > payload_start + static_cast<size_t>(length)) {
+    ROS_WARN_THROTTLE(10, "Received IMU payload is incomplete");
+    return;
+  }
+
+  const double acc_x = static_cast<double>(unpackFloat(index));
+  const double acc_y = static_cast<double>(unpackFloat(index));
+  const double acc_z = static_cast<double>(unpackFloat(index));
+
+  const double gyro_x = static_cast<double>(unpackFloat(index));
+  const double gyro_y = static_cast<double>(unpackFloat(index));
+  const double gyro_z = static_cast<double>(unpackFloat(index));
+
+  const double qw = static_cast<double>(unpackFloat(index));
+  const double qx = static_cast<double>(unpackFloat(index));
+  const double qy = static_cast<double>(unpackFloat(index));
+  const double qz = static_cast<double>(unpackFloat(index));
+
+  updateImuState(acc_x, acc_y, acc_z,
+                 gyro_x, gyro_y, gyro_z,
+                 qw, qx, qy, qz);
 }
 
 void StRobotHW::processRxBuffer() {
@@ -618,5 +693,40 @@ void StRobotHW::processRxBuffer() {
     unpack(frame);
     rx_buffer_.erase(rx_buffer_.begin(), rx_buffer_.begin() + expected_size);
   }
+}
+
+void StRobotHW::updateImuState(double acc_x, double acc_y, double acc_z,
+                               double gyro_x, double gyro_y, double gyro_z,
+                               double qw, double qx, double qy, double qz) {
+  imu_linear_acceleration_[0] = acc_x;
+  imu_linear_acceleration_[1] = acc_y;
+  imu_linear_acceleration_[2] = acc_z;
+
+  imu_angular_velocity_[0] = gyro_x;
+  imu_angular_velocity_[1] = gyro_y;
+  imu_angular_velocity_[2] = gyro_z;
+
+  tf2::Quaternion q(qx, qy, qz, qw);
+
+  const double norm2 = q.length2();
+  if (!std::isfinite(norm2) || norm2 < 1e-12) {
+    ROS_WARN_THROTTLE(1.0, "Received invalid IMU quaternion, fallback to RPY");
+  }
+
+  q.normalize();
+
+  // Maintain quaternion sign continuity to avoid q / -q jitter
+  const double dot = q.x() * imu_orientation_[0] +
+                     q.y() * imu_orientation_[1] +
+                     q.z() * imu_orientation_[2] +
+                     q.w() * imu_orientation_[3];
+  if (dot < 0.0) {
+    q = tf2::Quaternion(-q.x(), -q.y(), -q.z(), -q.w());
+  }
+
+  imu_orientation_[0] = q.x();
+  imu_orientation_[1] = q.y();
+  imu_orientation_[2] = q.z();
+  imu_orientation_[3] = q.w();
 }
 } // namespace steering_engine_hw

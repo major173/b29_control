@@ -94,6 +94,7 @@ public:
   void unpack(std::vector<uint8_t> rx_buffer);
 
   bool loadUrdf(ros::NodeHandle &root_nh);
+  void loadImuCovarianceParams(ros::NodeHandle &root_nh);
   void setInterface();
   bool setupTransmission(ros::NodeHandle &root_nh);
 
@@ -103,6 +104,11 @@ public:
   bool loadProtocolConfig(ros::NodeHandle &root_nh);
   void jointSpeedTargetCallback(const std_msgs::Float64::ConstPtr &msg);
   void clawSpeedTargetCallback(const std_msgs::Float64MultiArray::ConstPtr &msg);
+  
+  void updateImuState(double acc_x, double acc_y, double acc_z,
+                    double gyro_x, double gyro_y, double gyro_z,
+                    double qw, double qx, double qy, double qz);
+
   //去除输入字符串开头的斜线
   std::string stripSlash(const std::string &in) {
     if (!in.empty() && in[0] == '/') {
@@ -222,7 +228,7 @@ private:
   const unsigned char header[2] = {0x55, 0xaa};
   const unsigned char ender[2] = {0x0d, 0x0a};
   const unsigned char control_code_ = 0x01;
-
+  
   std::array<double, 4> imu_orientation_{{0.0, 0.0, 0.0, 1.0}};
   std::array<double, 9> imu_orientation_covariance_{{0.0}};
   std::array<double, 3> imu_angular_velocity_{{0.0, 0.0, 0.0}};

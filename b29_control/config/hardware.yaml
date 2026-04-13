@@ -2,6 +2,10 @@ steering_engine_hw:
   serial:
     port: "/dev/ttyUSB0"
     baudrate: 115200
+  imu:
+    orientation_covariance_diagonal: [0.0012, 0.0012, 0.0012]
+    angular_velocity_covariance_diagonal: [0.0004, 0.0004, 0.0004]
+    linear_acceleration_covariance_diagonal: [0.01, 0.01, 0.01]
   protocol:
     id_map:
       left_first_leg_joint: 0
