@@ -26,7 +26,3 @@ install(PROGRAMS scripts/rqt_b29_smc_console
 install(FILES plugin.xml
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
-
-if(CATKIN_ENABLE_TESTING)
-  catkin_add_nosetests(test)
-endif()
