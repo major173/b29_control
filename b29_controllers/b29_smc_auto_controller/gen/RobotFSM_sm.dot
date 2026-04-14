@@ -1,0 +1,81 @@
+digraph RobotFSM {
+
+    node
+        [shape=Mrecord width=1.5];
+
+    subgraph cluster_RobotFSM {
+
+        label="RobotFSM";
+
+        //
+        // States (Nodes)
+        //
+
+        "RobotFSM::Idle"
+            [label="{Idle|evAutoStart/\levTick/\l}"];
+
+        "RobotFSM::AutoInit"
+            [label="{AutoInit|Entry/\l&nbsp;&nbsp;&nbsp;startInitSequence;\lExit/\l&nbsp;&nbsp;&nbsp;clearInitFlags;\l|evAutoStart/\levTick/\l}"];
+
+        "RobotFSM::Traversing"
+            [label="{Traversing|Entry/\l&nbsp;&nbsp;&nbsp;setCruiseCommand;\l|evAutoStart/\levTick\l\[ctxt.isObstacleDetected()\]/\levTick\l\[ctxt.isObstacleNotDetected()\]/\l&nbsp;&nbsp;&nbsp;setCruiseCommand;\l}"];
+
+        "RobotFSM::CommsLoss"
+            [label="{CommsLoss|Entry/\l&nbsp;&nbsp;&nbsp;startReconnectTimer;\l&nbsp;&nbsp;&nbsp;alertCommsLoss;\lExit/\l&nbsp;&nbsp;&nbsp;stopReconnectTimer;\l|evAutoStart/\levTick/\levCommsLost/\l}"];
+
+        "RobotFSM::SafeStop"
+            [label="{SafeStop|Entry/\l&nbsp;&nbsp;&nbsp;disableAutoMode;\l&nbsp;&nbsp;&nbsp;alertSafeStop;\l&nbsp;&nbsp;&nbsp;logSafeStopEntry;\l|evAutoStart/\levTick/\levCommsLost/\levEmergencyStop/\l}"];
+
+        "%start"
+            [label="" shape=circle style=filled fillcolor=black width=0.25];
+
+        //
+        // Transitions (Edges)
+        //
+
+        "RobotFSM::Idle" -> "RobotFSM::AutoInit"
+            [label="evAutoStart\l\[ctxt.canStartAuto()\]/\llogIdleToAutoInit;\linitAutoMode;\l"];
+
+        "RobotFSM::Idle" -> "RobotFSM::CommsLoss"
+            [label="evCommsLost/\lreportCommsLoss;\l"];
+
+        "RobotFSM::Idle" -> "RobotFSM::SafeStop"
+            [label="evEmergencyStop/\lreportEmergencyStopIdle;\l"];
+
+        "RobotFSM::AutoInit" -> "RobotFSM::Traversing"
+            [label="evTick\l\[ctxt.isReadyToTraverse()\]/\llogAutoInitToTraversing;\lsetCruiseCommand;\l"];
+
+        "RobotFSM::AutoInit" -> "RobotFSM::SafeStop"
+            [label="evInitFailed/\lreportErrorAutoInitFailed;\l"];
+
+        "RobotFSM::AutoInit" -> "RobotFSM::CommsLoss"
+            [label="evCommsLost/\lreportCommsLoss;\l"];
+
+        "RobotFSM::AutoInit" -> "RobotFSM::SafeStop"
+            [label="evEmergencyStop/\lreportEmergencyStopInit;\l"];
+
+        "RobotFSM::Traversing" -> "RobotFSM::Idle"
+            [label="evAutoRunPause/\lreportAutoRunPause;\l"];
+
+        "RobotFSM::Traversing" -> "RobotFSM::CommsLoss"
+            [label="evCommsLost/\lreportCommsLoss;\l"];
+
+        "RobotFSM::Traversing" -> "RobotFSM::SafeStop"
+            [label="evEmergencyStop/\lreportEmergencyStopTraversal;\l"];
+
+        "RobotFSM::CommsLoss" -> "RobotFSM::Idle"
+            [label="evCommsRestored/\llogCommsRestored;\lalertCommsRestored;\l"];
+
+        "RobotFSM::CommsLoss" -> "RobotFSM::SafeStop"
+            [label="evReconnectTimeout/\lreportReconnectTimeout;\l"];
+
+        "RobotFSM::CommsLoss" -> "RobotFSM::SafeStop"
+            [label="evEmergencyStop/\lreportEmergencyStopCommsLoss;\l"];
+
+        "RobotFSM::SafeStop" -> "RobotFSM::Idle"
+            [label="evManualReset/\lresetFaultFlags;\llogSafeStopToIdle;\l"];
+
+        "%start" -> "RobotFSM::Idle"
+    }
+
+}

@@ -1,0 +1,212 @@
+// RobotFSM.sm
+// Task 3 最小状态机：以本文件作为 SMC 单一事实源。
+
+%class RobotContext
+%fsmclass RobotFSMContext
+%fsmfile RobotFSM_sm
+%header b29_smc_auto_controller/robot_context.h
+%start RobotFSM::Idle
+%access public
+
+%map RobotFSM
+%%
+
+Idle
+{
+    evAutoStart
+        [ctxt.canStartAuto()]
+        AutoInit
+        {
+            logIdleToAutoInit();
+            initAutoMode();
+        }
+
+    evAutoStart
+        nil
+        {
+        }
+
+    evTick
+        nil
+        {
+        }
+
+    evCommsLost
+        CommsLoss
+        {
+            reportCommsLoss();
+        }
+
+    evEmergencyStop
+        SafeStop
+        {
+            reportEmergencyStopIdle();
+        }
+}
+
+AutoInit
+    Entry { startInitSequence(); }
+    Exit  { clearInitFlags(); }
+{
+    evAutoStart
+        nil
+        {
+        }
+
+    evTick
+        [ctxt.isReadyToTraverse()]
+        Traversing
+        {
+            logAutoInitToTraversing();
+            setCruiseCommand();
+        }
+
+    evTick
+        nil
+        {
+        }
+
+    evInitFailed
+        SafeStop
+        {
+            reportErrorAutoInitFailed();
+        }
+
+    evCommsLost
+        CommsLoss
+        {
+            reportCommsLoss();
+        }
+
+    evEmergencyStop
+        SafeStop
+        {
+            reportEmergencyStopInit();
+        }
+}
+
+Traversing
+    Entry
+    {
+        setCruiseCommand();
+    }
+{
+    evAutoStart
+        nil
+        {
+        }
+
+    evAutoRunPause
+        Idle
+        {
+            reportAutoRunPause();
+        }
+
+    evTick
+        [ctxt.isObstacleDetected()]
+        nil
+        {
+        }
+
+    evTick
+        [ctxt.isObstacleNotDetected()]
+        nil
+        {
+            setCruiseCommand();
+        }
+
+    evCommsLost
+        CommsLoss
+        {
+            reportCommsLoss();
+        }
+
+    evEmergencyStop
+        SafeStop
+        {
+            reportEmergencyStopTraversal();
+        }
+}
+
+CommsLoss
+    Entry
+    {
+        startReconnectTimer();
+        alertCommsLoss();
+    }
+    Exit
+    {
+        stopReconnectTimer();
+    }
+{
+    evAutoStart
+        nil
+        {
+        }
+
+    evTick
+        nil
+        {
+        }
+
+    evCommsLost
+        nil
+        {
+        }
+
+    evCommsRestored
+        Idle
+        {
+            logCommsRestored();
+            alertCommsRestored();
+        }
+
+    evReconnectTimeout
+        SafeStop
+        {
+            reportReconnectTimeout();
+        }
+
+    evEmergencyStop
+        SafeStop
+        {
+            reportEmergencyStopCommsLoss();
+        }
+}
+
+SafeStop
+    Entry
+    {
+        disableAutoMode();
+        alertSafeStop();
+        logSafeStopEntry();
+    }
+{
+    evAutoStart
+        nil
+        {
+        }
+
+    evTick
+        nil
+        {
+        }
+
+    evCommsLost
+        nil
+        {
+        }
+
+    evEmergencyStop
+        nil
+        {
+        }
+
+    evManualReset
+        Idle
+        {
+            resetFaultFlags();
+            logSafeStopToIdle();
+        }
+}
+%%

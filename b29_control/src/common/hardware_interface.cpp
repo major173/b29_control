@@ -128,7 +128,7 @@ void StRobotHW::write(const ros::Time &time, const ros::Duration &period) {
     packFloat(static_cast<float>(joint_angle_target));
   }
 
-  if (memcmp(data.data(), last_send_data.data(), data.size()) != 0) {
+  if (true) {
     pack(tx_buffer_, control_code_, data.data());
     tx_len_ = sizeof(tx_buffer_);
     try {

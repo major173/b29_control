@@ -39,4 +39,57 @@ b29_controller:
       right_second_leg_joint: "right_second_leg_joint"
       right_rod_joint: "right_rod_joint"
       left_friction_wheel_joint: "left_friction_wheel_joint"
+<<<<<<< HEAD
       right_friction_wheel_joint: "right_friction_wheel_joint"
+=======
+      right_friction_wheel_joint: "right_friction_wheel_joint"
+
+  b29_smc_auto_controller:
+    type: b29_smc_auto_controller/B29SmcAutoController
+    publish_rate: 50
+    posture_roll_limit: 0.035
+    posture_pitch_limit: 0.035
+    joint_names:
+      left_first_leg_joint: "left_first_leg_joint"
+      left_second_leg_joint: "left_second_leg_joint"
+      left_rod_joint: "left_rod_joint"
+      right_first_leg_joint: "right_first_leg_joint"
+      right_second_leg_joint: "right_second_leg_joint"
+      right_rod_joint: "right_rod_joint"
+      left_friction_wheel_joint: "left_friction_wheel_joint"
+      right_friction_wheel_joint: "right_friction_wheel_joint"
+    imu_names: "base_imu"
+
+  left_first_leg_joint_position_controller:
+    type: position_controllers/JointPositionController
+    joint: left_first_leg_joint
+
+  left_second_leg_joint_position_controller:
+    type: position_controllers/JointPositionController
+    joint: left_second_leg_joint
+
+  left_rod_joint_position_controller:
+    type: position_controllers/JointPositionController
+    joint: left_rod_joint
+
+  right_first_leg_joint_position_controller:
+    type: position_controllers/JointPositionController
+    joint: right_first_leg_joint
+
+  right_second_leg_joint_position_controller:
+    type: position_controllers/JointPositionController
+    joint: right_second_leg_joint
+
+  right_rod_joint_position_controller:
+    type: position_controllers/JointPositionController
+    joint: right_rod_joint
+
+  left_friction_wheel_joint_velocity_controller:
+    type: velocity_controllers/JointVelocityController
+    joint: left_friction_wheel_joint
+
+  right_friction_wheel_joint_velocity_controller:
+    type: velocity_controllers/JointVelocityController
+    joint: right_friction_wheel_joint
+
+>>>>>>> origin/dev/controllers

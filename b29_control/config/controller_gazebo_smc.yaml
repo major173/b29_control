@@ -1,0 +1,3 @@
+b29_controller:
+  b29_smc_auto_controller:
+    output_mode: safe_hold

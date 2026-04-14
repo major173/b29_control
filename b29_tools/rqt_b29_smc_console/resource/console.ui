@@ -1,0 +1,717 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>B29SmcConsoleWidget</class>
+ <widget class="QWidget" name="B29SmcConsoleWidget">
+  <property name="windowTitle">
+   <string>B29 SMC Console</string>
+  </property>
+  <property name="styleSheet">
+   <string notr="true">QWidget#B29SmcConsoleWidget {
+  background: #f4f7fb;
+  color: #17324d;
+}
+QFrame[card=&quot;true&quot;] {
+  background: #ffffff;
+  border: 1px solid #d8e1eb;
+  border-radius: 14px;
+}
+QLabel[sectionTitle=&quot;true&quot;] {
+  font-size: 16px;
+  font-weight: 700;
+  color: #12385a;
+}
+QLabel[valueRole=&quot;primary&quot;] {
+  font-size: 18px;
+  font-weight: 700;
+  color: #0f2740;
+}
+QPushButton {
+  min-height: 32px;
+  border-radius: 8px;
+  padding: 6px 12px;
+  border: 1px solid #2b6cb0;
+  background: #2b6cb0;
+  color: #ffffff;
+}
+QPushButton[secondary=&quot;true&quot;] {
+  border-color: #bfd0e3;
+  background: #eef4fb;
+  color: #1d4061;
+}
+QLineEdit, QComboBox, QDoubleSpinBox, QListWidget {
+  min-height: 30px;
+  border: 1px solid #c6d4e1;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 4px 8px;
+}
+QGroupBox {
+  font-weight: 700;
+  border: 1px solid #dce6ef;
+  border-radius: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+}
+QGroupBox::title {
+  left: 12px;
+  padding: 0 4px;
+}
+</string>
+  </property>
+  <layout class="QVBoxLayout" name="rootLayout">
+   <property name="spacing">
+    <number>12</number>
+   </property>
+   <property name="leftMargin">
+    <number>12</number>
+   </property>
+   <property name="topMargin">
+    <number>12</number>
+   </property>
+   <property name="rightMargin">
+    <number>12</number>
+   </property>
+   <property name="bottomMargin">
+    <number>12</number>
+   </property>
+   <item>
+    <widget class="QFrame" name="headerCard">
+     <property name="card" stdset="0">
+      <bool>true</bool>
+     </property>
+     <layout class="QHBoxLayout" name="headerLayout">
+      <property name="leftMargin">
+       <number>16</number>
+      </property>
+      <property name="topMargin">
+       <number>16</number>
+      </property>
+      <property name="rightMargin">
+       <number>16</number>
+      </property>
+      <property name="bottomMargin">
+       <number>16</number>
+      </property>
+      <item>
+       <layout class="QVBoxLayout" name="titleLayout">
+        <item>
+         <widget class="QLabel" name="headerTitleLabel">
+          <property name="sectionTitle" stdset="0">
+           <bool>true</bool>
+          </property>
+          <property name="text">
+           <string>B29 SMC Dashboard Console</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLabel" name="headerSubtitleLabel">
+          <property name="text">
+           <string>监控状态、组织传感器输入、发送覆盖命令并执行默认 workflow。</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <spacer name="headerSpacer">
+        <property name="orientation">
+         <enum>Qt::Horizontal</enum>
+        </property>
+        <property name="sizeHint" stdset="0">
+         <size>
+          <width>40</width>
+          <height>20</height>
+         </size>
+        </property>
+       </spacer>
+      </item>
+      <item>
+       <layout class="QFormLayout" name="namespaceFormLayout">
+        <item row="0" column="0">
+         <widget class="QLabel" name="namespaceLabel">
+          <property name="text">
+           <string>Namespace</string>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="1">
+         <widget class="QLineEdit" name="namespaceValueLineEdit">
+          <property name="readOnly">
+           <bool>true</bool>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="0">
+         <widget class="QLabel" name="languageLabel">
+          <property name="text">
+           <string>Language</string>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="1">
+         <widget class="QComboBox" name="languageComboBox"/>
+        </item>
+       </layout>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="mainRowLayout">
+     <property name="spacing">
+      <number>12</number>
+     </property>
+     <item>
+      <layout class="QVBoxLayout" name="leftColumnLayout">
+       <property name="spacing">
+        <number>12</number>
+       </property>
+       <item>
+        <widget class="QFrame" name="overviewCard">
+         <property name="card" stdset="0">
+          <bool>true</bool>
+         </property>
+         <layout class="QVBoxLayout" name="overviewCardLayout">
+          <property name="leftMargin">
+           <number>16</number>
+          </property>
+          <property name="topMargin">
+           <number>16</number>
+          </property>
+          <property name="rightMargin">
+           <number>16</number>
+          </property>
+          <property name="bottomMargin">
+           <number>16</number>
+          </property>
+          <item>
+           <widget class="QLabel" name="overviewTitleLabel">
+            <property name="sectionTitle" stdset="0">
+             <bool>true</bool>
+            </property>
+            <property name="text">
+             <string>Overview</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <layout class="QGridLayout" name="overviewGridLayout">
+            <property name="horizontalSpacing">
+             <number>12</number>
+            </property>
+            <property name="verticalSpacing">
+             <number>10</number>
+            </property>
+            <item row="0" column="0">
+             <widget class="QLabel" name="overviewNamespaceTitleLabel">
+              <property name="text">
+               <string>namespace</string>
+              </property>
+             </widget>
+            </item>
+            <item row="0" column="1">
+             <widget class="QLabel" name="overviewNamespaceValueLabel">
+              <property name="text">
+               <string>-</string>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="0">
+             <widget class="QLabel" name="currentStateTitleLabel">
+              <property name="text">
+               <string>current_state</string>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="1">
+             <widget class="QLabel" name="currentStateValueLabel">
+              <property name="valueRole" stdset="0">
+               <bool>true</bool>
+              </property>
+              <property name="text">
+               <string>-</string>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="0">
+             <widget class="QLabel" name="previousStateTitleLabel">
+              <property name="text">
+               <string>previous_state</string>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="1">
+             <widget class="QLabel" name="previousStateValueLabel">
+              <property name="text">
+               <string>-</string>
+              </property>
+             </widget>
+            </item>
+            <item row="3" column="0">
+             <widget class="QLabel" name="lastEventTitleLabel">
+              <property name="text">
+               <string>last_event</string>
+              </property>
+             </widget>
+            </item>
+            <item row="3" column="1">
+             <widget class="QLabel" name="lastEventValueLabel">
+              <property name="text">
+               <string>-</string>
+              </property>
+             </widget>
+            </item>
+            <item row="4" column="0">
+             <widget class="QLabel" name="outputModeTitleLabel">
+              <property name="text">
+               <string>output_mode</string>
+              </property>
+             </widget>
+            </item>
+            <item row="4" column="1">
+             <widget class="QLabel" name="outputModeValueLabel">
+              <property name="text">
+               <string>-</string>
+              </property>
+             </widget>
+            </item>
+            <item row="5" column="0">
+             <widget class="QLabel" name="reasonTitleLabel">
+              <property name="text">
+               <string>reason</string>
+              </property>
+             </widget>
+            </item>
+            <item row="5" column="1">
+             <widget class="QLabel" name="reasonValueLabel">
+              <property name="wordWrap">
+               <bool>true</bool>
+              </property>
+              <property name="text">
+               <string>-</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QFrame" name="sensorInputsCard">
+         <property name="card" stdset="0">
+          <bool>true</bool>
+         </property>
+         <layout class="QVBoxLayout" name="sensorInputsCardLayout">
+          <property name="leftMargin">
+           <number>16</number>
+          </property>
+          <property name="topMargin">
+           <number>16</number>
+          </property>
+          <property name="rightMargin">
+           <number>16</number>
+          </property>
+          <property name="bottomMargin">
+           <number>16</number>
+          </property>
+          <item>
+           <widget class="QLabel" name="sensorInputsTitleLabel">
+            <property name="sectionTitle" stdset="0">
+             <bool>true</bool>
+            </property>
+            <property name="text">
+             <string>Sensor Input</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <layout class="QHBoxLayout" name="sensorPresetButtonsLayout">
+            <item>
+             <widget class="QPushButton" name="presetBaseReadyButton">
+              <property name="secondary" stdset="0">
+               <bool>true</bool>
+              </property>
+              <property name="text">
+               <string>基础可启动</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QPushButton" name="presetCommsLossButton">
+              <property name="secondary" stdset="0">
+               <bool>true</bool>
+              </property>
+              <property name="text">
+               <string>通信丢失</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QPushButton" name="presetObstacleButton">
+              <property name="secondary" stdset="0">
+               <bool>true</bool>
+              </property>
+              <property name="text">
+               <string>障碍出现</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QPushButton" name="presetClearButton">
+              <property name="secondary" stdset="0">
+               <bool>true</bool>
+              </property>
+              <property name="text">
+               <string>全部清空</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <widget class="QScrollArea" name="sensorScrollArea">
+            <property name="widgetResizable">
+             <bool>true</bool>
+            </property>
+            <widget class="QWidget" name="sensorScrollAreaContents">
+             <layout class="QVBoxLayout" name="sensorGroupsLayout">
+              <property name="leftMargin">
+               <number>0</number>
+              </property>
+              <property name="topMargin">
+               <number>0</number>
+              </property>
+              <property name="rightMargin">
+               <number>0</number>
+              </property>
+              <property name="bottomMargin">
+               <number>0</number>
+              </property>
+             </layout>
+            </widget>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="publishSensorInputButton">
+            <property name="text">
+             <string>发布当前 Sensor Input</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+      </layout>
+     </item>
+     <item>
+      <layout class="QVBoxLayout" name="rightColumnLayout">
+       <property name="spacing">
+        <number>12</number>
+       </property>
+       <item>
+        <widget class="QFrame" name="overrideComposerCard">
+         <property name="card" stdset="0">
+          <bool>true</bool>
+         </property>
+         <layout class="QVBoxLayout" name="overrideComposerCardLayout">
+          <property name="leftMargin">
+           <number>16</number>
+          </property>
+          <property name="topMargin">
+           <number>16</number>
+          </property>
+          <property name="rightMargin">
+           <number>16</number>
+          </property>
+          <property name="bottomMargin">
+           <number>16</number>
+          </property>
+          <item>
+           <widget class="QLabel" name="overrideComposerTitleLabel">
+            <property name="sectionTitle" stdset="0">
+             <bool>true</bool>
+            </property>
+            <property name="text">
+             <string>Override Composer</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <layout class="QFormLayout" name="overrideComposerFormLayout">
+            <item row="0" column="0">
+             <widget class="QLabel" name="overrideFieldLabel">
+              <property name="text">
+               <string>字段</string>
+              </property>
+             </widget>
+            </item>
+            <item row="0" column="1">
+             <widget class="QComboBox" name="overrideFieldComboBox"/>
+            </item>
+            <item row="1" column="0">
+             <widget class="QLabel" name="overrideActionLabel">
+              <property name="text">
+               <string>动作</string>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="1">
+             <widget class="QComboBox" name="overrideActionComboBox"/>
+            </item>
+            <item row="2" column="0">
+             <widget class="QLabel" name="overrideValueLabel">
+              <property name="text">
+               <string>值</string>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="1">
+             <widget class="QStackedWidget" name="overrideValueStackedWidget">
+              <widget class="QWidget" name="overrideBoolPage">
+               <layout class="QHBoxLayout" name="overrideBoolPageLayout">
+                <property name="leftMargin">
+                 <number>0</number>
+                </property>
+                <property name="topMargin">
+                 <number>0</number>
+                </property>
+                <property name="rightMargin">
+                 <number>0</number>
+                </property>
+                <property name="bottomMargin">
+                 <number>0</number>
+                </property>
+                <item>
+                 <widget class="QCheckBox" name="overrideBoolValueCheckBox">
+                  <property name="text">
+                   <string>激活</string>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </widget>
+              <widget class="QWidget" name="overrideEnumPage">
+               <layout class="QHBoxLayout" name="overrideEnumPageLayout">
+                <property name="leftMargin">
+                 <number>0</number>
+                </property>
+                <property name="topMargin">
+                 <number>0</number>
+                </property>
+                <property name="rightMargin">
+                 <number>0</number>
+                </property>
+                <property name="bottomMargin">
+                 <number>0</number>
+                </property>
+                <item>
+                 <widget class="QComboBox" name="overrideEnumValueComboBox"/>
+                </item>
+               </layout>
+              </widget>
+              <widget class="QWidget" name="overrideFloatPage">
+               <layout class="QHBoxLayout" name="overrideFloatPageLayout">
+                <property name="leftMargin">
+                 <number>0</number>
+                </property>
+                <property name="topMargin">
+                 <number>0</number>
+                </property>
+                <property name="rightMargin">
+                 <number>0</number>
+                </property>
+                <property name="bottomMargin">
+                 <number>0</number>
+                </property>
+                <item>
+                 <widget class="QDoubleSpinBox" name="overrideFloatValueSpinBox">
+                  <property name="decimals">
+                   <number>3</number>
+                  </property>
+                  <property name="minimum">
+                   <double>-9999.000000000000000</double>
+                  </property>
+                  <property name="maximum">
+                   <double>9999.000000000000000</double>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </widget>
+             </widget>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <widget class="QLabel" name="overrideActionHintLabel">
+            <property name="wordWrap">
+             <bool>true</bool>
+            </property>
+            <property name="text">
+             <string>-</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLabel" name="overrideMaskPreviewLabel">
+            <property name="wordWrap">
+             <bool>true</bool>
+            </property>
+            <property name="text">
+             <string>-</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="sendOverrideButton">
+            <property name="text">
+             <string>发送 Override</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QFrame" name="workflowCard">
+         <property name="card" stdset="0">
+          <bool>true</bool>
+         </property>
+         <layout class="QVBoxLayout" name="workflowCardLayout">
+          <property name="leftMargin">
+           <number>16</number>
+          </property>
+          <property name="topMargin">
+           <number>16</number>
+          </property>
+          <property name="rightMargin">
+           <number>16</number>
+          </property>
+          <property name="bottomMargin">
+           <number>16</number>
+          </property>
+          <item>
+           <widget class="QLabel" name="workflowTitleLabel">
+            <property name="sectionTitle" stdset="0">
+             <bool>true</bool>
+            </property>
+            <property name="text">
+             <string>Workflow</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QComboBox" name="workflowComboBox"/>
+          </item>
+          <item>
+           <widget class="QLabel" name="workflowStatusLabel">
+            <property name="wordWrap">
+             <bool>true</bool>
+            </property>
+            <property name="text">
+             <string>Ready to run workflow.</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="runWorkflowButton">
+            <property name="text">
+             <string>执行流程</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QFrame" name="traceCard">
+         <property name="card" stdset="0">
+          <bool>true</bool>
+         </property>
+         <layout class="QVBoxLayout" name="traceCardLayout">
+          <property name="leftMargin">
+           <number>16</number>
+          </property>
+          <property name="topMargin">
+           <number>16</number>
+          </property>
+          <property name="rightMargin">
+           <number>16</number>
+          </property>
+          <property name="bottomMargin">
+           <number>16</number>
+          </property>
+          <item>
+           <layout class="QHBoxLayout" name="traceHeaderLayout">
+            <item>
+             <widget class="QLabel" name="traceTitleLabel">
+              <property name="sectionTitle" stdset="0">
+               <bool>true</bool>
+              </property>
+              <property name="text">
+               <string>Trace</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <spacer name="traceHeaderSpacer">
+              <property name="orientation">
+               <enum>Qt::Horizontal</enum>
+              </property>
+              <property name="sizeHint" stdset="0">
+               <size>
+                <width>40</width>
+                <height>20</height>
+               </size>
+              </property>
+             </spacer>
+            </item>
+            <item>
+             <widget class="QLabel" name="traceModeLabel">
+              <property name="text">
+               <string>View</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QComboBox" name="traceModeComboBox"/>
+            </item>
+            <item>
+             <widget class="QPushButton" name="tracePauseButton">
+              <property name="secondary" stdset="0">
+               <bool>true</bool>
+              </property>
+              <property name="text">
+               <string>Pause</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QPushButton" name="traceClearButton">
+              <property name="secondary" stdset="0">
+               <bool>true</bool>
+              </property>
+              <property name="text">
+               <string>Clear</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <widget class="QListWidget" name="traceListWidget"/>
+          </item>
+         </layout>
+        </widget>
+       </item>
+      </layout>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

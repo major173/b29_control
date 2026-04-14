@@ -1,0 +1,25 @@
+events:
+  - time: 0.2
+    fields:
+      - auto_start_requested
+      - lower_alive
+      - imu_ready
+      - posture_ready
+      - grip_confirmed
+    auto_start_requested: true
+    lower_alive: true
+    imu_ready: true
+    posture_ready: true
+    grip_confirmed: true
+  - time: 0.4
+    fields:
+      - auto_start_requested
+    auto_start_requested: false
+  - time: 1.0
+    fields:
+      - obstacle_detected
+      - obstacle_type
+      - classification_stable
+    obstacle_detected: true
+    obstacle_type: 1
+    classification_stable: true
