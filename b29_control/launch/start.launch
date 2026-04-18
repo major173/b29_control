@@ -18,21 +18,19 @@
         pkg="controller_manager"
         type="spawner"
         output="screen"
-        args="load
-          b29_controller/joint_state_controller
-          b29_controller/robot_state_controller
-          b29_controller/b29_joint_controller
-          b29_controller/imu_sensor_controller
-          b29_controller/b29_smc_auto_controller
-          b29_controller/left_first_leg_joint_position_controller
-          b29_controller/left_second_leg_joint_position_controller
-          b29_controller/left_rod_joint_position_controller
-          b29_controller/right_first_leg_joint_position_controller
-          b29_controller/right_second_leg_joint_position_controller
-          b29_controller/right_rod_joint_position_controller
-          b29_controller/left_friction_wheel_joint_velocity_controller
-          b29_controller/right_friction_wheel_joint_velocity_controller
-        "/>
+        args="b29_controller/joint_state_controller
+              b29_controller/robot_state_controller
+              b29_controller/b29_joint_controller
+              b29_controller/imu_sensor_controller
+              b29_controller/b29_smc_auto_controller
+              b29_controller/left_first_leg_joint_position_controller
+              b29_controller/left_second_leg_joint_position_controller
+              b29_controller/left_rod_joint_position_controller
+              b29_controller/right_first_leg_joint_position_controller
+              b29_controller/right_second_leg_joint_position_controller
+              b29_controller/right_rod_joint_position_controller
+              b29_controller/left_friction_wheel_joint_velocity_controller
+              b29_controller/right_friction_wheel_joint_velocity_controller" />
 
   <node name="imu_topic_relay"
         pkg="topic_tools"

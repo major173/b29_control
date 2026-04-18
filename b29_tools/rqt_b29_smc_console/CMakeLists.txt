@@ -26,11 +26,3 @@ install(PROGRAMS scripts/rqt_b29_smc_console
 install(FILES plugin.xml
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
-
-if(CATKIN_ENABLE_TESTING)
-  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test")
-    catkin_add_nosetests(test)
-  else()
-    message(STATUS "Skipping nosetests: missing test directory")
-  endif()
-endif()

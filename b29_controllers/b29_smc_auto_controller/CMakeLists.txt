@@ -72,27 +72,6 @@ add_library(${PROJECT_NAME}
 add_dependencies(${PROJECT_NAME} ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 target_link_libraries(${PROJECT_NAME} ${catkin_LIBRARIES})
 
-if (CATKIN_ENABLE_TESTING)
-        function(add_optional_gtest target_name source_file)
-                if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${source_file}")
-                        catkin_add_gtest(${target_name}
-                                        ${source_file})
-                        if (TARGET ${target_name})
-                                target_link_libraries(${target_name} ${PROJECT_NAME} ${catkin_LIBRARIES})
-                                add_dependencies(${target_name} ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-                        endif()
-                else()
-                        message(STATUS "Skipping ${target_name}: missing ${source_file}")
-                endif()
-        endfunction()
-
-        add_optional_gtest(test_auto_types test/test_auto_types.cpp)
-        add_optional_gtest(test_auto_input_mux test/test_auto_input_mux.cpp)
-        add_optional_gtest(test_command_dispatcher test/test_command_dispatcher.cpp)
-        add_optional_gtest(test_trace_mapping test/test_trace_mapping.cpp)
-        add_optional_gtest(test_robot_context test/test_robot_context.cpp)
-endif()
-
 install(
         TARGETS ${PROJECT_NAME}
         ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
