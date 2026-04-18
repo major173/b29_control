@@ -12,7 +12,8 @@ find_package(catkin REQUIRED COMPONENTS
         roscpp
         sensor_msgs
         smclib
-        std_msgs)
+        std_msgs
+        b29_control)
 
 set(SMC_VENDOR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/smc")
 set(SMC_VENDOR_INCLUDE_DIR "${SMC_VENDOR_DIR}/include")
@@ -72,30 +73,24 @@ add_dependencies(${PROJECT_NAME} ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EX
 target_link_libraries(${PROJECT_NAME} ${catkin_LIBRARIES})
 
 if (CATKIN_ENABLE_TESTING)
-    catkin_add_gtest(test_auto_types
-            test/test_auto_types.cpp)
-    target_link_libraries(test_auto_types ${catkin_LIBRARIES})
-    add_dependencies(test_auto_types ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+        function(add_optional_gtest target_name source_file)
+                if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${source_file}")
+                        catkin_add_gtest(${target_name}
+                                        ${source_file})
+                        if (TARGET ${target_name})
+                                target_link_libraries(${target_name} ${PROJECT_NAME} ${catkin_LIBRARIES})
+                                add_dependencies(${target_name} ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+                        endif()
+                else()
+                        message(STATUS "Skipping ${target_name}: missing ${source_file}")
+                endif()
+        endfunction()
 
-    catkin_add_gtest(test_auto_input_mux
-            test/test_auto_input_mux.cpp)
-    target_link_libraries(test_auto_input_mux ${PROJECT_NAME} ${catkin_LIBRARIES})
-    add_dependencies(test_auto_input_mux ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-
-    catkin_add_gtest(test_command_dispatcher
-            test/test_command_dispatcher.cpp)
-    target_link_libraries(test_command_dispatcher ${PROJECT_NAME} ${catkin_LIBRARIES})
-    add_dependencies(test_command_dispatcher ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-
-    catkin_add_gtest(test_trace_mapping
-            test/test_trace_mapping.cpp)
-    target_link_libraries(test_trace_mapping ${PROJECT_NAME} ${catkin_LIBRARIES})
-    add_dependencies(test_trace_mapping ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-
-    catkin_add_gtest(test_robot_context
-            test/test_robot_context.cpp)
-    target_link_libraries(test_robot_context ${PROJECT_NAME} ${catkin_LIBRARIES})
-    add_dependencies(test_robot_context ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+        add_optional_gtest(test_auto_types test/test_auto_types.cpp)
+        add_optional_gtest(test_auto_input_mux test/test_auto_input_mux.cpp)
+        add_optional_gtest(test_command_dispatcher test/test_command_dispatcher.cpp)
+        add_optional_gtest(test_trace_mapping test/test_trace_mapping.cpp)
+        add_optional_gtest(test_robot_context test/test_robot_context.cpp)
 endif()
 
 install(

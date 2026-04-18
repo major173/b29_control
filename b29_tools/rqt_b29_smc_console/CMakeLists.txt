@@ -28,5 +28,9 @@ install(FILES plugin.xml
 )
 
 if(CATKIN_ENABLE_TESTING)
-  catkin_add_nosetests(test)
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test")
+    catkin_add_nosetests(test)
+  else()
+    message(STATUS "Skipping nosetests: missing test directory")
+  endif()
 endif()

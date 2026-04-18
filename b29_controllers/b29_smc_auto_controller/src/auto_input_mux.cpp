@@ -48,6 +48,11 @@ void AutoInputMux::setDebugOverride(const AutoDebugOverride& debug_override)
   has_debug_override_ = true;
 }
 
+void AutoInputMux::setSmcState(const steering_engine_hw::SmcStateData& smc_state)
+{
+  smc_state_ = smc_state;
+}
+
 AutoInputSnapshot AutoInputMux::buildSnapshot() const
 {
   AutoInputSnapshot snapshot;

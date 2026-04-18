@@ -39,9 +39,6 @@ b29_controller:
       right_second_leg_joint: "right_second_leg_joint"
       right_rod_joint: "right_rod_joint"
       left_friction_wheel_joint: "left_friction_wheel_joint"
-<<<<<<< HEAD
-      right_friction_wheel_joint: "right_friction_wheel_joint"
-=======
       right_friction_wheel_joint: "right_friction_wheel_joint"
 
   b29_smc_auto_controller:
@@ -92,4 +89,3 @@ b29_controller:
     type: velocity_controllers/JointVelocityController
     joint: right_friction_wheel_joint
 
->>>>>>> origin/dev/controllers

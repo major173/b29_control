@@ -112,7 +112,7 @@ find_package(catkin REQUIRED COMPONENTS
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
         INCLUDE_DIRS include
-        LIBRARIES b29_control
+        # LIBRARIES b29_control
         CATKIN_DEPENDS rm_common
         # DEPENDS system_lib
 )

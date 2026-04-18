@@ -8,6 +8,8 @@
 #include <b29_smc_auto_controller/AutoSensorInput.h>
 #include <b29_smc_auto_controller/auto_types.h>
 
+#include <steering_engine/common/smc_state_interface.h>
+
 namespace b29_smc_auto_controller
 {
 class AutoInputMux
@@ -20,6 +22,7 @@ public:
   void setSensorInput(const AutoSensorInput& sensor_input);
   void setControlRequest(const AutoControlRequest& control_request);
   void setDebugOverride(const AutoDebugOverride& debug_override);
+  void setSmcState(const steering_engine_hw::SmcStateData& smc_state);
 
   AutoInputSnapshot buildSnapshot() const;
 
@@ -35,6 +38,7 @@ private:
   AutoSensorInput sensor_input_{};
   AutoControlRequest control_request_{};
   AutoDebugOverride debug_override_{};
+  steering_engine_hw::SmcStateData smc_state_{};
   bool has_joint_state_{false};
   bool has_base_imu_{false};
   bool has_sensor_input_{false};

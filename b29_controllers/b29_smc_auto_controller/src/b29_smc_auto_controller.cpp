@@ -64,6 +64,7 @@ void B29SmcAutoController::update(const ros::Time& time, const ros::Duration& /*
   input_mux_.setDebugOverride(debug_override_);
   input_mux_.setJointState(buildJointStateMessage(time));
   input_mux_.setBaseImu(buildBaseImuMessage(time));
+  input_mux_.setSmcState(smc_state_handle_.getData()); 
 
   robot_context_.setInputSnapshot(input_mux_.buildSnapshot());
   robot_context_.tick50Hz();
@@ -91,8 +92,11 @@ bool B29SmcAutoController::initInterfaces(hardware_interface::RobotHW* robot_hw)
   position_joint_interface_ = robot_hw->get<hardware_interface::PositionJointInterface>();
   velocity_joint_interface_ = robot_hw->get<hardware_interface::VelocityJointInterface>();
   imu_sensor_interface_ = robot_hw->get<hardware_interface::ImuSensorInterface>();
+  smc_state_interface_ = robot_hw->get<steering_engine_hw::SmcStateInterface>();
 
-  return joint_state_interface_ && position_joint_interface_ && velocity_joint_interface_ && imu_sensor_interface_;
+  return joint_state_interface_ && position_joint_interface_ 
+          && velocity_joint_interface_ && imu_sensor_interface_ 
+          && smc_state_interface_;
 }
 
 bool B29SmcAutoController::loadParameters(ros::NodeHandle& controller_nh)
@@ -106,6 +110,7 @@ bool B29SmcAutoController::loadParameters(ros::NodeHandle& controller_nh)
   controller_nh.param<std::string>("joint_names/left_friction_wheel_joint", wheel_joint_names_[0], wheel_joint_names_[0]);
   controller_nh.param<std::string>("joint_names/right_friction_wheel_joint", wheel_joint_names_[1], wheel_joint_names_[1]);
   controller_nh.param<std::string>("imu_names", base_imu_name_, base_imu_name_);
+  controller_nh.param<std::string>("smc_state_name", smc_state_name_, smc_state_name_);
   std::string output_mode_name = toString(output_mode_);
   controller_nh.param<std::string>("output_mode", output_mode_name, output_mode_name);
 
@@ -136,6 +141,7 @@ void B29SmcAutoController::buildHandles()
   }
 
   base_imu_handle_ = imu_sensor_interface_->getHandle(base_imu_name_);
+  smc_state_handle_ = smc_state_interface_->getHandle(smc_state_name_);
 }
 
 void B29SmcAutoController::sensorInputCallback(const AutoSensorInput::ConstPtr& msg)
@@ -200,6 +206,12 @@ sensor_msgs::Imu B29SmcAutoController::buildBaseImuMessage(const ros::Time& stam
 
   return imu;
 }
+
+steering_engine_hw::SmcStateData B29SmcAutoController::getSmcState(steering_engine_hw::SmcStateHandle smc_state_handle) const
+{
+  return smc_state_handle.getData();
+}
+
 }  // namespace b29_smc_auto_controller
 
 PLUGINLIB_EXPORT_CLASS(b29_smc_auto_controller::B29SmcAutoController, controller_interface::ControllerBase)

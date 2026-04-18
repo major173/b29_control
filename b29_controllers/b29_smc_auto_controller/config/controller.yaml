@@ -9,3 +9,4 @@ b29_smc_auto_controller:
     left_friction_wheel_joint: left_friction_wheel_joint
     right_friction_wheel_joint: right_friction_wheel_joint
   imu_names: base_imu
+  smc_state_name: smc_state

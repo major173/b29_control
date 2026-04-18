@@ -55,6 +55,11 @@ bool StRobotHW::init(ros::NodeHandle &root_nh, ros::NodeHandle &robot_hw_nh) {
     return false;
   }
 
+  if(!initSmcStateData(smc_state_data_)) {
+    ROS_ERROR("Failed to init smc state data");
+    return false;
+  }
+
   if (serial_.isOpen())
     return true;
   try {
@@ -68,6 +73,10 @@ bool StRobotHW::init(ros::NodeHandle &root_nh, ros::NodeHandle &robot_hw_nh) {
 
 void StRobotHW::read(const ros::Time &time, const ros::Duration &period) {
   if (serial_.available()) {
+    const ros::Time now = time;
+    smc_state_data_.lower_alive = !last_rx_time_.isZero() &&
+                                  (now - last_rx_time_).toSec() < 0.2;
+
     rx_len_ = static_cast<int>(serial_.available());
     std::vector<uint8_t> incoming;
     const size_t bytes_read = serial_.read(incoming, static_cast<size_t>(rx_len_));
@@ -324,6 +333,11 @@ void StRobotHW::setInterface() {
   imu_sensor_interface_.registerHandle(imu_handle);
   registerInterface(&imu_sensor_interface_);
   registerInterface(&robot_state_interface_);
+
+  // interface for smc
+  SmcStateHandle smc_handle("smc_state", &smc_state_data_);
+  smc_state_interface_.registerHandle(smc_handle);
+  registerInterface(&smc_state_interface_);
 }
 
 bool StRobotHW::loadProtocolConfig(ros::NodeHandle &root_nh) {
@@ -622,6 +636,8 @@ void StRobotHW::unpack(std::vector<uint8_t> rx_buffer) {
   updateImuState(acc_x, acc_y, acc_z,
                  gyro_x, gyro_y, gyro_z,
                  qw, qx, qy, qz);
+
+  last_rx_time_ = ros::Time::now();
 }
 
 void StRobotHW::processRxBuffer() {
@@ -728,5 +744,14 @@ void StRobotHW::updateImuState(double acc_x, double acc_y, double acc_z,
   imu_orientation_[1] = q.y();
   imu_orientation_[2] = q.z();
   imu_orientation_[3] = q.w();
+}
+
+bool StRobotHW::initSmcStateData(SmcStateData &data) {
+  data.lower_alive = false;
+  data.imu_ready = false;
+  data.grip_confirmed = false;
+  data.joint_fault = false;
+  data.grip_fault = false;
+  return true;
 }
 } // namespace steering_engine_hw

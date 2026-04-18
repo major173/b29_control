@@ -16,7 +16,7 @@
 #define __packed __attribute__((packed))
 
 // ROS
-#include <XmlRpcValue.h>
+#include <xmlrpcpp/XmlRpcValue.h>
 #include <geometry_msgs/TransformStamped.h>
 #include <kdl/tree.hpp>
 #include <kdl_parser/kdl_parser.hpp>
@@ -39,6 +39,9 @@
 #include <transmission_interface/transmission_interface.h>
 #include <transmission_interface/transmission_interface_loader.h>
 #include <transmission_interface/transmission_loader.h>
+
+// SMC
+#include "steering_engine/common/smc_state_interface.h"
 
 namespace steering_engine_hw {
 
@@ -108,6 +111,8 @@ public:
   void updateImuState(double acc_x, double acc_y, double acc_z,
                     double gyro_x, double gyro_y, double gyro_z,
                     double qw, double qx, double qy, double qz);
+
+  bool initSmcStateData(SmcStateData &data);
 
   //去除输入字符串开头的斜线
   std::string stripSlash(const std::string &in) {
@@ -189,6 +194,13 @@ private:
   std::vector<hardware_interface::JointStateHandle> joint_state_handles_{};
   std::vector<hardware_interface::JointHandle> position_joint_handles_{};
   std::vector<hardware_interface::JointHandle> velocity_joint_handles_{};
+
+  // interface for smc
+  SmcStateInterface smc_state_interface_;
+
+  // data for smc
+  SmcStateData smc_state_data_{};
+  ros::Time last_rx_time_{};
 
   // transmission of the robot
   transmission_interface::ActuatorToJointStateInterface
