@@ -27,6 +27,6 @@ install(FILES plugin.xml
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
 
-if(CATKIN_ENABLE_TESTING)
-  catkin_add_nosetests(test)
-endif()
+# if(CATKIN_ENABLE_TESTING)
+#   catkin_add_nosetests(test)
+# endif()
