@@ -40,6 +40,9 @@
 #include <transmission_interface/transmission_interface_loader.h>
 #include <transmission_interface/transmission_loader.h>
 
+//smc
+#include <steering_engine/common/auto_state_interface.h>
+
 namespace steering_engine_hw {
 
 class SegmentPair {
@@ -132,6 +135,8 @@ public:
     }
   }
   void processRxBuffer();
+
+
   static unsigned char getCrc8(unsigned char *ptr, unsigned short len) {
     unsigned char crc;
     unsigned char i;
@@ -185,6 +190,12 @@ private:
   hardware_interface::PositionJointInterface position_joint_interface_;
   hardware_interface::ImuSensorInterface imu_sensor_interface_;
   rm_control::RobotStateInterface robot_state_interface_;
+
+  //interface for auto state
+  AutoStateInterface auto_state_interface_;
+  //data for auto state
+  AutoStateData auto_state_data_{};
+
   std::shared_ptr<controller_manager::ControllerManager> controller_manager_;
   std::vector<hardware_interface::JointStateHandle> joint_state_handles_{};
   std::vector<hardware_interface::JointHandle> position_joint_handles_{};

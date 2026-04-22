@@ -114,6 +114,7 @@ struct AutoInputSnapshot
   bool post_check_passed{false};
   bool post_check_failed{false};
   bool auto_run_pause{false};
+  bool IsImuOnline_{false};
 };
 
 struct AutoControlCommand

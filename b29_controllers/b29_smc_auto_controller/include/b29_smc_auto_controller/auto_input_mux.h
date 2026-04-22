@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: BSD-3-Clause
 #pragma once
 
+#include <cstdint>
+
 #include <sensor_msgs/Imu.h>
 #include <sensor_msgs/JointState.h>
 
@@ -20,6 +22,7 @@ public:
   void setSensorInput(const AutoSensorInput& sensor_input);
   void setControlRequest(const AutoControlRequest& control_request);
   void setDebugOverride(const AutoDebugOverride& debug_override);
+  void IsImuOnline();
 
   AutoInputSnapshot buildSnapshot() const;
 
@@ -40,5 +43,11 @@ private:
   bool has_sensor_input_{false};
   bool has_control_request_{false};
   bool has_debug_override_{false};
+  bool IsImuOnline_{false};
+  std::uint32_t imu_valid_streak_{0};
+  std::uint32_t imu_invalid_streak_{0};
+  sensor_msgs::Imu imu_prev_frame_{};
+  bool has_imu_prev_frame_{false};
+  std::uint32_t imu_stale_streak_{0};
 };
 }  // namespace b29_smc_auto_controller
