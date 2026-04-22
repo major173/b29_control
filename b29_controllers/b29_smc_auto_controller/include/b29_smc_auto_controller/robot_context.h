@@ -8,6 +8,7 @@
 #include <b29_smc_auto_controller/auto_types.h>
 #include <b29_smc_auto_controller/command_dispatcher.h>
 #include <b29_smc_auto_controller/robot_actions.h>
+#include <b29_smc_auto_controller/auto_input_mux.h>
 
 #include <RobotFSM_sm.h>
 
@@ -35,7 +36,7 @@ public:
   b29_smc_auto_controller::AutoStateTrace buildTraceMessage(const ros::Time& stamp) const;
 
   bool isLowerAlive() const override;
-  bool isImuReady() const override;
+  bool isImuReady() override;
   bool isPostureReady() const override;
   bool isGripConfirmed() const override;
   bool isObstacleDetected() const override;

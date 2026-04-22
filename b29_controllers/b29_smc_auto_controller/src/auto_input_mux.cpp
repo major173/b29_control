@@ -3,14 +3,55 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace b29_smc_auto_controller
 {
 namespace
 {
+constexpr double kImuQuatNormMin = 0.7;
+constexpr double kImuQuatNormMax = 1.3;
+constexpr double kImuGyroAbsMax = 35.0;
+constexpr double kImuAccAbsMax = 80.0;
+constexpr std::uint32_t kImuOnlineOnStreak = 3;
+constexpr std::uint32_t kImuOnlineOffStreak = 3;
+constexpr std::uint32_t kImuFrozenOffStreak = 5;
+
 double clampUnit(double value)
 {
   return std::max(-1.0, std::min(1.0, value));
+}
+
+bool isFiniteVec3(const geometry_msgs::Vector3& vec)
+{
+  return std::isfinite(vec.x) && std::isfinite(vec.y) && std::isfinite(vec.z);
+}
+
+double quaternionNorm(const geometry_msgs::Quaternion& q)
+{
+  return std::sqrt(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
+}
+
+bool withinAbsLimit(const geometry_msgs::Vector3& vec, double limit)
+{
+  return std::abs(vec.x) <= limit && std::abs(vec.y) <= limit && std::abs(vec.z) <= limit;
+}
+
+bool exactlySameVec3(const geometry_msgs::Vector3& lhs, const geometry_msgs::Vector3& rhs)
+{
+  return lhs.x == rhs.x && lhs.y == rhs.y && lhs.z == rhs.z;
+}
+
+bool exactlySameQuat(const geometry_msgs::Quaternion& lhs, const geometry_msgs::Quaternion& rhs)
+{
+  return lhs.x == rhs.x && lhs.y == rhs.y && lhs.z == rhs.z && lhs.w == rhs.w;
+}
+
+bool exactlySameImuPayload(const sensor_msgs::Imu& lhs, const sensor_msgs::Imu& rhs)
+{
+  return exactlySameQuat(lhs.orientation, rhs.orientation) &&
+         exactlySameVec3(lhs.angular_velocity, rhs.angular_velocity) &&
+         exactlySameVec3(lhs.linear_acceleration, rhs.linear_acceleration);
 }
 }  // namespace
 
@@ -28,6 +69,7 @@ void AutoInputMux::setBaseImu(const sensor_msgs::Imu& base_imu)
 {
   base_imu_ = base_imu;
   has_base_imu_ = true;
+  IsImuOnline();
 }
 
 void AutoInputMux::setSensorInput(const AutoSensorInput& sensor_input)
@@ -51,6 +93,7 @@ void AutoInputMux::setDebugOverride(const AutoDebugOverride& debug_override)
 AutoInputSnapshot AutoInputMux::buildSnapshot() const
 {
   AutoInputSnapshot snapshot;
+  snapshot.IsImuOnline_ = IsImuOnline_;
 
   if (has_sensor_input_)
   {
@@ -113,6 +156,82 @@ bool AutoInputMux::isPostureWithinThreshold() const
   const double pitch = std::asin(clampUnit(sinp));
 
   return std::abs(roll) <= config_.max_abs_roll_rad && std::abs(pitch) <= config_.max_abs_pitch_rad;
+}
+
+void AutoInputMux::IsImuOnline()
+{
+  if (!has_base_imu_)
+  {
+    IsImuOnline_ = false;
+    imu_valid_streak_ = 0;
+    imu_invalid_streak_ = 0;
+    imu_stale_streak_ = 0;
+    has_imu_prev_frame_ = false;
+    return;
+  }
+
+  const bool finite_orientation = std::isfinite(base_imu_.orientation.x) && std::isfinite(base_imu_.orientation.y) &&
+                                  std::isfinite(base_imu_.orientation.z) && std::isfinite(base_imu_.orientation.w);
+  const bool finite_angular_velocity = isFiniteVec3(base_imu_.angular_velocity);
+  const bool finite_linear_acceleration = isFiniteVec3(base_imu_.linear_acceleration);
+  const double quat_norm = quaternionNorm(base_imu_.orientation);
+  const bool quat_norm_valid = quat_norm >= kImuQuatNormMin && quat_norm <= kImuQuatNormMax;
+  const bool gyro_in_range = withinAbsLimit(base_imu_.angular_velocity, kImuGyroAbsMax);
+  const bool acc_in_range = withinAbsLimit(base_imu_.linear_acceleration, kImuAccAbsMax);
+
+  const bool valid_frame = finite_orientation && finite_angular_velocity && finite_linear_acceleration &&
+                           quat_norm_valid && gyro_in_range && acc_in_range;
+
+  bool frozen_payload = false;
+  if (has_imu_prev_frame_)
+  {
+    frozen_payload = exactlySameImuPayload(base_imu_, imu_prev_frame_);
+  }
+
+  if (frozen_payload)
+  {
+    if (imu_stale_streak_ < std::numeric_limits<std::uint32_t>::max())
+    {
+      ++imu_stale_streak_;
+    }
+  }
+  else
+  {
+    imu_stale_streak_ = 0;
+  }
+
+  imu_prev_frame_ = base_imu_;
+  has_imu_prev_frame_ = true;
+
+  const bool stale_fault = imu_stale_streak_ >= kImuFrozenOffStreak;
+  const bool effective_valid_frame = valid_frame && !stale_fault;
+
+  if (effective_valid_frame)
+  {
+    if (imu_valid_streak_ < std::numeric_limits<std::uint32_t>::max())
+    {
+      ++imu_valid_streak_;
+    }
+    imu_invalid_streak_ = 0;
+  }
+  else
+  {
+    if (imu_invalid_streak_ < std::numeric_limits<std::uint32_t>::max())
+    {
+      ++imu_invalid_streak_;
+    }
+    imu_valid_streak_ = 0;
+  }
+
+  if (imu_valid_streak_ >= kImuOnlineOnStreak)
+  {
+    IsImuOnline_ = true;
+  }
+  if (imu_invalid_streak_ >= kImuOnlineOffStreak || stale_fault)
+  {
+    IsImuOnline_ = false;
+  }
+
 }
 
 ObstacleType AutoInputMux::toObstacleType(uint8_t obstacle_type)

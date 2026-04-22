@@ -235,8 +235,10 @@ bool RobotContext::isLowerAlive() const
   return input_.lower_alive;
 }
 
-bool RobotContext::isImuReady() const
+bool RobotContext::isImuReady()
 {
+  if(input_.IsImuOnline_ )input_.imu_ready=true;
+  else input_.imu_ready=false;
   return input_.imu_ready;
 }
 
@@ -367,6 +369,7 @@ void RobotContext::resetFaultFlags()
 
 bool RobotContext::canStartAuto() const
 {
+
   return isLowerAlive() && isImuReady() && isPostureReady() && isGripConfirmed();
 }
 

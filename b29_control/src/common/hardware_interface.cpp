@@ -649,4 +649,48 @@ void StRobotHW::processRxBuffer() {
     rx_buffer_.erase(rx_buffer_.begin(), rx_buffer_.begin() + expected_size);
   }
 }
+
+void StRobotHW::updateImuState(double acc_x, double acc_y, double acc_z,
+                               double gyro_x, double gyro_y, double gyro_z,
+                               double qw, double qx, double qy, double qz) {
+  imu_linear_acceleration_[0] = acc_x;
+  imu_linear_acceleration_[1] = acc_y;
+  imu_linear_acceleration_[2] = acc_z;
+
+  imu_angular_velocity_[0] = gyro_x;
+  imu_angular_velocity_[1] = gyro_y;
+  imu_angular_velocity_[2] = gyro_z;
+
+  tf2::Quaternion q(qx, qy, qz, qw);
+
+  const double norm2 = q.length2();
+  if (!std::isfinite(norm2) || norm2 < 1e-12) {
+    ROS_WARN_THROTTLE(1.0, "Received invalid IMU quaternion, fallback to RPY");
+  }
+
+  q.normalize();
+
+  // Maintain quaternion sign continuity to avoid q / -q jitter
+  const double dot = q.x() * imu_orientation_[0] +
+                     q.y() * imu_orientation_[1] +
+                     q.z() * imu_orientation_[2] +
+                     q.w() * imu_orientation_[3];
+  if (dot < 0.0) {
+    q = tf2::Quaternion(-q.x(), -q.y(), -q.z(), -q.w());
+  }
+
+  imu_orientation_[0] = q.x();
+  imu_orientation_[1] = q.y();
+  imu_orientation_[2] = q.z();
+  imu_orientation_[3] = q.w();
+}
+
+bool StRobotHW::initSmcStateData(SmcStateData &data) {
+  data.lower_alive=false;
+  data.imu_ready=false;
+  data.grip_confirmed=false;
+  data.joint_fault=false;
+  data.grip_fault=false;
+  return true;
+
 } // namespace steering_engine_hw

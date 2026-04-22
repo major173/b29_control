@@ -21,7 +21,7 @@ bool B29SmcAutoController::init(hardware_interface::RobotHW* robot_hw, ros::Node
 
   if (!loadParameters(controller_nh))
   {
-    return false;
+    return false;  9
   }
 
   buildHandles();
