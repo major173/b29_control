@@ -8,7 +8,6 @@
 #include <b29_smc_auto_controller/auto_types.h>
 #include <b29_smc_auto_controller/command_dispatcher.h>
 #include <b29_smc_auto_controller/robot_actions.h>
-#include <b29_smc_auto_controller/auto_input_mux.h>
 
 #include <RobotFSM_sm.h>
 
@@ -92,7 +91,7 @@ private:
   void setCommandReason(std::string_view reason);
   static b29_smc_auto_controller::DriveMode toAutoDriveMode(robot_fsm::DriveMode mode);
 
-  mutable b29_smc_auto_controller::AutoInputSnapshot input_{};
+  b29_smc_auto_controller::AutoInputSnapshot input_{};
   b29_smc_auto_controller::AutoControlCommand command_{};
   RobotFSMContext fsm_;
   bool started_{false};

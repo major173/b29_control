@@ -74,6 +74,5 @@ private:
   ros::Subscriber debug_override_sub_;
   ros::Publisher state_trace_pub_;
   bool initialized_{false};
-  
 };
 }  // namespace b29_smc_auto_controller
