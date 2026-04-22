@@ -684,13 +684,6 @@ void StRobotHW::updateImuState(double acc_x, double acc_y, double acc_z,
   imu_orientation_[2] = q.z();
   imu_orientation_[3] = q.w();
 }
+}
 
-bool StRobotHW::initSmcStateData(SmcStateData &data) {
-  data.lower_alive=false;
-  data.imu_ready=false;
-  data.grip_confirmed=false;
-  data.joint_fault=false;
-  data.grip_fault=false;
-  return true;
-
-} // namespace steering_engine_hw
+ // namespace steering_engine_hw

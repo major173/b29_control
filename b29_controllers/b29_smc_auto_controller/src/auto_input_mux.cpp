@@ -9,10 +9,6 @@ namespace b29_smc_auto_controller
 {
 namespace
 {
-constexpr double kImuQuatNormMin = 0.7;
-constexpr double kImuQuatNormMax = 1.3;
-constexpr double kImuGyroAbsMax = 35.0;
-constexpr double kImuAccAbsMax = 80.0;
 constexpr std::uint32_t kImuOnlineOnStreak = 3;
 constexpr std::uint32_t kImuOnlineOffStreak = 3;
 constexpr std::uint32_t kImuFrozenOffStreak = 5;
@@ -175,12 +171,7 @@ void AutoInputMux::IsImuOnline()
   const bool finite_angular_velocity = isFiniteVec3(base_imu_.angular_velocity);
   const bool finite_linear_acceleration = isFiniteVec3(base_imu_.linear_acceleration);
   const double quat_norm = quaternionNorm(base_imu_.orientation);
-  const bool quat_norm_valid = quat_norm >= kImuQuatNormMin && quat_norm <= kImuQuatNormMax;
-  const bool gyro_in_range = withinAbsLimit(base_imu_.angular_velocity, kImuGyroAbsMax);
-  const bool acc_in_range = withinAbsLimit(base_imu_.linear_acceleration, kImuAccAbsMax);
-
-  const bool valid_frame = finite_orientation && finite_angular_velocity && finite_linear_acceleration &&
-                           quat_norm_valid && gyro_in_range && acc_in_range;
+  const bool valid_frame = finite_orientation && finite_angular_velocity && finite_linear_acceleration ;
 
   bool frozen_payload = false;
   if (has_imu_prev_frame_)
@@ -231,7 +222,6 @@ void AutoInputMux::IsImuOnline()
   {
     IsImuOnline_ = false;
   }
-
 }
 
 ObstacleType AutoInputMux::toObstacleType(uint8_t obstacle_type)

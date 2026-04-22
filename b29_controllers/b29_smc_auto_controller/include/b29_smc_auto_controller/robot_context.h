@@ -36,7 +36,7 @@ public:
   b29_smc_auto_controller::AutoStateTrace buildTraceMessage(const ros::Time& stamp) const;
 
   bool isLowerAlive() const override;
-  bool isImuReady() override;
+  bool isImuReady() const override;
   bool isPostureReady() const override;
   bool isGripConfirmed() const override;
   bool isObstacleDetected() const override;
@@ -92,7 +92,7 @@ private:
   void setCommandReason(std::string_view reason);
   static b29_smc_auto_controller::DriveMode toAutoDriveMode(robot_fsm::DriveMode mode);
 
-  b29_smc_auto_controller::AutoInputSnapshot input_{};
+  mutable b29_smc_auto_controller::AutoInputSnapshot input_{};
   b29_smc_auto_controller::AutoControlCommand command_{};
   RobotFSMContext fsm_;
   bool started_{false};

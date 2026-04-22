@@ -71,32 +71,6 @@ add_library(${PROJECT_NAME}
 add_dependencies(${PROJECT_NAME} ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 target_link_libraries(${PROJECT_NAME} ${catkin_LIBRARIES})
 
-# if (CATKIN_ENABLE_TESTING)
-#     catkin_add_gtest(test_auto_types
-#             test/test_auto_types.cpp)
-#     target_link_libraries(test_auto_types ${catkin_LIBRARIES})
-#     add_dependencies(test_auto_types ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-
-#     catkin_add_gtest(test_auto_input_mux
-#             test/test_auto_input_mux.cpp)
-#     target_link_libraries(test_auto_input_mux ${PROJECT_NAME} ${catkin_LIBRARIES})
-#     add_dependencies(test_auto_input_mux ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-
-#     catkin_add_gtest(test_command_dispatcher
-#             test/test_command_dispatcher.cpp)
-#     target_link_libraries(test_command_dispatcher ${PROJECT_NAME} ${catkin_LIBRARIES})
-#     add_dependencies(test_command_dispatcher ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-
-#     catkin_add_gtest(test_trace_mapping
-#             test/test_trace_mapping.cpp)
-#     target_link_libraries(test_trace_mapping ${PROJECT_NAME} ${catkin_LIBRARIES})
-#     add_dependencies(test_trace_mapping ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-
-#     catkin_add_gtest(test_robot_context
-#             test/test_robot_context.cpp)
-#     target_link_libraries(test_robot_context ${PROJECT_NAME} ${catkin_LIBRARIES})
-#     add_dependencies(test_robot_context $ {${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-# endif()
 
 install(
         TARGETS ${PROJECT_NAME}

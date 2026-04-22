@@ -235,10 +235,9 @@ bool RobotContext::isLowerAlive() const
   return input_.lower_alive;
 }
 
-bool RobotContext::isImuReady()
+bool RobotContext::isImuReady() const
 {
-  if(input_.IsImuOnline_ )input_.imu_ready=true;
-  else input_.imu_ready=false;
+  input_.imu_ready = input_.IsImuOnline_;
   return input_.imu_ready;
 }
 

@@ -107,7 +107,10 @@ public:
   bool loadProtocolConfig(ros::NodeHandle &root_nh);
   void jointSpeedTargetCallback(const std_msgs::Float64::ConstPtr &msg);
   void clawSpeedTargetCallback(const std_msgs::Float64MultiArray::ConstPtr &msg);
-  //去除输入字符串开头的斜线
+  void updateImuState(double acc_x, double acc_y, double acc_z,
+                               double gyro_x, double gyro_y, double gyro_z,
+                               double qw, double qx, double qy, double qz);
+ 
   std::string stripSlash(const std::string &in) {
     if (!in.empty() && in[0] == '/') {
       return in.substr(1);
@@ -131,10 +134,6 @@ public:
   }
   void processRxBuffer();
 
-  bool StRobotHW::initAutoStateData(AutoStateData &data);
-  void StRobotHW::updateImuState(double acc_x, double acc_y, double acc_z,
-                               double gyro_x, double gyro_y, double gyro_z,
-                               double qw, double qx, double qy, double qz);
 
   static unsigned char getCrc8(unsigned char *ptr, unsigned short len) {
     unsigned char crc;
