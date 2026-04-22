@@ -126,24 +126,25 @@ float jointAngleTarget[4];
 **流向**：下位机 (Robot) →→ 上位机 (PC)
 **作用**：告诉上位机现在各个电机的实际状态（位置、速度、力矩）。
 
-**A. 数据包结构 (111 Bytes *)**
+**A. 数据包结构 (151 Bytes *)**
 
-注：假设当前电机数量 `num = 8`。长度 = `7 + (8 \* 13)` = 111字节。*
+注：假设当前电机数量 `num = 8`。长度 = `7 + (8 \* 13) + 2 * 3 * 4 + 4 * 4` = 151字节。
 
-| 顺序        | 字段名      | 长度          | 值/类型      | 说明                    |
-| ----------- | ----------- | ------------- | ------------ | ----------------------- |
-| 1           | 帧头1       | 1 Byte        | `0x55`       | 固定头                  |
-| 2           | 帧头2       | 1 Byte        | `0xAA`       | 固定头                  |
-| 3           | 命令字      | 1 Byte        | `0x01`       | 反馈指令                |
-| 4           | 长度位      | 1 Byte        | `0x68` (104) | 后续数据净荷长度 (8*13) |
-| **5 ~ 108** | **Payload** | **104 Bytes** | **Mixed**    | **所有电机的状态列表**  |
-| 109         | CRC         | 1 Byte        | Calc         | CRC8 校验码             |
-| 110         | 帧尾1       | 1 Byte        | `0x0D`       | CR                      |
-| 111         | 帧尾2       | 1 Byte        | `0x0A`       | LF                      |
+| **顺序**      | **字段名**  | **长度**      | **值/类型**      | **说明**                                          |
+| ------------- | ----------- | ------------- | ---------------- | ------------------------------------------------- |
+| **1**         | **帧头1**   | **1 Byte**    | **`0x55`**       | **固定头**                                        |
+| **2**         | **帧头2**   | **1 Byte**    | **`0xAA`**       | **固定头**                                        |
+| **3**         | **命令字**  | **1 Byte**    | **`0x01`**       | **反馈指令**                                      |
+| **4**         | **长度位**  | **1 Byte**    | **`0x90` (144)** | **后续数据净荷长度 (8 * 13 + 2 * 3 * 4 + 4 * 4)** |
+| **5 ~ 108**   | **Payload** | **104 Bytes** | **Mixed**        | **所有电机的状态列表**                            |
+| **109 ~ 148** | **Payload** | **40  Bytes** | **Mixed**        | **IMU数据**                                       |
+| 149           | CRC         | 1 Byte        | Calc             | CRC8 校验码                                       |
+| 150           | 帧尾1       | 1 Byte        | `0x0D`           | CR                                                |
+| 151           | 帧尾2       | 1 Byte        | `0x0A`           | LF                                                |
 
 
 
-**B. Payload 数据内容 (对于8个电机)**
+**B. Payload 数据内容 (8个电机  IMU数据)**
 
 数据是一个**列表**，每个电机占用 **13 个字节**，依次排列 (Motor1 → Motor8)。
 **单个电机的数据块结构 (13 Bytes)**：**(注： float数据按小端序发送)**
@@ -170,39 +171,30 @@ Block 8 (Byte 91-103): **电机 8** 的 ID, Pos, Vel, Tor
 
 
 
+IMU 数据（加速度 角速度 四元数）
+
+-   X 加速度
+-   Y 加速度
+-   Z 加速度
+-   X 角速度
+-   Y 角速度
+-   Z 角速度
+-   四元数 W
+-   四元数 X
+-   四元数 Y
+-   四元数 Z
+
+
+
 **C. 上位机如何解析**
 
 1. **寻找帧头**：在串口流中寻找 `55 AA`。
-
-2. **读取长度**：读取 Length 字节 (0x68 = 104)。
-
-3. **读取 Payload**：读取接下来的 104 字节。
-
-4. **循环解析**：
-
-```python
-# Python 伪代码
-num_motors = 8
-payload = rx_data[4 : 4+104]
-offset = 0
-for i in range(num_motors):
-    motor_id = payload[offset]
-    pos = struct.unpack('<f', payload[offset+1 : offset+5])
-    vel = struct.unpack('<f', payload[offset+5 : offset+9])
-    tor = struct.unpack('<f', payload[offset+9 : offset+13]) 
-    offset += 13
-    print(f"Motor {motor_id}: P={pos}, V={vel}, T={tor}")
-```
-
-
-
-![image-20260113173812270](/home/yuchen/Documents/B29调试/images/B29调试/image-20260113173812270.png)
+2. **读取长度**：读取 Length 字节 (0x90 = 144)。
+3. **读取 Payload**：读取接下来的 144 字节。
 
 
 
 ### 校验相关代码
-
-![image-20260112190724940](/home/yuchen/Documents/B29调试/images/B29调试/image-20260112190724940.png)
 
 **下位机相关代码：**
 
@@ -223,40 +215,60 @@ if (crc_calc != crc_rx) {
 //tx_buff中包含一个完整的反馈帧
 void slave_send_packet(void){
     const uint8_t motor_count = (uint8_t)num;
-    const uint8_t payload_len = (uint8_t)(motor_count * 13u); //每个电机需要用到13个字节
+    const uint8_t motor_payload_len = (uint8_t)(motor_count * 13u);
+    const uint8_t imu_payload_len = 4u * 4u;
+    const uint8_t payload_len = (uint8_t)(motor_payload_len + imu_payload_len);
+    const imuDataStruct_t *imu = get_imu_data();
+    
     static uint8_t tx_buf[256];
     
     uint16_t index = 0;
+    // Clear buffer to ensure no garbage data
+    memset(tx_buf, 0, 256);
+    
     tx_buf[index++] = UART_HEADER1;
     tx_buf[index++] = UART_HEADER2;
     tx_buf[index++] = 0x01;
     tx_buf[index++] = payload_len;
-    // 填充数据位，循环填充每一个电机的相关数据
-    // 按照id，pos，vel，tor的顺序循环填充（uint8_t*1,uint8_t*4,uint8_t*4,uint8_t*4）
+    /*电机部分*/
     for (uint8_t i = 0; i < motor_count; i++) {
         formatTrans32Struct_t motor_data;
         const motor_t *m = &motor[i];
         // id
         tx_buf[index++] = (uint8_t)(m->id & 0xFF);
         // pos
-        motor_data.f_temp = m->para.pos;
+        if (i == Motor3 || i == Motor7) {
+            motor_data.f_temp = motor_to_mechanism_rad(i, m->pos_track.theta_total_rad);
+        }
+        else if(i == Motor4 || i == Motor8)
+        {
+            motor_data.f_temp = motor_to_mechanism_position(i, m->pos_track.theta_total_rad); 
+        }
+        else 
+        {
+            motor_data.f_temp = m->para.pos;
+        }
+        
         memcpy(&tx_buf[index], motor_data.u8_temp, 4); index += 4;
         // vel
         motor_data.f_temp = m->para.vel;
         memcpy(&tx_buf[index], motor_data.u8_temp, 4); index += 4;
         // tor
-        motor_data.f_temp = m->para.tor;
-        memcpy(&tx_buf[index], motor_data.u8_temp, 4); index += 4;
-    }
-    // 此处计算反馈帧的crc校验位
-    tx_buf[index++] = Get_CRC8_Check_Sum(tx_buf, (uint16_t)payload_len + 4u, 0xFF);
 
+        motor_data.f_temp = m->para.tor;
+        memcpy(&tx_buf[index], motor_data.u8_temp, 4); index += 4; 
+    }
+    
+    for (uint8_t i = 0; i < 4u; i++)
+    {
+        memcpy(&tx_buf[index], imu->quat[i].u8_temp, 4u);
+        index += 4u;
+    }
+    
+    tx_buf[index++] = Get_CRC8_Check_Sum(tx_buf, (uint16_t)payload_len + 4u, 0xFF);
     tx_buf[index++] = UART_END1;
     tx_buf[index++] = UART_END2;
     
-    for(int k=0; k<index; k++){
-        debug_tx_buffer[k] = tx_buf[k];
-    }
     (void)HAL_UART_Transmit_DMA(&huart1, tx_buf, index);
 }
 

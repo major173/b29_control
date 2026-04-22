@@ -11,12 +11,12 @@ namespace steering_engine_hw {
 bool StRobotHW::init(ros::NodeHandle &root_nh, ros::NodeHandle &robot_hw_nh) {
   //**series**//
 
-  serial::Timeout to = serial::Timeout::simpleTimeout(100); //创建timeout
-  serial::parity_t pt = serial::parity_t::parity_none; //创建校验位为0位
-  serial::bytesize_t bt = serial::bytesize_t::eightbits; //创建发送字节数为8位
+  serial::Timeout to = serial::Timeout::simpleTimeout(100);
+  serial::parity_t pt = serial::parity_t::parity_none;
+  serial::bytesize_t bt = serial::bytesize_t::eightbits;
   serial::flowcontrol_t ft =
-      serial::flowcontrol_t::flowcontrol_none; //创建数据流控制，不使用
-  serial::stopbits_t st = serial::stopbits_t::stopbits_one; //创建终止位为1位
+      serial::flowcontrol_t::flowcontrol_none;
+  serial::stopbits_t st = serial::stopbits_t::stopbits_one;
 
   std::string port_name = "/dev/usbSteering";
   int baudrate = 115200;
@@ -25,11 +25,12 @@ bool StRobotHW::init(ros::NodeHandle &root_nh, ros::NodeHandle &robot_hw_nh) {
   serial_.setPort(port_name);
   ROS_INFO("%s", port_name.c_str());
   serial_.setBaudrate(baudrate);
-  serial_.setParity(pt);      //设置校验位
-  serial_.setBytesize(bt);    //设置发送字节数
-  serial_.setFlowcontrol(ft); //设置数据流控制
-  serial_.setStopbits(st);    //设置终止位
+  serial_.setParity(pt);
+  serial_.setBytesize(bt);
+  serial_.setFlowcontrol(ft);
+  serial_.setStopbits(st);
   serial_.setTimeout(to);
+  loadImuCovarianceParams(root_nh);
   setInterface();
 
   if (!loadUrdf(root_nh)) {
@@ -222,6 +223,58 @@ bool StRobotHW::setupTransmission(ros::NodeHandle &root_nh) {
   return true;
 }
 
+void StRobotHW::loadImuCovarianceParams(ros::NodeHandle &root_nh) {
+  auto toDouble = [](const XmlRpc::XmlRpcValue &value) -> double {
+    if (value.getType() == XmlRpc::XmlRpcValue::TypeInt) {
+      return static_cast<int>(value);
+    }
+    return static_cast<double>(value);
+  };
+
+  auto loadCovarianceDiagonal =
+      [&](const std::string &param_name, std::array<double, 9> &covariance,
+          const std::array<double, 3> &defaults) {
+        covariance = {defaults[0], 0.0, 0.0,
+                      0.0, defaults[1], 0.0,
+                      0.0, 0.0, defaults[2]};
+
+        XmlRpc::XmlRpcValue diag;
+        if (!root_nh.getParam(param_name, diag)) {
+          ROS_WARN_STREAM("Missing " << param_name << ", using defaults.");
+          return;
+        }
+        if (diag.getType() != XmlRpc::XmlRpcValue::TypeArray || diag.size() != 3) {
+          ROS_WARN_STREAM(param_name << " should be a 3-element array, using defaults.");
+          return;
+        }
+
+        for (int i = 0; i < 3; ++i) {
+          if (diag[i].getType() != XmlRpc::XmlRpcValue::TypeDouble &&
+              diag[i].getType() != XmlRpc::XmlRpcValue::TypeInt) {
+            ROS_WARN_STREAM(param_name << "[" << i << "] is not numeric, using defaults.");
+            return;
+          }
+        }
+
+        covariance = {toDouble(diag[0]), 0.0, 0.0,
+                      0.0, toDouble(diag[1]), 0.0,
+                      0.0, 0.0, toDouble(diag[2])};
+      };
+
+  loadCovarianceDiagonal("/steering_engine_hw/imu/orientation_covariance_diagonal",
+                         imu_orientation_covariance_,
+                         {0.0012, 0.0012, 0.0012});
+
+  loadCovarianceDiagonal("/steering_engine_hw/imu/angular_velocity_covariance_diagonal",
+                         imu_angular_velocity_covariance_,
+                         {0.0004, 0.0004, 0.0004});
+
+  loadCovarianceDiagonal("/steering_engine_hw/imu/linear_acceleration_covariance_diagonal",
+                         imu_linear_acceleration_covariance_,
+                         {0.01, 0.01, 0.01});
+}
+
+
 void StRobotHW::setInterface() {
   struct ActuatorSpec {
     const char *name;
@@ -241,15 +294,19 @@ void StRobotHW::setInterface() {
   };
 
   for (const auto &spec : actuator_specs) {
-    hardware_interface::ActuatorStateHandle state_handle(
+    hardware_interface::ActuatorStateHandle state_handle(   
         spec.name, &angle_[spec.index], &vel_[spec.index],
         &effort_[spec.index]);
+
     act_state_interface_.registerHandle(state_handle);
+
     hardware_interface::ActuatorHandle cmd_handle(
         act_state_interface_.getHandle(spec.name), &cmd_[spec.index]);
+
     if (spec.velocity_interface) {
-      velocity_act_interface_.registerHandle(cmd_handle);
-    } else {
+      velocity_act_interface_.registerHandle(cmd_handle);   
+    } 
+    else {
       position_act_interface_.registerHandle(cmd_handle);
     }
   }
@@ -440,36 +497,6 @@ void StRobotHW::addChildren(const KDL::SegmentMap::const_iterator segment) {
   }
 }
 
-void StRobotHW::updateTf(const ros::Time &time) {
-  //  std::vector<std::string> link_names;
-  //  for (const auto &link : urdf_model_->links_) {
-  //    link_names.push_back(link.first);
-
-  std::vector<geometry_msgs::TransformStamped> tf_transforms;
-  geometry_msgs::TransformStamped tf_transform;
-  // Loop over all float segments
-  for (auto &item : segments_) {
-    auto jnt_iter = joint_states_segment_.find(item.first);
-    if (jnt_iter != joint_states_segment_.end())
-      tf_transform = tf2::kdlToTransform(
-          item.second.segment.pose(jnt_iter->second.getPosition()));
-    else {
-      ROS_WARN_THROTTLE(
-          10,
-          "Joint state with name: \"%s\" was received but not found in URDF",
-          item.first.c_str());
-      continue;
-    }
-    tf_transform.header.stamp = time;
-    tf_transform.header.frame_id = stripSlash(item.second.root);
-    tf_transform.child_frame_id = stripSlash(item.second.tip);
-    tf_transforms.push_back(tf_transform);
-  }
-  tf_broadcaster_.sendTransform(tf_transforms);
-
-  tf_transforms.clear();
-}
-
 void StRobotHW::pack(unsigned char *tx_buffer, unsigned char ctrl,
                      unsigned char *data) {
   memset(tx_buffer, 0, k_frame_length_);
@@ -488,22 +515,13 @@ void StRobotHW::pack(unsigned char *tx_buffer, unsigned char ctrl,
   // set crc
   frame->crc_ = getCrc8(tx_buffer, k_header_length_ + k_ctrl_length_ +
                                        k_length_ + k_data_length_);
-  // ser ender
+  // set ender
   for (int i = 0; i < 2; i++) {
     frame->ender_[i] = ender[i];
   }
 }
 
 void StRobotHW::unpack(std::vector<uint8_t> rx_buffer) {
-  const size_t min_frame_length =
-      k_header_length_ + k_ctrl_length_ + k_length_ + k_crc_length_ +
-      k_tail_length_;
-  if (rx_buffer.size() < min_frame_length) {
-    ROS_WARN_THROTTLE(10, "Received message length %zu is too short",
-                      rx_buffer.size());
-    return;
-  }
-
   // check header and ender
   if (rx_buffer[0] != header[0] || rx_buffer[1] != header[1]) {
     return;
@@ -546,37 +564,64 @@ void StRobotHW::unpack(std::vector<uint8_t> rx_buffer) {
     return;
   }
 
-  const size_t entry_size = 1 + 4 + 4 + 4;
-  if (length % entry_size != 0) {
+  auto unpackFloat = [&rx_buffer](size_t &offset) -> float {
+    float value = 0.0f;
+    std::memcpy(&value, &rx_buffer[offset], sizeof(float));
+    offset += sizeof(float);
+    return value;
+  };
+
+  constexpr size_t kImuFloatCount = 10;
+  constexpr size_t kImuPayloadSize = kImuFloatCount * sizeof(float);
+  const size_t motor_id_length = 1;
+  const size_t entry_size = motor_id_length + 3 * sizeof(float);
+
+  const size_t motor_payload_size = static_cast<size_t>(length) - kImuPayloadSize;
+  if (motor_payload_size % entry_size != 0) {
     ROS_WARN_THROTTLE(10, "Received message data length %u is invalid", length);
     return;
   }
 
-  const size_t motor_count = length / entry_size;
+  const size_t motor_count = motor_payload_size / entry_size;
   size_t index = payload_start;
   for (size_t i = 0; i < motor_count; ++i) {
     const int id = rx_buffer[index++];
+    const float pos = unpackFloat(index);
+    const float vel = unpackFloat(index);
+    const float tor = unpackFloat(index);
+
     auto it = id_to_actuator_.find(id);
     if (it == id_to_actuator_.end()) {
-      index += 12;
       continue;
     }
 
     ActuatorIndex actuator_index = it->second;
-    float pos = 0.0f;
-    float vel = 0.0f;
-    float tor = 0.0f;
-    std::memcpy(&pos, &rx_buffer[index], sizeof(float));
-    index += sizeof(float);
-    std::memcpy(&vel, &rx_buffer[index], sizeof(float));
-    index += sizeof(float);
-    std::memcpy(&tor, &rx_buffer[index], sizeof(float));
-    index += sizeof(float);
-
-    angle_[actuator_index] = static_cast<double>(pos) - offset_vector_[actuator_index];
-    vel_[actuator_index] = static_cast<double>(vel);
+    angle_[actuator_index]  = static_cast<double>(pos) - offset_vector_[actuator_index];
+    vel_[actuator_index]    = static_cast<double>(vel);
     effort_[actuator_index] = static_cast<double>(tor);
   }
+
+  if (index + kImuPayloadSize > payload_start + static_cast<size_t>(length)) {
+    ROS_WARN_THROTTLE(10, "Received IMU payload is incomplete");
+    return;
+  }
+
+  const double acc_x = static_cast<double>(unpackFloat(index));
+  const double acc_y = static_cast<double>(unpackFloat(index));
+  const double acc_z = static_cast<double>(unpackFloat(index));
+
+  const double gyro_x = static_cast<double>(unpackFloat(index));
+  const double gyro_y = static_cast<double>(unpackFloat(index));
+  const double gyro_z = static_cast<double>(unpackFloat(index));
+
+  const double qw = static_cast<double>(unpackFloat(index));
+  const double qx = static_cast<double>(unpackFloat(index));
+  const double qy = static_cast<double>(unpackFloat(index));
+  const double qz = static_cast<double>(unpackFloat(index));
+
+  updateImuState(acc_x, acc_y, acc_z,
+                 gyro_x, gyro_y, gyro_z,
+                 qw, qx, qy, qz);
 }
 
 void StRobotHW::processRxBuffer() {
@@ -684,6 +729,4 @@ void StRobotHW::updateImuState(double acc_x, double acc_y, double acc_z,
   imu_orientation_[2] = q.z();
   imu_orientation_[3] = q.w();
 }
-}
-
- // namespace steering_engine_hw
+} // namespace steering_engine_hw
