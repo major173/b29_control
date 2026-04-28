@@ -63,7 +63,7 @@ void RobotContext::tick50Hz()
 
   const int current_state_id = fsm_.getState().getId();
 
-  if (input_.emergency_stop)
+  if (input_.emergency_stop || hasSafetyFault())
   {
     auto_start_requested_ = false;
     fsm_.evEmergencyStop();
@@ -380,24 +380,54 @@ bool RobotContext::isObstacleNotDetected() const
   return !isObstacleDetected();
 }
 
+bool RobotContext::hasSafetyFault() const
+{
+  return input_.joint_fault || input_.grip_fault || !input_.imu_ready;;
+}
+
+std::string RobotContext::safetyStopReason(std::string_view fallback) const
+{
+  if (input_.joint_fault && input_.grip_fault)
+  {
+    return "joint_and_grip_fault";
+  }
+
+  if (input_.joint_fault)
+  {
+    return "joint_fault";
+  }
+
+  if (input_.grip_fault)
+  {
+    return "grip_fault";
+  }
+
+  if (!input_.imu_ready)
+  {
+    return "imu_not_ready";
+  }
+
+  return std::string(fallback);
+}
+
 void RobotContext::reportEmergencyStopIdle()
 {
-  reportEmergencyStop("emergency_stop_idle");
+  reportEmergencyStop(safetyStopReason("emergency_stop_idle"));
 }
 
 void RobotContext::reportEmergencyStopInit()
 {
-  reportEmergencyStop("emergency_stop_init");
+  reportEmergencyStop(safetyStopReason("emergency_stop_init"));
 }
 
 void RobotContext::reportEmergencyStopTraversal()
 {
-  reportEmergencyStop("emergency_stop_traversal");
+  reportEmergencyStop(safetyStopReason("emergency_stop_traversal"));
 }
 
 void RobotContext::reportEmergencyStopCommsLoss()
 {
-  reportEmergencyStop("emergency_stop_comms_loss");
+  reportEmergencyStop(safetyStopReason("emergency_stop_comms_loss"));
 }
 
 void RobotContext::reportReconnectTimeout()

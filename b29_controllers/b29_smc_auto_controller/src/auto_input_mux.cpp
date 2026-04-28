@@ -48,9 +48,10 @@ void AutoInputMux::setDebugOverride(const AutoDebugOverride& debug_override)
   has_debug_override_ = true;
 }
 
-void AutoInputMux::setSmcState(const steering_engine_hw::SmcStateData& smc_state)
+void AutoInputMux::setAutoState(const steering_engine_hw::AutoStateData& auto_state)
 {
-  smc_state_ = smc_state;
+  auto_state_ = auto_state;
+  has_auto_state_ = true;
 }
 
 AutoInputSnapshot AutoInputMux::buildSnapshot() const
@@ -75,6 +76,23 @@ AutoInputSnapshot AutoInputMux::buildSnapshot() const
     snapshot.stamp = sensor_input_.header.stamp;
   }
 
+  if (has_auto_state_)
+  {
+    snapshot.lower_alive = auto_state_.lower_alive;
+    snapshot.grip_confirmed = auto_state_.grip_confirmed;
+    snapshot.joint_fault = auto_state_.joint_fault;
+    snapshot.grip_fault = auto_state_.grip_fault;
+    snapshot.obstacle_detected = auto_state_.obstacle_detected;
+    snapshot.obstacle_type = toObstacleType(static_cast<uint8_t>(auto_state_.obstacle_type));
+    snapshot.classification_stable = auto_state_.classification_stable;
+    snapshot.range_to_obstacle = auto_state_.range_to_obstacle;
+    snapshot.at_crossing_position = auto_state_.at_crossing_position;
+    snapshot.post_check_passed = auto_state_.post_check_passed;
+    snapshot.post_check_failed = auto_state_.post_check_failed;
+    snapshot.auto_run_pause = false;
+    snapshot.stamp = auto_state_.header.stamp;
+  }
+
   if (has_control_request_)
   {
     snapshot.auto_start_requested = control_request_.auto_start_requested;
@@ -91,6 +109,7 @@ AutoInputSnapshot AutoInputMux::buildSnapshot() const
   if (has_base_imu_)
   {
     snapshot.posture_ready = isPostureWithinThreshold();
+    snapshot.imu_ready = isBaseImuReady();
     snapshot.stamp = latestStamp(snapshot.stamp, base_imu_.header.stamp);
   }
 
@@ -118,6 +137,76 @@ bool AutoInputMux::isPostureWithinThreshold() const
   const double pitch = std::asin(clampUnit(sinp));
 
   return std::abs(roll) <= config_.max_abs_roll_rad && std::abs(pitch) <= config_.max_abs_pitch_rad;
+}
+
+bool AutoInputMux::isBaseImuReady() const
+{
+  bool is_base_imu_ready = true;
+  static size_t imu_unchange_count = 0;
+  static sensor_msgs::Imu last_imu{};
+  constexpr size_t kMaxUnchangedCount = 10;
+
+  if (!has_base_imu_ || base_imu_.header.stamp.isZero())
+  {
+    is_base_imu_ready = false;
+  }
+
+    const auto finite = [](double value) {
+    return std::isfinite(value);
+  };
+
+  const auto& q = base_imu_.orientation;
+  const auto& gyro = base_imu_.angular_velocity;
+  const auto& acc = base_imu_.linear_acceleration;
+
+  const bool value_valid =
+      finite(q.x) && finite(q.y) && finite(q.z) && finite(q.w) &&
+      finite(gyro.x) && finite(gyro.y) && finite(gyro.z) &&
+      finite(acc.x) && finite(acc.y) && finite(acc.z);
+
+  if (!value_valid)
+  {
+    return false;
+  }
+
+  const double norm2 = q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w;
+  if (!std::isfinite(norm2) || norm2 < 1e-12)
+  {
+    return false;
+  }
+
+  if (!isBaseImuChange(base_imu_, last_imu))
+  {
+    ++imu_unchange_count;
+  }
+  else
+  {
+    imu_unchange_count = 0;
+  }
+
+  if (imu_unchange_count >= kMaxUnchangedCount)
+  {
+    is_base_imu_ready = false;
+  }
+
+  last_imu = base_imu_;
+
+  return is_base_imu_ready;
+}
+
+bool AutoInputMux::isBaseImuChange(const sensor_msgs::Imu& current, 
+                                  const sensor_msgs::Imu& previous) const
+{
+  return current.orientation.x != previous.orientation.x ||
+         current.orientation.y != previous.orientation.y ||
+         current.orientation.z != previous.orientation.z ||
+         current.orientation.w != previous.orientation.w ||
+         current.angular_velocity.x != previous.angular_velocity.x ||
+         current.angular_velocity.y != previous.angular_velocity.y ||
+         current.angular_velocity.z != previous.angular_velocity.z ||
+         current.linear_acceleration.x != previous.linear_acceleration.x ||
+         current.linear_acceleration.y != previous.linear_acceleration.y ||
+         current.linear_acceleration.z != previous.linear_acceleration.z;
 }
 
 ObstacleType AutoInputMux::toObstacleType(uint8_t obstacle_type)

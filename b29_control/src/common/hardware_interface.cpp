@@ -55,8 +55,8 @@ bool StRobotHW::init(ros::NodeHandle &root_nh, ros::NodeHandle &robot_hw_nh) {
     return false;
   }
 
-  if(!initSmcStateData(smc_state_data_)) {
-    ROS_ERROR("Failed to init smc state data");
+  if(!initAutoStateData(auto_state_data_)) {
+    ROS_ERROR("Failed to init auto state data");
     return false;
   }
 
@@ -72,29 +72,64 @@ bool StRobotHW::init(ros::NodeHandle &root_nh, ros::NodeHandle &robot_hw_nh) {
 }
 
 void StRobotHW::read(const ros::Time &time, const ros::Duration &period) {
-  if (serial_.available()) {
-    const ros::Time now = time;
-    smc_state_data_.lower_alive = !last_rx_time_.isZero() &&
-                                  (now - last_rx_time_).toSec() < 0.2;
-
-    rx_len_ = static_cast<int>(serial_.available());
-    std::vector<uint8_t> incoming;
-    const size_t bytes_read = serial_.read(incoming, static_cast<size_t>(rx_len_));
-    if (bytes_read == 0) {
-      return;
-    }
-    incoming.resize(bytes_read);
-    rx_buffer_.insert(rx_buffer_.end(), incoming.begin(), incoming.end());
-    processRxBuffer();
-    if (act_to_jnt_state_interface_) {
-      act_to_jnt_state_interface_->propagate();
-    }
-  } else {
+  if (!serial_.isOpen()) {
+    tryReconnectSerial(time);
     return;
+  }
+  
+  constexpr double kLowerAliveTimeout = 0.2;
+  if(!last_rx_time_.isZero() &&
+      (time - last_rx_time_).toSec() < kLowerAliveTimeout)
+  {
+    auto_state_data_.lower_alive = true;
+  } 
+  else {
+    auto_state_data_.lower_alive = false;
+  }
+
+  size_t available = 0;
+  try {
+    available = serial_.available();
+  } 
+  catch (const std::exception& e) {
+    ROS_ERROR_STREAM_THROTTLE(0.5, "Serial available() failed: " << e.what());
+    return;
+  }
+
+  if (available == 0) {
+    return;
+  }
+
+  rx_len_ = static_cast<int>(available);
+  std::vector<uint8_t> incoming;
+  size_t bytes_read = 0;
+  try {
+    bytes_read = serial_.read(incoming, static_cast<size_t>(rx_len_));
+  } 
+  catch (const std::exception& e) {
+    ROS_ERROR_STREAM_THROTTLE(0.5, "Serial read() failed: " << e.what());
+    return;
+  }
+
+  if (bytes_read == 0) {
+    return;
+  }
+
+  incoming.resize(bytes_read);
+  rx_buffer_.insert(rx_buffer_.end(), incoming.begin(), incoming.end());
+  processRxBuffer(time);
+
+  if (act_to_jnt_state_interface_) {
+    act_to_jnt_state_interface_->propagate();
   }
 }
 
 void StRobotHW::write(const ros::Time &time, const ros::Duration &period) {
+  if (!serial_.isOpen()) {
+    tryReconnectSerial(time);
+    return;
+  }
+  
   static std::array<uint8_t, k_data_length_> last_send_data{};
   std::array<uint8_t, k_data_length_> data{};
 
@@ -137,7 +172,7 @@ void StRobotHW::write(const ros::Time &time, const ros::Duration &period) {
     packFloat(static_cast<float>(joint_angle_target));
   }
 
-  if (true) {
+  if (memcmp(data.data(), last_send_data.data(), data.size()) != 0) {
     pack(tx_buffer_, control_code_, data.data());
     tx_len_ = sizeof(tx_buffer_);
     try {
@@ -334,10 +369,10 @@ void StRobotHW::setInterface() {
   registerInterface(&imu_sensor_interface_);
   registerInterface(&robot_state_interface_);
 
-  // interface for smc
-  SmcStateHandle smc_handle("smc_state", &smc_state_data_);
-  smc_state_interface_.registerHandle(smc_handle);
-  registerInterface(&smc_state_interface_);
+  // interface for auto
+  AutoStateHandle auto_handle("auto_state", &auto_state_data_);
+  auto_state_interface_.registerHandle(auto_handle);
+  registerInterface(&auto_state_interface_);
 }
 
 bool StRobotHW::loadProtocolConfig(ros::NodeHandle &root_nh) {
@@ -535,7 +570,7 @@ void StRobotHW::pack(unsigned char *tx_buffer, unsigned char ctrl,
   }
 }
 
-void StRobotHW::unpack(std::vector<uint8_t> rx_buffer) {
+void StRobotHW::unpack(std::vector<uint8_t> rx_buffer,const ros::Time &time) {
   // check header and ender
   if (rx_buffer[0] != header[0] || rx_buffer[1] != header[1]) {
     return;
@@ -587,10 +622,11 @@ void StRobotHW::unpack(std::vector<uint8_t> rx_buffer) {
 
   constexpr size_t kImuFloatCount = 10;
   constexpr size_t kImuPayloadSize = kImuFloatCount * sizeof(float);
-  const size_t motor_id_length = 1;
-  const size_t entry_size = motor_id_length + 3 * sizeof(float);
+  constexpr size_t kStatusPayloadSize = 2;
+  constexpr size_t kMotorIdLength = 1;
+  const size_t entry_size = kMotorIdLength + 3 * sizeof(float);
 
-  const size_t motor_payload_size = static_cast<size_t>(length) - kImuPayloadSize;
+  const size_t motor_payload_size = static_cast<size_t>(length) - kImuPayloadSize - kStatusPayloadSize;
   if (motor_payload_size % entry_size != 0) {
     ROS_WARN_THROTTLE(10, "Received message data length %u is invalid", length);
     return;
@@ -637,10 +673,44 @@ void StRobotHW::unpack(std::vector<uint8_t> rx_buffer) {
                  gyro_x, gyro_y, gyro_z,
                  qw, qx, qy, qz);
 
-  last_rx_time_ = ros::Time::now();
+  if(index + kStatusPayloadSize > payload_start + static_cast<size_t>(length)) {
+    ROS_WARN_THROTTLE(10, "Received status payload is incomplete");
+    return;
+  }
+
+  const uint8_t motor_fault     = rx_buffer[index++];
+  const uint8_t grip_confirmed  = rx_buffer[index++];
+
+  constexpr size_t joint_motor_fault_bit = 4;
+  constexpr size_t wheel_motor_fault_bit = 2;
+  constexpr size_t grip_motor_fault_bit  = 2;
+
+  auto_state_data_.joint_fault = 0;
+  for (size_t i = 0; i < joint_motor_fault_bit; ++i)
+  {
+    if (!(motor_fault & (1U << i)))
+    {
+      auto_state_data_.joint_fault = 1;
+      break;
+    }
+  }
+
+  auto_state_data_.grip_fault = 0;
+  for (size_t i = 0; i < grip_motor_fault_bit; ++i)
+  {
+    size_t bit_pos = i + joint_motor_fault_bit + wheel_motor_fault_bit;
+    if (!(motor_fault & (1U << bit_pos)))
+    {
+      auto_state_data_.grip_fault = 1;
+      break;
+    }
+  }
+  auto_state_data_.grip_confirmed = grip_confirmed;
+
+  last_rx_time_ = time;
 }
 
-void StRobotHW::processRxBuffer() {
+void StRobotHW::processRxBuffer(const ros::Time& time) {
   const size_t min_frame_length =
       k_header_length_ + k_ctrl_length_ + k_length_ + k_crc_length_ +
       k_tail_length_;
@@ -706,7 +776,7 @@ void StRobotHW::processRxBuffer() {
 
     std::vector<uint8_t> frame(rx_buffer_.begin(),
                                rx_buffer_.begin() + expected_size);
-    unpack(frame);
+    unpack(frame,time);
     rx_buffer_.erase(rx_buffer_.begin(), rx_buffer_.begin() + expected_size);
   }
 }
@@ -746,12 +816,33 @@ void StRobotHW::updateImuState(double acc_x, double acc_y, double acc_z,
   imu_orientation_[3] = q.w();
 }
 
-bool StRobotHW::initSmcStateData(SmcStateData &data) {
+bool StRobotHW::initAutoStateData(AutoStateData &data) {
   data.lower_alive = false;
-  data.imu_ready = false;
   data.grip_confirmed = false;
   data.joint_fault = false;
   data.grip_fault = false;
   return true;
+}
+
+void StRobotHW::tryReconnectSerial(const ros::Time& time) {
+  static ros::Time last_reconnect_attempt;
+
+  if (serial_.isOpen()) {
+    return;
+  }
+
+  if (!last_reconnect_attempt.isZero() &&
+      (time - last_reconnect_attempt).toSec() < 1.0) {
+    return;
+  }
+
+  last_reconnect_attempt = time;
+
+  try {
+    serial_.open();
+    ROS_INFO_STREAM("Serial reconnected: " << serial_.getPort());
+  } catch (const serial::IOException& e) {
+    ROS_WARN_THROTTLE(2.0, "Serial reconnect failed: %s", e.what());
+  }
 }
 } // namespace steering_engine_hw
