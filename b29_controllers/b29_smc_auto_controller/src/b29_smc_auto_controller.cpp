@@ -96,17 +96,6 @@ void B29SmcAutoController::update(const ros::Time& time, const ros::Duration& /*
     input_mux_.setSensorInput(sensor_input_);
   }
 
-  // 打印 auto_state_handle_ 数据进行调试（每秒一次）
-  if (use_auto_state_)
-  {
-    const auto& auto_state_data = auto_state_handle_.getData();
-    ROS_INFO_STREAM_THROTTLE(
-        1.0, "AutoStateData - lower_alive: " << auto_state_data.lower_alive
-          << ", grip_confirmed: " << auto_state_data.grip_confirmed
-          << ", joint_fault: " << auto_state_data.joint_fault
-          << ", grip_fault: " << auto_state_data.grip_fault);
-  }
-
   input_mux_.setDebugOverride(debug_override_);
   input_mux_.setJointState(buildJointStateMessage(time));
   input_mux_.setBaseImu(buildBaseImuMessage(time));

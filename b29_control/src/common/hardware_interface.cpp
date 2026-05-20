@@ -72,11 +72,6 @@ bool StRobotHW::init(ros::NodeHandle &root_nh, ros::NodeHandle &robot_hw_nh) {
 }
 
 void StRobotHW::read(const ros::Time &time, const ros::Duration &period) {
-  if (!serial_.isOpen()) {
-    tryReconnectSerial(time);
-    return;
-  }
-  
   constexpr double kLowerAliveTimeout = 0.2;
   if(!last_rx_time_.isZero() &&
       (time - last_rx_time_).toSec() < kLowerAliveTimeout)
@@ -86,13 +81,18 @@ void StRobotHW::read(const ros::Time &time, const ros::Duration &period) {
   else {
     auto_state_data_.lower_alive = false;
   }
-
+  
+  if (!serial_.isOpen()) {
+    tryReconnectSerial(time);
+    return;
+  }
+  
   size_t available = 0;
   try {
     available = serial_.available();
   } 
-  catch (const std::exception& e) {
-    ROS_ERROR_STREAM_THROTTLE(0.5, "Serial available() failed: " << e.what());
+  catch (const serial::IOException& e) {
+    handleSerialIoError("Serial available() failed", e);
     return;
   }
 
@@ -106,8 +106,8 @@ void StRobotHW::read(const ros::Time &time, const ros::Duration &period) {
   try {
     bytes_read = serial_.read(incoming, static_cast<size_t>(rx_len_));
   } 
-  catch (const std::exception& e) {
-    ROS_ERROR_STREAM_THROTTLE(0.5, "Serial read() failed: " << e.what());
+  catch (const serial::IOException& e) {
+    handleSerialIoError("Serial read() failed", e);
     return;
   }
 
@@ -140,18 +140,49 @@ void StRobotHW::write(const ros::Time &time, const ros::Duration &period) {
     jnt_to_act_velocity_interface_->propagate();
   }
 
-  const double wheel_speed_left = cmd_[control_map_.wheel_speed[0]];
-  const double wheel_speed_right = cmd_[control_map_.wheel_speed[1]];
-  const double claw_speed_left = claw_speed_target_[0];
-  const double claw_speed_right = claw_speed_target_[1];
-  const double claw_angle_left = cmd_[control_map_.claw_angle[0]];
-  const double claw_angle_right = cmd_[control_map_.claw_angle[1]];
-  const double joint_speed_target = joint_speed_target_;
+  auto sanitizeCommand = [](const char *name, double value, double fallback) {
+    if (std::isfinite(value)) {
+      return value;
+    }
+    ROS_WARN_STREAM_THROTTLE(1.0, "Replacing non-finite " << name
+                                           << " command with " << fallback);
+    return fallback;
+  };
+  auto positionFallback = [this](ActuatorIndex index) {
+    return std::isfinite(angle_[index]) ? angle_[index] : 0.0;
+  };
+
+  const auto left_wheel_index    = control_map_.wheel_speed[0];
+  const auto right_wheel_index   = control_map_.wheel_speed[1];
+  const auto left_claw_index     = control_map_.claw_angle[0];
+  const auto right_claw_index    = control_map_.claw_angle[1];
+  const auto joint_angle_indices = control_map_.joint_angle;
+
+  const double wheel_speed_left   =
+      sanitizeCommand("left wheel speed" , cmd_[left_wheel_index], 0.0);
+  const double wheel_speed_right  =
+      sanitizeCommand("right wheel speed", cmd_[right_wheel_index], 0.0);
+  const double claw_speed_left    =
+      sanitizeCommand("left claw speed"  , claw_speed_target_[0], 0.0);
+  const double claw_speed_right   =
+      sanitizeCommand("right claw speed" , claw_speed_target_[1], 0.0);
+  const double claw_angle_left    =
+      sanitizeCommand("left claw angle"  , cmd_[left_claw_index],
+                      positionFallback(left_claw_index));
+  const double claw_angle_right   =
+      sanitizeCommand("right claw angle" , cmd_[right_claw_index],
+                      positionFallback(right_claw_index));
+  const double joint_speed_target =
+      sanitizeCommand("joint speed target", joint_speed_target_, 0.0);
   const double joint_angle_targets[4] = {
-      cmd_[control_map_.joint_angle[0]],
-      cmd_[control_map_.joint_angle[1]],
-      cmd_[control_map_.joint_angle[2]],
-      cmd_[control_map_.joint_angle[3]],
+      sanitizeCommand("left first leg angle"  , cmd_[joint_angle_indices[0]],
+                      positionFallback(joint_angle_indices[0])),
+      sanitizeCommand("left second leg angle" , cmd_[joint_angle_indices[1]],
+                      positionFallback(joint_angle_indices[1])),
+      sanitizeCommand("right first leg angle" , cmd_[joint_angle_indices[2]],
+                      positionFallback(joint_angle_indices[2])),
+      sanitizeCommand("right second leg angle", cmd_[joint_angle_indices[3]],
+                      positionFallback(joint_angle_indices[3])),
   };
 
   uint16_t index = 0;
@@ -177,8 +208,10 @@ void StRobotHW::write(const ros::Time &time, const ros::Duration &period) {
     tx_len_ = sizeof(tx_buffer_);
     try {
       serial_.write(tx_buffer_, tx_len_);
-    } catch (serial::PortNotOpenedException &e) {
-      ROS_ERROR_STREAM("Failed to usart data. " << e.what());
+    } 
+    catch (const serial::IOException& e) {
+      handleSerialIoError("Serial write() failed", e);
+      return;
     }
     memcpy(last_send_data.data(), data.data(), data.size());
   }
@@ -587,9 +620,15 @@ void StRobotHW::unpack(std::vector<uint8_t> rx_buffer,const ros::Time &time) {
   const size_t expected_size =
       payload_start + static_cast<size_t>(length) + k_crc_length_ +
       k_tail_length_;
+  const size_t data_length = rx_buffer.size() - payload_start - k_crc_length_ - k_tail_length_;
   if (rx_buffer.size() < expected_size) {
     ROS_WARN_THROTTLE(10, "Received message length %zu is inconsistent",
                       rx_buffer.size());
+    return;
+  }
+  if(data_length != length) {
+    ROS_WARN_THROTTLE(10, "Received message data length %zu does not match length bit %u",
+                      data_length, length);
     return;
   }
   if (rx_buffer[expected_size - 2] != ender[0] ||
@@ -845,4 +884,25 @@ void StRobotHW::tryReconnectSerial(const ros::Time& time) {
     ROS_WARN_THROTTLE(2.0, "Serial reconnect failed: %s", e.what());
   }
 }
+
+void StRobotHW::handleSerialIoError(const std::string& context,
+                                    const serial::IOException& e) {
+  rx_buffer_.clear();
+
+  ROS_ERROR_STREAM_THROTTLE(0.5, context << " : " << e.what());
+
+  if (!serial_.isOpen()) {
+    return;
+  }
+
+  try {
+    serial_.close();
+  } 
+  catch (const serial::IOException& close_error) {
+    ROS_WARN_STREAM_THROTTLE(
+        1.0, "Serial close() after " << context
+             << " : " << close_error.what());
+  }
+}
+
 } // namespace steering_engine_hw

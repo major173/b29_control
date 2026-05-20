@@ -93,10 +93,10 @@ rosrun plotjuggler plotjuggler
 5. **左夹爪位置** (`float`, 4B) - `clawAngleTarget[0]`
 6. **右夹爪位置** (`float`, 4B) - `clawAngleTarget[1]`
 7. **关节统一速度** (`float`, 4B) - `jointSpeedTarget` (所有关节共用此限速或目标速度)
-8. **关节1 角度** (`float`, 4B) - `jointAngleTarget[0]`
-9. **关节2 角度** (`float`, 4B) - `jointAngleTarget[1]`
-10. **关节3 角度** (`float`, 4B) - `jointAngleTarget[2]`
-11. **关节4 角度** (`float`, 4B) - `jointAngleTarget[3]`
+8. **左1关节 角度** (`float`, 4B) - `jointAngleTarget[0]`
+9. **左2关节 角度** (`float`, 4B) - `jointAngleTarget[1]`
+10. **右1关节 角度** (`float`, 4B) - `jointAngleTarget[2]`
+11. **右2关节 角度** (`float`, 4B) - `jointAngleTarget[3]`
 
 ```c
 float wheelSpeedTarget[2];

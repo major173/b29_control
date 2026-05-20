@@ -114,6 +114,7 @@ public:
 
   bool initAutoStateData(AutoStateData &data);
   void tryReconnectSerial(const ros::Time& time);
+  void handleSerialIoError(const std::string& context,const serial::IOException& e);
 
   //去除输入字符串开头的斜线
   std::string stripSlash(const std::string &in) {
