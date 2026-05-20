@@ -14,12 +14,12 @@ bool B29SmcAutoController::init(hardware_interface::RobotHW* robot_hw, ros::Node
 bool B29SmcAutoController::init(hardware_interface::RobotHW* robot_hw, ros::NodeHandle& /*root_nh*/,
                                 ros::NodeHandle& controller_nh)
 {
-  if (!initInterfaces(robot_hw))
+  if (!loadParameters(controller_nh))
   {
     return false;
   }
 
-  if (!loadParameters(controller_nh))
+  if (!initInterfaces(robot_hw))
   {
     return false;
   }
@@ -46,7 +46,25 @@ void B29SmcAutoController::starting(const ros::Time& time)
 
   robot_context_.start();
   sensor_input_.header.stamp = time;
-  input_mux_.setSensorInput(sensor_input_);
+
+  bool use_data_fault_ = (use_auto_state_ == use_sensor_input_);
+
+  if(use_data_fault_)
+  {
+    const std::string state = (use_auto_state_ && use_sensor_input_) ? "true" : "false";
+    ROS_WARN("Both use_auto_state and use_sensor_input are set to %s. The controller will use sensor input and auto "
+             "state data interchangeably, treating missing data as faults.",state);
+  }
+  else if (use_auto_state_)
+  {
+    input_mux_.setAutoState(auto_state_handle_.getData());
+  }
+  else
+  {
+    input_mux_.setSensorInput(sensor_input_);
+  }
+
+
   input_mux_.setDebugOverride(debug_override_);
   command_dispatcher_.dispatch(robot_context_.currentCommand());
   state_trace_pub_.publish(robot_context_.buildTraceMessage(time));
@@ -59,12 +77,28 @@ void B29SmcAutoController::update(const ros::Time& time, const ros::Duration& /*
     return;
   }
 
-  sensor_input_.header.stamp = time;
-  input_mux_.setSensorInput(sensor_input_);
+  
+  bool use_data_fault_ = ((use_auto_state_ && use_sensor_input_) == true) || 
+                         ((use_auto_state_ || use_sensor_input_) == false);
+
+  if(use_data_fault_)
+  {
+    ROS_WARN("Both use_auto_state and use_sensor_input are set to %s. The controller will use sensor input and auto "
+             "state data interchangeably, treating missing data as faults.",
+             (use_auto_state_ && use_sensor_input_) ? "true" : "false");
+  }
+  else if (use_auto_state_)
+  {
+    input_mux_.setAutoState(auto_state_handle_.getData());
+  }
+  else
+  {
+    input_mux_.setSensorInput(sensor_input_);
+  }
+
   input_mux_.setDebugOverride(debug_override_);
   input_mux_.setJointState(buildJointStateMessage(time));
   input_mux_.setBaseImu(buildBaseImuMessage(time));
-
   robot_context_.setInputSnapshot(input_mux_.buildSnapshot());
   robot_context_.tick50Hz();
   command_dispatcher_.dispatch(robot_context_.currentCommand());
@@ -91,8 +125,22 @@ bool B29SmcAutoController::initInterfaces(hardware_interface::RobotHW* robot_hw)
   position_joint_interface_ = robot_hw->get<hardware_interface::PositionJointInterface>();
   velocity_joint_interface_ = robot_hw->get<hardware_interface::VelocityJointInterface>();
   imu_sensor_interface_ = robot_hw->get<hardware_interface::ImuSensorInterface>();
+  auto_state_interface_ = robot_hw->get<steering_engine_hw::AutoStateInterface>();
 
-  return joint_state_interface_ && position_joint_interface_ && velocity_joint_interface_ && imu_sensor_interface_;
+  if (!joint_state_interface_ || !position_joint_interface_ || !velocity_joint_interface_ || !imu_sensor_interface_)
+  {
+    ROS_ERROR("b29_smc_auto_controller requires JointStateInterface, PositionJointInterface, "
+              "VelocityJointInterface, and ImuSensorInterface.");
+    return false;
+  }
+
+  if (use_auto_state_ && !auto_state_interface_)
+  {
+    ROS_ERROR("b29_smc_auto_controller requires AutoStateInterface when use_auto_state=true.");
+    return false;
+  }
+
+  return true;
 }
 
 bool B29SmcAutoController::loadParameters(ros::NodeHandle& controller_nh)
@@ -106,6 +154,9 @@ bool B29SmcAutoController::loadParameters(ros::NodeHandle& controller_nh)
   controller_nh.param<std::string>("joint_names/left_friction_wheel_joint", wheel_joint_names_[0], wheel_joint_names_[0]);
   controller_nh.param<std::string>("joint_names/right_friction_wheel_joint", wheel_joint_names_[1], wheel_joint_names_[1]);
   controller_nh.param<std::string>("imu_names", base_imu_name_, base_imu_name_);
+  controller_nh.param<std::string>("auto_state_name", auto_state_name_, auto_state_name_);
+  controller_nh.param<bool>("use_sensor_input", use_sensor_input_, use_sensor_input_);
+  controller_nh.param<bool>("use_auto_state", use_auto_state_, use_auto_state_);
   std::string output_mode_name = toString(output_mode_);
   controller_nh.param<std::string>("output_mode", output_mode_name, output_mode_name);
 
@@ -136,6 +187,10 @@ void B29SmcAutoController::buildHandles()
   }
 
   base_imu_handle_ = imu_sensor_interface_->getHandle(base_imu_name_);
+  if (use_auto_state_)
+  {
+    auto_state_handle_ = auto_state_interface_->getHandle(auto_state_name_);
+  }
 }
 
 void B29SmcAutoController::sensorInputCallback(const AutoSensorInput::ConstPtr& msg)

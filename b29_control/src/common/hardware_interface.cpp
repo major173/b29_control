@@ -55,6 +55,11 @@ bool StRobotHW::init(ros::NodeHandle &root_nh, ros::NodeHandle &robot_hw_nh) {
     return false;
   }
 
+  if(!initAutoStateData(auto_state_data_)) {
+    ROS_ERROR("Failed to init auto state data");
+    return false;
+  }
+
   if (serial_.isOpen())
     return true;
   try {
@@ -67,25 +72,64 @@ bool StRobotHW::init(ros::NodeHandle &root_nh, ros::NodeHandle &robot_hw_nh) {
 }
 
 void StRobotHW::read(const ros::Time &time, const ros::Duration &period) {
-  if (serial_.available()) {
-    rx_len_ = static_cast<int>(serial_.available());
-    std::vector<uint8_t> incoming;
-    const size_t bytes_read = serial_.read(incoming, static_cast<size_t>(rx_len_));
-    if (bytes_read == 0) {
-      return;
-    }
-    incoming.resize(bytes_read);
-    rx_buffer_.insert(rx_buffer_.end(), incoming.begin(), incoming.end());
-    processRxBuffer();
-    if (act_to_jnt_state_interface_) {
-      act_to_jnt_state_interface_->propagate();
-    }
-  } else {
+  constexpr double kLowerAliveTimeout = 0.2;
+  if(!last_rx_time_.isZero() &&
+      (time - last_rx_time_).toSec() < kLowerAliveTimeout)
+  {
+    auto_state_data_.lower_alive = true;
+  } 
+  else {
+    auto_state_data_.lower_alive = false;
+  }
+  
+  if (!serial_.isOpen()) {
+    tryReconnectSerial(time);
     return;
+  }
+  
+  size_t available = 0;
+  try {
+    available = serial_.available();
+  } 
+  catch (const serial::IOException& e) {
+    handleSerialIoError("Serial available() failed", e);
+    return;
+  }
+
+  if (available == 0) {
+    return;
+  }
+
+  rx_len_ = static_cast<int>(available);
+  std::vector<uint8_t> incoming;
+  size_t bytes_read = 0;
+  try {
+    bytes_read = serial_.read(incoming, static_cast<size_t>(rx_len_));
+  } 
+  catch (const serial::IOException& e) {
+    handleSerialIoError("Serial read() failed", e);
+    return;
+  }
+
+  if (bytes_read == 0) {
+    return;
+  }
+
+  incoming.resize(bytes_read);
+  rx_buffer_.insert(rx_buffer_.end(), incoming.begin(), incoming.end());
+  processRxBuffer(time);
+
+  if (act_to_jnt_state_interface_) {
+    act_to_jnt_state_interface_->propagate();
   }
 }
 
 void StRobotHW::write(const ros::Time &time, const ros::Duration &period) {
+  if (!serial_.isOpen()) {
+    tryReconnectSerial(time);
+    return;
+  }
+  
   static std::array<uint8_t, k_data_length_> last_send_data{};
   std::array<uint8_t, k_data_length_> data{};
 
@@ -96,18 +140,49 @@ void StRobotHW::write(const ros::Time &time, const ros::Duration &period) {
     jnt_to_act_velocity_interface_->propagate();
   }
 
-  const double wheel_speed_left = cmd_[control_map_.wheel_speed[0]];
-  const double wheel_speed_right = cmd_[control_map_.wheel_speed[1]];
-  const double claw_speed_left = claw_speed_target_[0];
-  const double claw_speed_right = claw_speed_target_[1];
-  const double claw_angle_left = cmd_[control_map_.claw_angle[0]];
-  const double claw_angle_right = cmd_[control_map_.claw_angle[1]];
-  const double joint_speed_target = joint_speed_target_;
+  auto sanitizeCommand = [](const char *name, double value, double fallback) {
+    if (std::isfinite(value)) {
+      return value;
+    }
+    ROS_WARN_STREAM_THROTTLE(1.0, "Replacing non-finite " << name
+                                           << " command with " << fallback);
+    return fallback;
+  };
+  auto positionFallback = [this](ActuatorIndex index) {
+    return std::isfinite(angle_[index]) ? angle_[index] : 0.0;
+  };
+
+  const auto left_wheel_index    = control_map_.wheel_speed[0];
+  const auto right_wheel_index   = control_map_.wheel_speed[1];
+  const auto left_claw_index     = control_map_.claw_angle[0];
+  const auto right_claw_index    = control_map_.claw_angle[1];
+  const auto joint_angle_indices = control_map_.joint_angle;
+
+  const double wheel_speed_left   =
+      sanitizeCommand("left wheel speed" , cmd_[left_wheel_index], 0.0);
+  const double wheel_speed_right  =
+      sanitizeCommand("right wheel speed", cmd_[right_wheel_index], 0.0);
+  const double claw_speed_left    =
+      sanitizeCommand("left claw speed"  , claw_speed_target_[0], 0.0);
+  const double claw_speed_right   =
+      sanitizeCommand("right claw speed" , claw_speed_target_[1], 0.0);
+  const double claw_angle_left    =
+      sanitizeCommand("left claw angle"  , cmd_[left_claw_index],
+                      positionFallback(left_claw_index));
+  const double claw_angle_right   =
+      sanitizeCommand("right claw angle" , cmd_[right_claw_index],
+                      positionFallback(right_claw_index));
+  const double joint_speed_target =
+      sanitizeCommand("joint speed target", joint_speed_target_, 0.0);
   const double joint_angle_targets[4] = {
-      cmd_[control_map_.joint_angle[0]],
-      cmd_[control_map_.joint_angle[1]],
-      cmd_[control_map_.joint_angle[2]],
-      cmd_[control_map_.joint_angle[3]],
+      sanitizeCommand("left first leg angle"  , cmd_[joint_angle_indices[0]],
+                      positionFallback(joint_angle_indices[0])),
+      sanitizeCommand("left second leg angle" , cmd_[joint_angle_indices[1]],
+                      positionFallback(joint_angle_indices[1])),
+      sanitizeCommand("right first leg angle" , cmd_[joint_angle_indices[2]],
+                      positionFallback(joint_angle_indices[2])),
+      sanitizeCommand("right second leg angle", cmd_[joint_angle_indices[3]],
+                      positionFallback(joint_angle_indices[3])),
   };
 
   uint16_t index = 0;
@@ -128,13 +203,15 @@ void StRobotHW::write(const ros::Time &time, const ros::Duration &period) {
     packFloat(static_cast<float>(joint_angle_target));
   }
 
-  if (true) {
+  if (memcmp(data.data(), last_send_data.data(), data.size()) != 0) {
     pack(tx_buffer_, control_code_, data.data());
     tx_len_ = sizeof(tx_buffer_);
     try {
       serial_.write(tx_buffer_, tx_len_);
-    } catch (serial::PortNotOpenedException &e) {
-      ROS_ERROR_STREAM("Failed to usart data. " << e.what());
+    } 
+    catch (const serial::IOException& e) {
+      handleSerialIoError("Serial write() failed", e);
+      return;
     }
     memcpy(last_send_data.data(), data.data(), data.size());
   }
@@ -324,6 +401,11 @@ void StRobotHW::setInterface() {
   imu_sensor_interface_.registerHandle(imu_handle);
   registerInterface(&imu_sensor_interface_);
   registerInterface(&robot_state_interface_);
+
+  // interface for auto
+  AutoStateHandle auto_handle("auto_state", &auto_state_data_);
+  auto_state_interface_.registerHandle(auto_handle);
+  registerInterface(&auto_state_interface_);
 }
 
 bool StRobotHW::loadProtocolConfig(ros::NodeHandle &root_nh) {
@@ -521,7 +603,7 @@ void StRobotHW::pack(unsigned char *tx_buffer, unsigned char ctrl,
   }
 }
 
-void StRobotHW::unpack(std::vector<uint8_t> rx_buffer) {
+void StRobotHW::unpack(std::vector<uint8_t> rx_buffer,const ros::Time &time) {
   // check header and ender
   if (rx_buffer[0] != header[0] || rx_buffer[1] != header[1]) {
     return;
@@ -538,9 +620,15 @@ void StRobotHW::unpack(std::vector<uint8_t> rx_buffer) {
   const size_t expected_size =
       payload_start + static_cast<size_t>(length) + k_crc_length_ +
       k_tail_length_;
+  const size_t data_length = rx_buffer.size() - payload_start - k_crc_length_ - k_tail_length_;
   if (rx_buffer.size() < expected_size) {
     ROS_WARN_THROTTLE(10, "Received message length %zu is inconsistent",
                       rx_buffer.size());
+    return;
+  }
+  if(data_length != length) {
+    ROS_WARN_THROTTLE(10, "Received message data length %zu does not match length bit %u",
+                      data_length, length);
     return;
   }
   if (rx_buffer[expected_size - 2] != ender[0] ||
@@ -573,10 +661,11 @@ void StRobotHW::unpack(std::vector<uint8_t> rx_buffer) {
 
   constexpr size_t kImuFloatCount = 10;
   constexpr size_t kImuPayloadSize = kImuFloatCount * sizeof(float);
-  const size_t motor_id_length = 1;
-  const size_t entry_size = motor_id_length + 3 * sizeof(float);
+  constexpr size_t kStatusPayloadSize = 2;
+  constexpr size_t kMotorIdLength = 1;
+  const size_t entry_size = kMotorIdLength + 3 * sizeof(float);
 
-  const size_t motor_payload_size = static_cast<size_t>(length) - kImuPayloadSize;
+  const size_t motor_payload_size = static_cast<size_t>(length) - kImuPayloadSize - kStatusPayloadSize;
   if (motor_payload_size % entry_size != 0) {
     ROS_WARN_THROTTLE(10, "Received message data length %u is invalid", length);
     return;
@@ -622,9 +711,45 @@ void StRobotHW::unpack(std::vector<uint8_t> rx_buffer) {
   updateImuState(acc_x, acc_y, acc_z,
                  gyro_x, gyro_y, gyro_z,
                  qw, qx, qy, qz);
+
+  if(index + kStatusPayloadSize > payload_start + static_cast<size_t>(length)) {
+    ROS_WARN_THROTTLE(10, "Received status payload is incomplete");
+    return;
+  }
+
+  const uint8_t motor_fault     = rx_buffer[index++];
+  const uint8_t grip_confirmed  = rx_buffer[index++];
+
+  constexpr size_t joint_motor_fault_bit = 4;
+  constexpr size_t wheel_motor_fault_bit = 2;
+  constexpr size_t grip_motor_fault_bit  = 2;
+
+  auto_state_data_.joint_fault = 0;
+  for (size_t i = 0; i < joint_motor_fault_bit; ++i)
+  {
+    if (!(motor_fault & (1U << i)))
+    {
+      auto_state_data_.joint_fault = 1;
+      break;
+    }
+  }
+
+  auto_state_data_.grip_fault = 0;
+  for (size_t i = 0; i < grip_motor_fault_bit; ++i)
+  {
+    size_t bit_pos = i + joint_motor_fault_bit + wheel_motor_fault_bit;
+    if (!(motor_fault & (1U << bit_pos)))
+    {
+      auto_state_data_.grip_fault = 1;
+      break;
+    }
+  }
+  auto_state_data_.grip_confirmed = grip_confirmed;
+
+  last_rx_time_ = time;
 }
 
-void StRobotHW::processRxBuffer() {
+void StRobotHW::processRxBuffer(const ros::Time& time) {
   const size_t min_frame_length =
       k_header_length_ + k_ctrl_length_ + k_length_ + k_crc_length_ +
       k_tail_length_;
@@ -690,7 +815,7 @@ void StRobotHW::processRxBuffer() {
 
     std::vector<uint8_t> frame(rx_buffer_.begin(),
                                rx_buffer_.begin() + expected_size);
-    unpack(frame);
+    unpack(frame,time);
     rx_buffer_.erase(rx_buffer_.begin(), rx_buffer_.begin() + expected_size);
   }
 }
@@ -729,4 +854,55 @@ void StRobotHW::updateImuState(double acc_x, double acc_y, double acc_z,
   imu_orientation_[2] = q.z();
   imu_orientation_[3] = q.w();
 }
+
+bool StRobotHW::initAutoStateData(AutoStateData &data) {
+  data.lower_alive = false;
+  data.grip_confirmed = false;
+  data.joint_fault = false;
+  data.grip_fault = false;
+  return true;
+}
+
+void StRobotHW::tryReconnectSerial(const ros::Time& time) {
+  static ros::Time last_reconnect_attempt;
+
+  if (serial_.isOpen()) {
+    return;
+  }
+
+  if (!last_reconnect_attempt.isZero() &&
+      (time - last_reconnect_attempt).toSec() < 1.0) {
+    return;
+  }
+
+  last_reconnect_attempt = time;
+
+  try {
+    serial_.open();
+    ROS_INFO_STREAM("Serial reconnected: " << serial_.getPort());
+  } catch (const serial::IOException& e) {
+    ROS_WARN_THROTTLE(2.0, "Serial reconnect failed: %s", e.what());
+  }
+}
+
+void StRobotHW::handleSerialIoError(const std::string& context,
+                                    const serial::IOException& e) {
+  rx_buffer_.clear();
+
+  ROS_ERROR_STREAM_THROTTLE(0.5, context << " : " << e.what());
+
+  if (!serial_.isOpen()) {
+    return;
+  }
+
+  try {
+    serial_.close();
+  } 
+  catch (const serial::IOException& close_error) {
+    ROS_WARN_STREAM_THROTTLE(
+        1.0, "Serial close() after " << context
+             << " : " << close_error.what());
+  }
+}
+
 } // namespace steering_engine_hw

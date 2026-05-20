@@ -86,6 +86,10 @@ private:
   double getApproachSpeed() const;
   void setTargetSpeed(double speed_mps);
   void setDriveMode(robot_fsm::DriveMode mode);
+
+  bool hasSafetyFault() const;
+  std::string safetyStopReason(std::string_view fallback) const;
+
   void reportError(std::string_view reason);
   void reportEmergencyStop(std::string_view reason);
   void setCommandReason(std::string_view reason);

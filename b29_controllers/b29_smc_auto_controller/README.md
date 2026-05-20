@@ -42,6 +42,7 @@
 - `VelocityJointInterface`
 - `JointStateInterface`
 - `ImuSensorInterface(base_imu)`
+- `AutoStateInterface`
 
 同时，自动控制链路仍需要额外业务输入来闭合控制语义：
 
@@ -61,6 +62,8 @@
 
 
 
+在 `controller.yaml` 文件中选择输入数据来源为 `sensor_input` 还是 `AutoStateInterface`
+
 ## 模块说明
 
 ### AutoInputMux
@@ -79,8 +82,8 @@
 
 当前最小合并规则：
 
-- `imu_ready` 当前保留为业务输入语义，来自 `AutoSensorInput`
-- `base_imu` 当前只负责生成 `posture_ready`，不覆盖业务态 `imu_ready`
+- `imu_ready` 当前由 `base_imu` 数据是否有效进行判断，超过 ` 三个周期`  ` base_imu`  数据没有更新则判断为  `false`
+- `base_imu` 当前只负责生成 `posture_ready`
 - `posture_ready` 由 roll/pitch 阈值直接判定
 - `joint state` 当前先承担已注册硬件接口对齐与时间戳合并，不额外引入业务语义
 - `AutoDebugOverride` 只覆盖 `field_mask` 标记字段，未标记字段保持原合并结果

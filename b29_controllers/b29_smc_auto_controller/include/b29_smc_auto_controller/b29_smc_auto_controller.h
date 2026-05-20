@@ -18,13 +18,16 @@
 #include <b29_smc_auto_controller/command_dispatcher.h>
 #include <b29_smc_auto_controller/robot_context.h>
 
+#include <steering_engine/common/auto_state_interface.h>
+
 namespace b29_smc_auto_controller
 {
 class B29SmcAutoController
   : public controller_interface::MultiInterfaceController<hardware_interface::JointStateInterface,
                                                           hardware_interface::PositionJointInterface,
                                                           hardware_interface::VelocityJointInterface,
-                                                          hardware_interface::ImuSensorInterface>
+                                                          hardware_interface::ImuSensorInterface,
+                                                          steering_engine_hw::AutoStateInterface>
 {
 public:
   B29SmcAutoController() = default;
@@ -52,17 +55,22 @@ private:
   hardware_interface::PositionJointInterface* position_joint_interface_{nullptr};
   hardware_interface::VelocityJointInterface* velocity_joint_interface_{nullptr};
   hardware_interface::ImuSensorInterface* imu_sensor_interface_{nullptr};
+  steering_engine_hw::AutoStateInterface* auto_state_interface_{nullptr};
 
   std::array<std::string, kPositionJointCount> position_joint_names_{{"left_first_leg_joint", "left_second_leg_joint",
                                                                        "left_rod_joint", "right_first_leg_joint",
                                                                        "right_second_leg_joint", "right_rod_joint"}};
   std::array<std::string, kWheelJointCount> wheel_joint_names_{{"left_friction_wheel_joint", "right_friction_wheel_joint"}};
   std::string base_imu_name_{"base_imu"};
+  std::string auto_state_name_{"auto_state"};
+  bool use_sensor_input_{false};
+  bool use_auto_state_{true};
 
   std::array<hardware_interface::JointStateHandle, kPositionJointCount> joint_state_handles_{};
   CommandDispatcher::PositionJointHandles position_joint_handles_{};
   CommandDispatcher::WheelJointHandles wheel_joint_handles_{};
   hardware_interface::ImuSensorHandle base_imu_handle_{};
+  steering_engine_hw::AutoStateHandle auto_state_handle_{};
 
   AutoInputMux input_mux_{};
   RobotContext robot_context_{};

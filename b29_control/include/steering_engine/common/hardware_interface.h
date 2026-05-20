@@ -16,7 +16,7 @@
 #define __packed __attribute__((packed))
 
 // ROS
-#include <XmlRpcValue.h>
+#include <xmlrpcpp/XmlRpcValue.h>
 #include <geometry_msgs/TransformStamped.h>
 #include <kdl/tree.hpp>
 #include <kdl_parser/kdl_parser.hpp>
@@ -39,6 +39,9 @@
 #include <transmission_interface/transmission_interface.h>
 #include <transmission_interface/transmission_interface_loader.h>
 #include <transmission_interface/transmission_loader.h>
+
+// SMC
+#include "steering_engine/common/auto_state_interface.h"
 
 namespace steering_engine_hw {
 
@@ -91,7 +94,7 @@ public:
   void write(const ros::Time &time, const ros::Duration &period) override;
 
   void pack(unsigned char *tx_buffer, unsigned char ctrl, unsigned char *data);
-  void unpack(std::vector<uint8_t> rx_buffer);
+  void unpack(std::vector<uint8_t> rx_buffer,const ros::Time &time);
 
   bool loadUrdf(ros::NodeHandle &root_nh);
   void loadImuCovarianceParams(ros::NodeHandle &root_nh);
@@ -108,6 +111,10 @@ public:
   void updateImuState(double acc_x, double acc_y, double acc_z,
                     double gyro_x, double gyro_y, double gyro_z,
                     double qw, double qx, double qy, double qz);
+
+  bool initAutoStateData(AutoStateData &data);
+  void tryReconnectSerial(const ros::Time& time);
+  void handleSerialIoError(const std::string& context,const serial::IOException& e);
 
   //去除输入字符串开头的斜线
   std::string stripSlash(const std::string &in) {
@@ -131,7 +138,7 @@ public:
       iter = rx_buffer_.erase(iter);
     }
   }
-  void processRxBuffer();
+  void processRxBuffer(const ros::Time &time);
   static unsigned char getCrc8(unsigned char *ptr, unsigned short len) {
     unsigned char crc;
     unsigned char i;
@@ -189,6 +196,13 @@ private:
   std::vector<hardware_interface::JointStateHandle> joint_state_handles_{};
   std::vector<hardware_interface::JointHandle> position_joint_handles_{};
   std::vector<hardware_interface::JointHandle> velocity_joint_handles_{};
+
+  // interface for auto
+  AutoStateInterface auto_state_interface_;
+
+  // data for auto
+  AutoStateData auto_state_data_{};
+  ros::Time last_rx_time_{};
 
   // transmission of the robot
   transmission_interface::ActuatorToJointStateInterface
