@@ -2,10 +2,10 @@ b29_smc_auto_controller:
   joint_names:
     left_first_leg_joint: left_first_leg_joint
     left_second_leg_joint: left_second_leg_joint
-    left_rod_joint: left_rod_joint
+    left_rod_joint: l_gripper_left_drive_joint
     right_first_leg_joint: right_first_leg_joint
     right_second_leg_joint: right_second_leg_joint
-    right_rod_joint: right_rod_joint
+    right_rod_joint: r_gripper_left_drive_joint
     left_friction_wheel_joint: left_friction_wheel_joint
     right_friction_wheel_joint: right_friction_wheel_joint
   imu_names: base_imu

@@ -1,348 +1,440 @@
 <?xml version="1.0" encoding="utf-8"?>
-<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="b29">
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="gp11">
 
     <xacro:arg name="use_simulation" default="true"/>
-    <xacro:property name="wheel_radius" value="0.0405"/>
-    <xacro:property name="wheel_edge_radius" value="0.0460"/>
-    <xacro:property name="wheel_height" value="0.0153"/>
-    <xacro:property name="wheel_edge_height" value="0.002"/>
     <xacro:include filename="$(find b29_control)/urdf/common/imu.urdf.xacro"/>
 
+    <!-- ==================== base ==================== -->
     <link name="base_link">
         <inertial>
-            <mass value="0.307"/>
-            <origin xyz="0.003599 -0.017711 -0.020225"/>
-            <inertia ixx="2.331e-4" ixy="2.1312e-5" ixz="-3e-6" iyy="7.147e-4" iyz="-4.86e-5" izz="7.489e-4"/>
+            <origin xyz="8.8e-05 -1.9e-05 0.037664" rpy="0 0 0"/>
+            <mass value="2.429516"/>
+            <inertia ixx="0.006538" ixy="-0.005903" ixz="-1.4e-05" iyy="0.170381" iyz="4e-06" izz="0.167585"/>
         </inertial>
         <visual>
             <origin xyz="0 0 0" rpy="0 0 0"/>
             <geometry>
-                <mesh filename="package://b29_control/meshes/b29/base_link.stl"/>
+                <mesh filename="package://b29_control/meshes/b29/base.STL"/>
             </geometry>
         </visual>
         <collision>
-            <origin xyz="0 -0.01 -0.017" rpy="0 0 0"/>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
             <geometry>
-                <box size="0.244 0.064 0.075"/>
+                <mesh filename="package://b29_control/meshes/b29/base.STL"/>
             </geometry>
         </collision>
     </link>
 
-    <xacro:IMU connected_to="base_link" imu_name="base_imu" xyz="0.0 0.0 0.01"
-               rpy="0 0 0"/>
+    <xacro:IMU connected_to="base_link" imu_name="base_imu" xyz="0.0 0.0 0.01" rpy="0 0 0"/>
 
+    <!-- ==================== left_first_leg ==================== -->
     <link name="left_first_leg">
         <inertial>
-            <mass value="1.655723"/>
-            <origin xyz="-0.000892 0.009 -0.0013"/>
-            <inertia ixx="9.527e-4" ixy="3.7e-5" ixz="-4.25e-5" iyy="1.167e-3" iyz="2.709e-5" izz="9.965e-4"/>
+            <origin xyz="-0.063411 -0.008934 0.141596" rpy="0 0 0"/>
+            <mass value="0.85685"/>
+            <inertia ixx="0.024155" ixy="-0.000517" ixz="0.008494" iyy="0.027184" iyz="0.001291" izz="0.005481"/>
         </inertial>
         <visual>
             <origin xyz="0 0 0" rpy="0 0 0"/>
             <geometry>
-                <mesh filename="package://b29_control/meshes/b29/left_first_leg.stl"/>
-            </geometry>
-        </visual>
-    </link>
-
-    <joint name="left_first_leg_joint" type="continuous">
-        <origin xyz="0.1689 -0.01425 -0.016"
-                rpy="0 0 0"/>
-        <dynamics damping="0.0" friction="0.1"/>
-        <limit effort="97" velocity="6.28" lower="${-pi}" upper="${pi}"/>
-        <parent link="base_link"/>
-        <child link="left_first_leg"/>
-        <axis xyz="0 1 0"/>
-    </joint>
-
-    <link name="left_second_leg">
-        <inertial>
-            <mass value="2.148"/>
-            <origin xyz="-0.000392 -0.002265 0.144156"/>
-            <inertia ixx="2.888e-2" ixy="1.74e-7" ixz="5.5701e-5" iyy="2.91e-2" iyz="4.159e-6" izz="1.22e-3"/>
-        </inertial>
-        <visual>
-            <origin xyz="0 0 0" rpy="0 0 0"/>
-            <geometry>
-                <mesh filename="package://b29_control/meshes/b29/second_leg.stl"/>
+                <mesh filename="package://b29_control/meshes/b29/left_first_leg.STL"/>
             </geometry>
         </visual>
         <collision>
-            <origin xyz="0 -0.03 0.184" rpy="0 0 0"/>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
             <geometry>
-                <box size="0.1 0.002 0.26"/>
+                <mesh filename="package://b29_control/meshes/b29/left_first_leg.STL"/>
+            </geometry>
+        </collision>
+    </link>
+
+    <joint name="left_first_leg_joint" type="continuous">
+        <origin xyz="-0.299916107911189 -0.00183492089258142 0.0379999999994639" rpy="0 0 0"/>
+        <parent link="base_link"/>
+        <child link="left_first_leg"/>
+        <axis xyz="0 1 0"/>
+        <dynamics damping="1.2" friction="0.08"/>
+    </joint>
+
+    <!-- ==================== left_second_leg ==================== -->
+    <link name="left_second_leg">
+        <inertial>
+            <origin xyz="3.3e-05 -5.6e-05 0.066999" rpy="0 0 0"/>
+            <mass value="0.55532"/>
+            <inertia ixx="0.003574" ixy="0" ixz="-1e-06" iyy="0.003456" iyz="2e-06" izz="0.00035"/>
+        </inertial>
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://b29_control/meshes/b29/left_second_leg.STL"/>
+            </geometry>
+        </visual>
+        <collision>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://b29_control/meshes/b29/left_second_leg.STL"/>
             </geometry>
         </collision>
     </link>
 
     <joint name="left_second_leg_joint" type="continuous">
-        <origin xyz="0.050346 -0.03 0.04783"
-                rpy="0 0 0"/>
-        <dynamics damping="0.0" friction="0.1"/>
-        <limit effort="27" velocity="1.44" lower="${-pi}" upper="${pi}"/>
+        <origin xyz="-0.07 -0.01359 0.22765" rpy="0 0 0"/>
         <parent link="left_first_leg"/>
         <child link="left_second_leg"/>
-        <axis xyz="0 0 1"/>
+        <axis xyz="0 0 -1"/>
+        <dynamics damping="1.0" friction="0.06"/>
     </joint>
 
-    <link name="left_rod">
+    <!-- ==================== left gripper ==================== -->
+    <link name="l_gripper_left_drive">
         <inertial>
-            <mass value="0.083"/>
-            <origin xyz="-0.000518 -0.006737 0.124837"/>
-            <inertia ixx="5.17e-4" ixy="0" ixz="0" iyy="5.834e-4" iyz="-4.7556e-5" izz="1.21e-4"/>
+            <origin xyz="-0.0050526 0.01348 -7.0075e-09" rpy="0 0 0"/>
+            <mass value="0.0064743"/>
+            <inertia ixx="1.96837e-06" ixy="1.06745e-06" ixz="0" iyy="8.84156e-07" iyz="0" izz="2.74340e-06"/>
         </inertial>
         <visual>
             <origin xyz="0 0 0" rpy="0 0 0"/>
             <geometry>
-                <mesh filename="package://b29_control/meshes/b29/rod.stl"/>
+                <mesh filename="package://b29_control/meshes/b29/l_gripper_left_drive.STL"/>
             </geometry>
         </visual>
         <collision>
-            <origin xyz="0 0.0 0.0" rpy="0 0 0"/>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
             <geometry>
-                <mesh filename="package://b29_control/meshes/b29/rod.stl"/>
+                <mesh filename="package://b29_control/meshes/b29/l_gripper_left_drive.STL"/>
             </geometry>
         </collision>
     </link>
 
-    <joint name="left_rod_joint" type="prismatic">
-        <origin xyz="0 0 0.161"
-                rpy="0 0 0"/>
-        <dynamics damping="0.0" friction="0.1"/>
-        <limit effort="27" velocity="0.2" lower="0" upper="0.06"/>
+    <joint name="l_gripper_left_drive_joint" type="prismatic">
+        <origin xyz="0.0001 -0.0215 0.1151" rpy="1.5708 0 1.5708"/>
         <parent link="left_second_leg"/>
-        <child link="left_rod"/>
-        <axis xyz="0 0 1"/>
+        <child link="l_gripper_left_drive"/>
+        <axis xyz="-1 0 0"/>
+        <limit lower="-0.015" upper="0.015" effort="50" velocity="0.2"/>
+        <dynamics damping="150.0" friction="5.0"/>
     </joint>
 
-    <!--    <link name="left_rod">-->
-    <!--        <inertial>-->
-    <!--            <mass value="0.038424"/>-->
-    <!--            <origin xyz="0.0 0.0 0.002"/>-->
-    <!--            <inertia ixx="2.711e-6" ixy="0" ixz="0" iyy="1.1584e-5" iyz="-2.69e-7" izz="1.1076e-5"/>-->
-    <!--        </inertial>-->
-    <!--        <visual>-->
-    <!--            <origin xyz="0 0 0" rpy="0 0 0"/>-->
-    <!--            <geometry>-->
-    <!--                <mesh filename="package://b29_control/meshes/b29/jaw.stl"/>-->
-    <!--            </geometry>-->
-    <!--        </visual>-->
-    <!--        <collision>-->
-    <!--            <origin xyz="0 0.0 0.0" rpy="0 0 0"/>-->
-    <!--            <geometry>-->
-    <!--                <mesh filename="package://b29_control/meshes/b29/jaw.stl"/>-->
-    <!--            </geometry>-->
-    <!--        </collision>-->
-    <!--    </link>-->
-
-    <!--    <joint name="left_jaw_joint" type="revolute">-->
-    <!--        <origin xyz="0 -0.030904 0.11904"-->
-    <!--                rpy="0 0 0"/>-->
-    <!--        <dynamics damping="0.0" friction="0.1"/>-->
-    <!--        <limit effort="27" velocity="5.44" lower="-1e10" upper="1e10"/> &lt;!&ndash;> Motor choose <&ndash;&gt;-->
-    <!--        <parent link="left_second_leg"/>-->
-    <!--        <child link="left_jaw"/>-->
-    <!--        <axis xyz="1 0 0"/>-->
-    <!--    </joint>-->
-
-    <link name="left_friction_wheel">
+    <link name="l_gripper_left_up">
         <inertial>
-            <mass value="0.046925"/>
-            <origin xyz="0 0.009657 0"/>
-            <inertia ixx="3.7784e-5" ixy="0" ixz="0" iyy="7.1998e-5" iyz="0" izz="3.7784e-5"/>
+            <origin xyz="-0.005091 0.065621 -7.5e-05" rpy="0 0 0"/>
+            <mass value="0.519091"/>
+            <inertia ixx="0.003042" ixy="0.000201" ixz="0" iyy="0.000375" iyz="2e-06" izz="0.002807"/>
         </inertial>
         <visual>
             <origin xyz="0 0 0" rpy="0 0 0"/>
             <geometry>
-                <mesh filename="package://b29_control/meshes/b29/friction_wheel.stl"/>
+                <mesh filename="package://b29_control/meshes/b29/l_gripper_left_up.STL"/>
             </geometry>
         </visual>
         <collision>
-            <origin xyz="0 ${wheel_edge_height/2} 0" rpy="${-pi/2} 0 0"/>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
             <geometry>
-                <cylinder radius="${wheel_edge_radius}" length="${wheel_edge_height}"/>
+                <mesh filename="package://b29_control/meshes/b29/l_gripper_left_up.STL"/>
             </geometry>
         </collision>
-        <collision>
-            <origin xyz="0 ${wheel_edge_height+wheel_height/2} 0" rpy="${-pi/2} 0 0"/>
+    </link>
+
+    <joint name="l_gripper_left_up_joint" type="fixed">
+        <origin xyz="-0.018152 0.046589 0" rpy="0 0 0"/>
+        <parent link="l_gripper_left_drive"/>
+        <child link="l_gripper_left_up"/>
+    </joint>
+
+    <link name="left_friction_wheel">
+        <inertial>
+            <origin xyz="5.8564e-15 -0.00061383 2.8866e-15" rpy="0 0 0"/>
+            <mass value="0.084511"/>
+            <inertia ixx="9.2e-05" ixy="9.0826e-19" ixz="0" iyy="0.000169" iyz="0" izz="9.2e-05"/>
+        </inertial>
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
             <geometry>
-                <cylinder radius="${wheel_radius}" length="${wheel_height}"/>
+                <mesh filename="package://b29_control/meshes/b29/left_friction_wheel.STL"/>
             </geometry>
-        </collision>
+        </visual>
         <collision>
-            <origin xyz="0 ${wheel_edge_height+wheel_height+wheel_edge_height/2} 0" rpy="${-pi/2} 0 0"/>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
             <geometry>
-                <cylinder radius="${wheel_edge_radius}" length="${wheel_edge_height}"/>
+                <mesh filename="package://b29_control/meshes/b29/left_friction_wheel.STL"/>
             </geometry>
         </collision>
     </link>
 
     <joint name="left_friction_wheel_joint" type="continuous">
-        <origin xyz="0 0.012 0.2665"
-                rpy="0 0 0"/>
-        <dynamics damping="0.0" friction="0.1"/>
-        <limit effort="3.42" velocity="73"/>
-        <parent link="left_second_leg"/>
+        <origin xyz="0.01695 0.082384 -0.0001" rpy="1.4121 -1.5708 -2.9801"/>
+        <parent link="l_gripper_left_up"/>
         <child link="left_friction_wheel"/>
         <axis xyz="0 1 0"/>
     </joint>
 
-    <link name="right_first_leg">
+    <link name="l_gripper_right_drive">
         <inertial>
-            <mass value="1.656"/>
-            <origin xyz="-0.001 0.00879 -0.00079"/>
-            <inertia ixx="9.546e-4" ixy="-3.5123e-5" ixz="4.3e-5" iyy="1.172e-3" iyz="2.844e-5" izz="9.998e-4"/>
+            <origin xyz="0.0050526 0.01348 6.9946e-09" rpy="0 0 0"/>
+            <mass value="0.0064743"/>
+            <inertia ixx="1.96837e-06" ixy="-1.06745e-06" ixz="0" iyy="8.84156e-07" iyz="0" izz="2.74340e-06"/>
         </inertial>
         <visual>
             <origin xyz="0 0 0" rpy="0 0 0"/>
             <geometry>
-                <mesh filename="package://b29_control/meshes/b29/right_first_leg.stl"/>
-            </geometry>
-        </visual>
-    </link>
-
-    <joint name="right_first_leg_joint" type="continuous">
-        <origin xyz="-0.1312 -0.01425 -0.016"
-                rpy="0 0 0"/>
-        <dynamics damping="0.0" friction="0.1"/>
-        <limit effort="97" velocity="6.28" lower="${-pi}" upper="${pi}"/>
-        <parent link="base_link"/>
-        <child link="right_first_leg"/>
-        <axis xyz="0 1 0"/>
-    </joint>
-
-    <link name="right_second_leg">
-        <inertial>
-            <mass value="2.231"/>
-            <origin xyz="-0.000392 -0.002265 0.144156"/>
-            <inertia ixx="2.888e-2" ixy="1.74e-7" ixz="5.5701e-5" iyy="2.91e-2" iyz="4.159e-6" izz="1.22e-3"/>
-        </inertial>
-        <visual>
-            <origin xyz="0 0 0" rpy="0 0 0"/>
-            <geometry>
-                <mesh filename="package://b29_control/meshes/b29/second_leg.stl"/>
+                <mesh filename="package://b29_control/meshes/b29/l_gripper_right_drive.STL"/>
             </geometry>
         </visual>
         <collision>
-            <origin xyz="0 -0.03 0.184" rpy="0 0 0"/>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
             <geometry>
-                <box size="0.1 0.002 0.26"/>
+                <mesh filename="package://b29_control/meshes/b29/l_gripper_right_drive.STL"/>
+            </geometry>
+        </collision>
+    </link>
+
+    <joint name="l_gripper_right_drive_joint" type="fixed">
+        <origin xyz="0.0001 0.0215 0.1151" rpy="1.5708 0 1.5708"/>
+        <parent link="left_second_leg"/>
+        <child link="l_gripper_right_drive"/>
+    </joint>
+
+    <link name="l_gripper_right_up">
+        <inertial>
+            <origin xyz="0.00052003 0.011886 -0.0001" rpy="0 0 0"/>
+            <mass value="0.12712"/>
+            <inertia ixx="0.000321" ixy="-3e-06" ixz="0" iyy="0.000313" iyz="0" izz="6.3e-05"/>
+        </inertial>
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://b29_control/meshes/b29/l_gripper_right_up.STL"/>
+            </geometry>
+        </visual>
+        <collision>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://b29_control/meshes/b29/l_gripper_right_up.STL"/>
+            </geometry>
+        </collision>
+    </link>
+
+    <joint name="l_gripper_right_up_joint" type="prismatic">
+        <origin xyz="0.018152 0.046589 0" rpy="0 0 0"/>
+        <parent link="l_gripper_right_drive"/>
+        <child link="l_gripper_right_up"/>
+        <axis xyz="-1 0 0"/>
+        <limit lower="-0.015" upper="0.015" effort="50" velocity="0.2"/>
+        <dynamics damping="150.0" friction="5.0"/>
+    </joint>
+
+    <link name="left_gripper_tool"/>
+    <joint name="left_gripper_tool_joint" type="fixed">
+        <origin xyz="0.0001 0 0.1151" rpy="1.5708 0 1.5708"/>
+        <parent link="left_second_leg"/>
+        <child link="left_gripper_tool"/>
+    </joint>
+
+    <!-- ==================== right_first_leg ==================== -->
+    <link name="right_first_leg">
+        <inertial>
+            <origin xyz="0.058923 0.005837 0.094762" rpy="0 0 0"/>
+            <mass value="0.484529"/>
+            <inertia ixx="0.008497" ixy="-0.000168" ixz="-0.003215" iyy="0.009795" iyz="-0.000271" izz="0.003452"/>
+        </inertial>
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://b29_control/meshes/b29/right_first_leg.STL"/>
+            </geometry>
+        </visual>
+        <collision>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://b29_control/meshes/b29/right_first_leg.STL"/>
+            </geometry>
+        </collision>
+    </link>
+
+    <joint name="right_first_leg_joint" type="continuous">
+        <origin xyz="0.30008 0.0018349 0.038" rpy="0 0 0"/>
+        <parent link="base_link"/>
+        <child link="right_first_leg"/>
+        <axis xyz="0 1 0"/>
+        <dynamics damping="1.2" friction="0.08"/>
+    </joint>
+
+    <!-- ==================== right_second_leg ==================== -->
+    <link name="right_second_leg">
+        <inertial>
+            <origin xyz="3.3e-05 -5.6e-05 0.066999" rpy="0 0 0"/>
+            <mass value="0.55532"/>
+            <inertia ixx="0.003574" ixy="0" ixz="-1e-06" iyy="0.003456" iyz="2e-06" izz="0.00035"/>
+        </inertial>
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://b29_control/meshes/b29/right_second_leg.STL"/>
+            </geometry>
+        </visual>
+        <collision>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://b29_control/meshes/b29/right_second_leg.STL"/>
             </geometry>
         </collision>
     </link>
 
     <joint name="right_second_leg_joint" type="continuous">
-        <origin xyz="-0.050346 -0.03 0.04783"
-                rpy="0 0 0"/>
-        <dynamics damping="0.0" friction="0.1"/>
-        <limit effort="27" velocity="1.44" lower="${-pi}" upper="${pi}"/>
+        <origin xyz="0.07 -0.0018099 0.22765" rpy="0 0 0"/>
         <parent link="right_first_leg"/>
         <child link="right_second_leg"/>
-        <axis xyz="0 0 1"/>
+        <axis xyz="0 0 -1"/>
+        <dynamics damping="1.0" friction="0.06"/>
     </joint>
 
-    <link name="right_rod">
+    <!-- ==================== right gripper ==================== -->
+    <link name="r_gripper_left_drive">
         <inertial>
-            <mass value="0.083"/>
-            <origin xyz="-0.000518 -0.006737 0.124837"/>
-            <inertia ixx="5.17e-4" ixy="0" ixz="0" iyy="5.834e-4" iyz="-4.7556e-5" izz="1.21e-4"/>
+            <origin xyz="-0.0050526 0.01348 -7.0069e-09" rpy="0 0 0"/>
+            <mass value="0.0064743"/>
+            <inertia ixx="1.96837e-06" ixy="1.06745e-06" ixz="0" iyy="8.84156e-07" iyz="0" izz="2.74340e-06"/>
         </inertial>
         <visual>
             <origin xyz="0 0 0" rpy="0 0 0"/>
             <geometry>
-                <mesh filename="package://b29_control/meshes/b29/rod.stl"/>
+                <mesh filename="package://b29_control/meshes/b29/r_gripper_left_drive.STL"/>
             </geometry>
         </visual>
         <collision>
-            <origin xyz="0 0.0 0.0" rpy="0 0 0"/>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
             <geometry>
-                <mesh filename="package://b29_control/meshes/b29/rod.stl"/>
+                <mesh filename="package://b29_control/meshes/b29/r_gripper_left_drive.STL"/>
             </geometry>
         </collision>
     </link>
 
-    <joint name="right_rod_joint" type="prismatic">
-        <origin xyz="0 0 0.161"
-                rpy="0 0 0"/>
-        <dynamics damping="0.0" friction="0.1"/>
-        <limit effort="27" velocity="0.2" lower="0" upper="0.06"/>
+    <joint name="r_gripper_left_drive_joint" type="prismatic">
+        <origin xyz="0.0001 -0.0215 0.1151" rpy="1.5708 0 1.5708"/>
         <parent link="right_second_leg"/>
-        <child link="right_rod"/>
-        <axis xyz="0 0 1"/>
+        <child link="r_gripper_left_drive"/>
+        <axis xyz="-1 0 0"/>
+        <limit lower="-0.015" upper="0.015" effort="50" velocity="0.2"/>
+        <dynamics damping="150.0" friction="5.0"/>
     </joint>
 
-    <!--    <link name="right_jaw">-->
-    <!--        <inertial>-->
-    <!--            <mass value="0.038424"/>-->
-    <!--            <origin xyz="0.0 0.0 0.002"/>-->
-    <!--            <inertia ixx="2.711e-6" ixy="0" ixz="0" iyy="1.1584e-5" iyz="-2.69e-7" izz="1.1076e-5"/>-->
-    <!--        </inertial>-->
-    <!--        <visual>-->
-    <!--            <origin xyz="0 0 0" rpy="0 0 0"/>-->
-    <!--            <geometry>-->
-    <!--                <mesh filename="package://b29_control/meshes/b29/jaw.stl"/>-->
-    <!--            </geometry>-->
-    <!--        </visual>-->
-    <!--        <collision>-->
-    <!--            <origin xyz="0 0.0 0.0" rpy="0 0 0"/>-->
-    <!--            <geometry>-->
-    <!--                <mesh filename="package://b29_control/meshes/b29/jaw.stl"/>-->
-    <!--            </geometry>-->
-    <!--        </collision>-->
-    <!--    </link>-->
-
-    <!--    <joint name="right_jaw_joint" type="revolute">-->
-    <!--        <origin xyz="0 -0.030904 0.11904"-->
-    <!--                rpy="0 0 0"/>-->
-    <!--        <dynamics damping="0.0" friction="0.1"/>-->
-    <!--        <limit effort="27" velocity="5.44" lower="-1e10" upper="1e10"/> &lt;!&ndash;> Motor choose <&ndash;&gt;-->
-    <!--        <parent link="right_second_leg"/>-->
-    <!--        <child link="right_jaw"/>-->
-    <!--        <axis xyz="1 0 0"/>-->
-    <!--    </joint>-->
-
-    <link name="right_friction_wheel">
+    <link name="r_gripper_left_uprod">
         <inertial>
-            <mass value="0.046925"/>
-            <origin xyz="0 0.009657 0"/>
-            <inertia ixx="3.7784e-5" ixy="0" ixz="0" iyy="7.1998e-5" iyz="0" izz="3.7784e-5"/>
+            <origin xyz="-0.005091 0.065621 -7.5e-05" rpy="0 0 0"/>
+            <mass value="0.519091"/>
+            <inertia ixx="0.003042" ixy="0.000201" ixz="0" iyy="0.000375" iyz="2e-06" izz="0.002807"/>
         </inertial>
         <visual>
             <origin xyz="0 0 0" rpy="0 0 0"/>
             <geometry>
-                <mesh filename="package://b29_control/meshes/b29/friction_wheel.stl"/>
+                <mesh filename="package://b29_control/meshes/b29/r_gripper_left_uprod.STL"/>
             </geometry>
         </visual>
         <collision>
-            <origin xyz="0 ${wheel_edge_height/2} 0" rpy="${-pi/2} 0 0"/>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
             <geometry>
-                <cylinder radius="${wheel_edge_radius}" length="${wheel_edge_height}"/>
+                <mesh filename="package://b29_control/meshes/b29/r_gripper_left_uprod.STL"/>
             </geometry>
         </collision>
-        <collision>
-            <origin xyz="0 ${wheel_edge_height+wheel_height/2} 0" rpy="${-pi/2} 0 0"/>
+    </link>
+
+    <joint name="r_gripper_left_uprod_joint" type="fixed">
+        <origin xyz="-0.018152 0.046589 0" rpy="0 0 0"/>
+        <parent link="r_gripper_left_drive"/>
+        <child link="r_gripper_left_uprod"/>
+    </joint>
+
+    <link name="right_friction_wheel">
+        <inertial>
+            <origin xyz="-2.2204e-16 -0.00061383 -1.1102e-15" rpy="0 0 0"/>
+            <mass value="0.084511"/>
+            <inertia ixx="9.2232e-05" ixy="-1.2193e-19" ixz="-3.0493e-20" iyy="0.00016859" iyz="1.0872e-18"
+                     izz="9.2232e-05"/>
+        </inertial>
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
             <geometry>
-                <cylinder radius="${wheel_radius}" length="${wheel_height}"/>
+                <mesh filename="package://b29_control/meshes/b29/right_friction_wheel.STL"/>
             </geometry>
-        </collision>
+        </visual>
         <collision>
-            <origin xyz="0 ${wheel_edge_height+wheel_height+wheel_edge_height/2} 0" rpy="${-pi/2} 0 0"/>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
             <geometry>
-                <cylinder radius="${wheel_edge_radius}" length="${wheel_edge_height}"/>
+                <mesh filename="package://b29_control/meshes/b29/right_friction_wheel.STL"/>
             </geometry>
         </collision>
     </link>
 
     <joint name="right_friction_wheel_joint" type="continuous">
-        <origin xyz="0 0.012 0.2665"
-                rpy="0 0 0"/>
-        <dynamics damping="0.0" friction="0.1"/>
-        <limit effort="3.42" velocity="73"/>
-        <parent link="right_second_leg"/>
+        <origin xyz="0.01695 0.082384 -0.0001" rpy="2.6586 -1.5708 2.0307"/>
+        <parent link="r_gripper_left_uprod"/>
         <child link="right_friction_wheel"/>
         <axis xyz="0 1 0"/>
     </joint>
 
+    <link name="r_gripper_right_drive">
+        <inertial>
+            <origin xyz="0.0050526 0.01348 6.9946e-09" rpy="0 0 0"/>
+            <mass value="0.0064743"/>
+            <inertia ixx="1.96837e-06" ixy="-1.06745e-06" ixz="0" iyy="8.84156e-07" iyz="0" izz="2.74340e-06"/>
+        </inertial>
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://b29_control/meshes/b29/r_gripper_right_drive.STL"/>
+            </geometry>
+        </visual>
+        <collision>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://b29_control/meshes/b29/r_gripper_right_drive.STL"/>
+            </geometry>
+        </collision>
+    </link>
+
+    <joint name="r_gripper_right_drive_joint" type="fixed">
+        <origin xyz="0.0001 0.0215 0.1151" rpy="1.5708 0 1.5708"/>
+        <parent link="right_second_leg"/>
+        <child link="r_gripper_right_drive"/>
+    </joint>
+
+    <link name="r_gripper_right_uprod">
+        <inertial>
+            <origin xyz="0.00052003 0.011886 -0.0001" rpy="0 0 0"/>
+            <mass value="0.12712"/>
+            <inertia ixx="0.000321" ixy="-3e-06" ixz="0" iyy="0.00031321" iyz="0" izz="6.3e-05"/>
+        </inertial>
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://b29_control/meshes/b29/r_gripper_right_uprod.STL"/>
+            </geometry>
+        </visual>
+        <collision>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <mesh filename="package://b29_control/meshes/b29/r_gripper_right_uprod.STL"/>
+            </geometry>
+        </collision>
+    </link>
+
+    <joint name="r_gripper_right_uprod_joint" type="prismatic">
+        <origin xyz="0.018152 0.046589 0" rpy="0 0 0"/>
+        <parent link="r_gripper_right_drive"/>
+        <child link="r_gripper_right_uprod"/>
+        <axis xyz="-1 0 0"/>
+        <limit lower="-0.015" upper="0.015" effort="50" velocity="0.2"/>
+        <dynamics damping="150.0" friction="5.0"/>
+    </joint>
+
+    <link name="right_gripper_tool"/>
+    <joint name="right_gripper_tool_joint" type="fixed">
+        <origin xyz="0.0001 0 0.1151" rpy="1.5708 0 1.5708"/>
+        <parent link="right_second_leg"/>
+        <child link="right_gripper_tool"/>
+    </joint>
+
+    <!-- ==================== transmissions ==================== -->
     <transmission name="trans_left_first_leg_joint">
         <type>transmission_interface/SimpleTransmission</type>
         <actuator name="left_first_leg_motor">
@@ -365,21 +457,22 @@
         </joint>
     </transmission>
 
-    <transmission name="trans_left_rod_joint">
+    <transmission name="trans_l_gripper_left_drive_joint">
         <type>transmission_interface/SimpleTransmission</type>
-        <actuator name="left_rod_motor">
+        <actuator name="l_gripper_left_drive_motor">
             <mechanicalReduction>1</mechanicalReduction>
         </actuator>
-        <joint name="left_rod_joint">
+        <joint name="l_gripper_left_drive_joint">
             <offset>0</offset>
             <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
         </joint>
     </transmission>
 
+
     <transmission name="trans_left_friction_wheel_joint">
         <type>transmission_interface/SimpleTransmission</type>
         <actuator name="left_friction_wheel_motor">
-            <mechanicalReduction>1</mechanicalReduction> <!--> 3508 real mechanicalReduction: 17:268 <-->
+            <mechanicalReduction>1</mechanicalReduction>
         </actuator>
         <joint name="left_friction_wheel_joint">
             <offset>0</offset>
@@ -409,16 +502,16 @@
         </joint>
     </transmission>
 
-    <transmission name="trans_right_rod_joint">
+    <transmission name="trans_r_gripper_left_drive_joint">
         <type>transmission_interface/SimpleTransmission</type>
-        <actuator name="right_rod_motor">
+        <actuator name="r_gripper_left_drive_motor">
             <mechanicalReduction>1</mechanicalReduction>
         </actuator>
-        <joint name="right_rod_joint">
-            <offset>0</offset>
+        <joint name="r_gripper_left_drive_joint">
             <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
         </joint>
     </transmission>
+
 
     <transmission name="trans_right_friction_wheel_joint">
         <type>transmission_interface/SimpleTransmission</type>
@@ -431,6 +524,7 @@
         </joint>
     </transmission>
 
+    <!-- ==================== Gazebo ==================== -->
     <gazebo>
         <joint name="world_fixed_joint" type="fixed">
             <parent>world</parent>
@@ -447,6 +541,5 @@
             </plugin>
         </gazebo>
     </xacro:if>
-
 
 </robot>
