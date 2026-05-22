@@ -1,0 +1,62 @@
+<?xml version="1.0"?>
+<!--
+  reach_gazebo_stage1.launch — Stage 1~2: Gazebo + position_controllers + RViz
+
+  数据流：
+    Gazebo physics → joint_state_controller → /joint_states
+    外部 rostopic pub / gazebo_rl_bridge → position_controllers → Gazebo physics
+    robot_state_publisher 发布 /tf，RViz 可渲染 URDF mesh
+
+-->
+<launch>
+    <arg name="use_sim_time" default="true"/>
+    <param name="use_sim_time" value="$(arg use_sim_time)"/>
+
+    <param name="robot_description"
+           command="xacro $(find b29_control)/urdf/b29/b29.urdf.xacro use_simulation:=true"/>
+
+    <rosparam file="$(find b29_control)/config/gazebo_ros_control.yaml" command="load"/>
+
+    <include file="$(find gazebo_ros)/launch/empty_world.launch">
+        <arg name="paused" value="true"/>
+        <arg name="use_sim_time" value="true"/>
+        <arg name="gui" value="true"/>
+        <arg name="headless" value="false"/>
+        <arg name="debug" value="false"/>
+    </include>
+
+    <node name="spawn_urdf" pkg="gazebo_ros" type="spawn_model"
+          args="-x 0.0 -y 0.0 -z 1.0
+              -R 0.0 -P 0.0 -Y 0.0
+              -param robot_description -urdf -model b29"/>
+
+    <rosparam file="$(find b29_control)/config/controller.yaml" command="load"/>
+    <rosparam file="$(find b29_control)/config/reach_rl_controllers.yaml" command="load"/>
+
+    <node name="controller_manager" pkg="controller_manager" type="controller_manager"
+          output="screen"
+          args="load
+          b29_controller/joint_state_controller
+          b29_controller/robot_state_controller
+          b29_controller/left_first_leg_joint_position_controller
+          b29_controller/left_second_leg_joint_position_controller
+          b29_controller/right_first_leg_joint_position_controller
+          b29_controller/right_second_leg_joint_position_controller
+        "/>
+
+    <!-- robot_state_publisher: 将 /joint_states 转换为 /tf，RViz 渲染 mesh 必须 -->
+    <node name="robot_state_publisher" pkg="robot_state_publisher"
+          type="robot_state_publisher" output="screen">
+        <param name="publish_frequency" value="50.0"/>
+    </node>
+
+    <!-- world → base_link 静态 TF（与 spawn -z 1.0 对应）
+         使 world → left_second_leg 链路完整，键盘节点和 RViz 均依赖此 frame -->
+    <node name="world_to_base_link" pkg="tf2_ros" type="static_transform_publisher"
+          args="0 0 1.0 0 0 0 world base_link"/>
+
+    <!-- RViz -->
+    <arg name="rviz" default="false"/>
+    <node if="$(arg rviz)" name="rviz" pkg="rviz" type="rviz"
+          args="-d $(find b29_control)/rviz/config.rviz" output="screen"/>
+</launch>
