@@ -18,7 +18,7 @@
     <rosparam file="$(find b29_control)/config/gazebo_ros_control.yaml" command="load"/>
 
     <include file="$(find gazebo_ros)/launch/empty_world.launch">
-        <arg name="paused" value="true"/>
+        <arg name="paused" value="false"/>
         <arg name="use_sim_time" value="true"/>
         <arg name="gui" value="true"/>
         <arg name="headless" value="false"/>
@@ -50,10 +50,13 @@
         <param name="publish_frequency" value="50.0"/>
     </node>
 
-    <!-- world → base_link 静态 TF（与 spawn -z 1.0 对应）
-         使 world → left_second_leg 链路完整，键盘节点和 RViz 均依赖此 frame -->
-    <node name="world_to_base_link" pkg="tf2_ros" type="static_transform_publisher"
-          args="0 0 1.0 0 0 0 world base_link"/>
+    <!-- world → base_link 动态 TF：以固定端 left_second_leg 为世界基座
+         适用于 Gazebo 仿真和实物，无需 /gazebo/link_states -->
+    <node name="anchor_world_tf_publisher" pkg="b29_control"
+          type="anchor_world_tf_publisher.py" output="screen">
+        <param name="anchor_link" value="left_second_leg"/>
+        <param name="rate"        value="50.0"/>
+    </node>
 
     <!-- RViz -->
     <arg name="rviz" default="false"/>
