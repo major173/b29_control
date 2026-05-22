@@ -2,9 +2,157 @@
 
 > B29机器人控制系统
 
+---
 
+## RL Reach Sim2Sim 启动流程
 
-## 调试
+---
+
+### Gazebo 仿真启动
+
+**终端 1：启动 Gazebo + 控制器 + TF**
+
+```bash
+cd ~/usetest/B29
+source devel/setup.bash
+roslaunch b29_control reach_gazebo_stage1.launch
+```
+
+启动内容：
+
+- Gazebo 空世界 + 机器人模型（`left_second_leg` 固定端）
+- `joint_state_controller` / `robot_state_controller`
+- 4 个腿部独立 `position_controller`（供 RL bridge 使用）
+- `robot_state_publisher`（`/joint_states` → `/tf`）
+- `anchor_world_tf_publisher`（发布 `world→base_link` 和 `world→capture_output_ref`）
+
+**终端 2：启动 RL bridge（接收网络关节目标并转发给控制器）**
+
+```bash
+cd ~/usetest/B29
+source devel/setup.bash
+rosrun b29_control gazebo_rl_bridge_node.py
+```
+
+订阅 `/gp11/rl/joint_targets`，按顺序转发到 4 个 position controller：
+`[left_first_leg, left_second_leg, right_first_leg, right_second_leg]`
+
+**终端 3：启动目标点键盘控制节点**
+
+```bash
+# anchor_side=left：左臂固定，右臂运动
+python3 src/b29_control/b29_control/scripts/reach_goal_keyboard_node.py --anchor_side left
+
+# anchor_side=right：右臂固定，左臂运动
+python3 src/b29_control/b29_control/scripts/reach_goal_keyboard_node.py --anchor_side right
+```
+
+键盘操作：
+
+| 按键     | 动作           |
+|--------|--------------|
+| W/S    | 目标点 X +/-    |
+| A/D    | 目标点 Y +/-    |
+| Q/E    | 目标点 Z +/-    |
+| R      | 重置目标点到当前末端位置 |
+| [ / ]  | 步长 -/+       |
+| Ctrl+C | 退出           |
+
+发布话题：`/gp11/rl/target_point_local`（`capture_output_ref` 坐标系下的 3D 目标点）
+
+**终端 4（可选）：手动发布关节目标测试**
+
+```bash
+rostopic pub /gp11/rl/joint_targets std_msgs/Float64MultiArray \
+  "data: [0.3, 0.5, -0.3, 0.5]" -r 50
+```
+
+---
+
+### RViz 可视化
+
+**启动 RViz**
+
+```bash
+# 方式一：随 launch 文件启动
+roslaunch b29_control reach_gazebo_stage1.launch rviz:=true
+
+# 方式二：单独启动
+rviz
+```
+
+**RViz 配置要点**
+
+| 设置项         | 值                                                             |
+|-------------|---------------------------------------------------------------|
+| Fixed Frame | `world`                                                       |
+| RobotModel  | 添加，Topic: `/robot_description`                                |
+| TF          | 添加，查看坐标系树                                                     |
+| Marker (红球) | Topic: `/gp11/rl/goal_marker`，目标点位置（`capture_output_ref` 坐标系） |
+| Marker (绿球) | Topic: `/gp11/rl/tool_marker`，运动端末端当前位置（`world` 坐标系）          |
+
+**关键 TF 帧说明**
+
+| TF 帧                   | 含义                                               |
+|------------------------|--------------------------------------------------|
+| `world`                | 世界固定系，以 `left_second_leg` 为原点                    |
+| `left_second_leg`      | 固定端（anchor），在 `world` 下静止不动                      |
+| `base_link`            | 机体，随关节运动在 `world` 下漂移                            |
+| `capture_output_ref`   | capture 网络输出参考坐标系，原点 = `left_second_leg` 位置 + 偏移 |
+| `r_gripper_left_uprod` | 运动端末端（绿球跟踪位置）                                    |
+
+---
+
+### 实机启动
+
+**终端 1：启动硬件接口 + 控制器**
+
+```bash
+cd ~/usetest/B29
+source devel/setup.bash
+roslaunch b29_control start.launch
+```
+
+**终端 2：启动 TF 发布（以固定端为世界基座）**
+
+```bash
+rosrun b29_control anchor_world_tf_publisher.py \
+  _anchor_link:=left_second_leg \
+  _anchor_side:=left \
+  _rate:=50.0
+```
+
+**终端 3：启动目标点键盘控制节点**
+
+```bash
+python3 src/b29_control/b29_control/scripts/reach_goal_keyboard_node.py \
+  --anchor_side left \
+  --world_frame base_link
+```
+
+> 实机无 `world` frame，使用 `--world_frame base_link`；RViz Fixed Frame 设为 `left_second_leg`。
+
+**实机 RViz 配置**
+
+| 设置项         | 值                                    |
+|-------------|--------------------------------------|
+| Fixed Frame | `left_second_leg`（实机无 `world` frame） |
+| RobotModel  | 添加                                   |
+| Marker (红球) | Topic: `/gp11/rl/goal_marker`        |
+| Marker (绿球) | Topic: `/gp11/rl/tool_marker`        |
+
+---
+
+### 节点与话题速查
+
+| 节点                            | 订阅                       | 发布                                                                          |
+|-------------------------------|--------------------------|-----------------------------------------------------------------------------|
+| `gazebo_rl_bridge_node`       | `/gp11/rl/joint_targets` | `*_position_controller/command` ×4                                          |
+| `reach_goal_keyboard_node`    | `/tf`                    | `/gp11/rl/target_point_local`，`/gp11/rl/goal_marker`，`/gp11/rl/tool_marker` |
+| `anchor_world_tf_publisher`   | `/tf`（TF buffer）         | `/tf`（`world→base_link`，`world→capture_output_ref`）                         |
+| `gripper_passive_joint_relay` | `/joint_states`          | `/joint_states`（从动夹爪关节，仅实机）                                                 |
+
+---
 
 ### 硬件接口测试
 
@@ -29,8 +177,6 @@ cutecom			 # 可视化界面
 # 确认发来的数据是否符合数据帧
 ```
 
-
-
 - 启动hardware
 
 ```bash
@@ -43,8 +189,6 @@ rqt
 
 进入rqt,在`controller manager`启动`joint_state_controller`
 
-
-
 - 观察电机数据
 
 ```bash
@@ -53,8 +197,6 @@ rosrun plotjuggler plotjuggler
 ```
 
 订阅`/joint_state`话题
-
-
 
 ## 通信协议
 
@@ -69,16 +211,16 @@ rosrun plotjuggler plotjuggler
 
 **A. 数据包结构 (51 Bytes)**
 
-| 顺序       | 字段名      | 长度         | 值/类型     | 说明                      |
-| ---------- | ----------- | ------------ | ----------- | ------------------------- |
-| 1          | 帧头1       | 1 Byte       | `0x55`      | 固定头                    |
-| 2          | 帧头2       | 1 Byte       | `0xAA`      | 固定头                    |
-| 3          | 命令字      | 1 Byte       | `0x01`      | 控制指令                  |
-| 4          | 长度位      | 1 Byte       | `0x2C` (44) | 后续数据净荷长度          |
+| 顺序         | 字段名         | 长度           | 值/类型        | 说明               |
+|------------|-------------|--------------|-------------|------------------|
+| 1          | 帧头1         | 1 Byte       | `0x55`      | 固定头              |
+| 2          | 帧头2         | 1 Byte       | `0xAA`      | 固定头              |
+| 3          | 命令字         | 1 Byte       | `0x01`      | 控制指令             |
+| 4          | 长度位         | 1 Byte       | `0x2C` (44) | 后续数据净荷长度         |
 | **5 ~ 48** | **Payload** | **44 Bytes** | **Mixed**   | **核心控制数据 (见下表)** |
-| 49         | CRC         | 1 Byte       | Calc        | CRC8 校验码               |
-| 50         | 帧尾1       | 1 Byte       | `0x0D`      | CR                        |
-| 51         | 帧尾2       | 1 Byte       | `0x0A`      | LF                        |
+| 49         | CRC         | 1 Byte       | Calc        | CRC8 校验码         |
+| 50         | 帧尾1         | 1 Byte       | `0x0D`      | CR               |
+| 51         | 帧尾2         | 1 Byte       | `0x0A`      | LF               |
 
 **B. Payload 数据内容 (44 Bytes) （注：float数据按小端序发送）**
 
@@ -106,8 +248,6 @@ float jointSpeedTarget;
 float jointAngleTarget[4];
 ```
 
-
-
 **C. 如何解析与使用**
 
 当下位机收到这串数据后：
@@ -115,11 +255,9 @@ float jointAngleTarget[4];
 1. **校验**：计算前 48 字节的 CRC8 是否等于第 49 字节。
 2. **映射**：将字节流按每 4 个字节强转为 `float`。
 3. 应用：
-   - 将 **轮子速度** 赋值给底盘运动学解算模块。
-   - 将 **关节角度** 发送给机械臂驱动模块（如位置模式控制）。
-   - 将 **夹爪位置/速度** 发送给夹爪电机。
-
-
+    - 将 **轮子速度** 赋值给底盘运动学解算模块。
+    - 将 **关节角度** 发送给机械臂驱动模块（如位置模式控制）。
+    - 将 **夹爪位置/速度** 发送给夹爪电机。
 
 ### 反馈帧结构
 
@@ -130,23 +268,21 @@ float jointAngleTarget[4];
 
 电机数量 `num = 8`。长度 = `7 + (8 \* 13) + 2 * 3 * 4 + 4 * 4 + 2` = 153字节。
 
-| **顺序**      | **字段名**  | **长度**      | **值/类型**      | **说明**                                              |
-| ------------- | ----------- | ------------- | ---------------- | ----------------------------------------------------- |
-| **1**         | **帧头1**   | **1 Byte**    | **`0x55`**       | **固定头**                                            |
-| **2**         | **帧头2**   | **1 Byte**    | **`0xAA`**       | **固定头**                                            |
-| **3**         | **命令字**  | **1 Byte**    | **`0x01`**       | **反馈指令**                                          |
-| **4**         | **长度位**  | **1 Byte**    | **`0x92` (146)** | **后续数据净荷长度 (8 * 13 + 2 * 3 * 4 + 4 * 4 + 2)** |
-| **5 ~ 108**   | **Payload** | **104 Bytes** | **Mixed**        | **所有电机的状态列表**                                |
-| **109 ~ 148** | **Payload** | **40  Bytes** | **Mixed**        | **IMU数据**                                           |
-| **149**       | **Payload** | **1 Bytes**   | **Mixed**        | **电机异常状态位**                                    |
+| **顺序**        | **字段名**     | **长度**        | **值/类型**         | **说明**                                        |
+|---------------|-------------|---------------|------------------|-----------------------------------------------|
+| **1**         | **帧头1**     | **1 Byte**    | **`0x55`**       | **固定头**                                       |
+| **2**         | **帧头2**     | **1 Byte**    | **`0xAA`**       | **固定头**                                       |
+| **3**         | **命令字**     | **1 Byte**    | **`0x01`**       | **反馈指令**                                      |
+| **4**         | **长度位**     | **1 Byte**    | **`0x92` (146)** | **后续数据净荷长度 (8 * 13 + 2 * 3 * 4 + 4 * 4 + 2)** |
+| **5 ~ 108**   | **Payload** | **104 Bytes** | **Mixed**        | **所有电机的状态列表**                                 |
+| **109 ~ 148** | **Payload** | **40  Bytes** | **Mixed**        | **IMU数据**                                     |
+| **149**       | **Payload** | **1 Bytes**   | **Mixed**        | **电机异常状态位**                                   |
 | **150**       | **Payload** | **1 Bytes**   | **Mixed**        | **夹爪初始化标志位**                                  |
-| 151           | CRC         | 1 Byte        | Calc             | CRC8 校验码                                           |
-| 152           | 帧尾1       | 1 Byte        | `0x0D`           | CR                                                    |
-| 153           | 帧尾2       | 1 Byte        | `0x0A`           | LF                                                    |
+| 151           | CRC         | 1 Byte        | Calc             | CRC8 校验码                                      |
+| 152           | 帧尾1         | 1 Byte        | `0x0D`           | CR                                            |
+| 153           | 帧尾2         | 1 Byte        | `0x0A`           | LF                                            |
 
-
-
-**B. Payload 数据内容 (8个电机  IMU数据)**
+**B. Payload 数据内容 (8个电机 IMU数据)**
 
 数据是一个**列表**，每个电机占用 **13 个字节**，依次排列 (Motor1 → Motor8)。
 **单个电机的数据块结构 (13 Bytes)**：**(注： float数据按小端序发送)**
@@ -171,52 +307,44 @@ Block 2 (Byte 13-25): **电机 2** 的 ID, Pos, Vel, Tor
 
 Block 8 (Byte 91-103): **电机 8** 的 ID, Pos, Vel, Tor
 
-
-
 **IMU 数据（加速度 角速度 四元数）**
 
--   X 加速度
--   Y 加速度
--   Z 加速度
--   X 角速度
--   Y 角速度
--   Z 角速度
--   四元数 W
--   四元数 X
--   四元数 Y
--   四元数 Z
-
-
+- X 加速度
+- Y 加速度
+- Z 加速度
+- X 角速度
+- Y 角速度
+- Z 角速度
+- 四元数 W
+- 四元数 X
+- 四元数 Y
+- 四元数 Z
 
 **电机异常状态位**
 
--   以 `一个字节` 表示 `8个电机` 异常状态, `1` 表示正常  `0` 表示异常
--   因此上位机接收此字节为 `0xFF` 时表示所有电机均 `正常`，否则有电机处于 `异常状态`
+- 以 `一个字节` 表示 `8个电机` 异常状态, `1` 表示正常  `0` 表示异常
+- 因此上位机接收此字节为 `0xFF` 时表示所有电机均 `正常`，否则有电机处于 `异常状态`
 
-| 字位      | 对应电机          |
-| --------- | ----------------- |
+| 字位      | 对应电机         |
+|---------|--------------|
 | `第 0 位` | `左pitch关节电机` |
 | `第 1 位` | `左yaw关节电机`   |
 | `第 2 位` | `右pitch关节电机` |
 | `第 3 位` | `右yaw关节电机`   |
-| `第 4 位` | `左驱动轮电机`    |
-| `第 5 位` | `右驱动轮电机`    |
+| `第 4 位` | `左驱动轮电机`     |
+| `第 5 位` | `右驱动轮电机`     |
 | `第 6 位` | `左夹爪电机`      |
 | `第 7 位` | `右夹爪电机`      |
 
 **夹爪初始化状态位**
 
--   此状态位用以判断夹爪是否初始化完成， `0` 表示未完成  `1` 表示完成
-
-
+- 此状态位用以判断夹爪是否初始化完成， `0` 表示未完成  `1` 表示完成
 
 **C. 上位机如何解析**
 
 1. **寻找帧头：在串口流中寻找 `55 AA`。**
 2. **读取长度：读取 Length 字节 (0x92 = 146)。**
 3. **读取 Payload：读取接下来的 146 字节。**
-
-
 
 ### **校验相关代码**
 

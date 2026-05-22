@@ -30,7 +30,8 @@ _ANCHOR_TO_LINKS = {
 
 ANCHOR_LINK = "left_second_leg"
 TOOL_LINK   = "r_gripper_left_uprod"
-WORLD_FRAME      = "world"   # 实物部署时改为 "base_link"，或通过 --world_frame 指定
+WORLD_FRAME = "world"   # 实物部署时改为 "base_link"，或通过 --world_frame 指定
+OUTPUT_REF_FRAME = "capture_output_ref"  # capture 输出参考坐标系，由 anchor_world_tf_publisher 发布
 STEP_DEFAULT     = 0.02
 
 _RST  = "\033[0m"
@@ -101,8 +102,8 @@ class ReachGoalKeyboardNode:
             return None
 
     def _get_ref_pose(self):
-        """world → ANCHOR_LINK 的位姿 (origin, R)。"""
-        return self._lookup(WORLD_FRAME, ANCHOR_LINK)
+        """world → capture_output_ref 的位姿 (origin, R)。"""
+        return self._lookup(WORLD_FRAME, OUTPUT_REF_FRAME)
 
     def _get_tool_pos_world(self):
         """运动端 gripper_tool 在 world 下的位置。"""
@@ -142,18 +143,16 @@ class ReachGoalKeyboardNode:
 
     def _marker_loop(self) -> None:
         while self._running and not rospy.is_shutdown():
-            ref_pose   = self._get_ref_pose()
             tool_world = self._get_tool_pos_world()
             stamp      = self._wall_stamp()
 
-            if ref_pose is not None:
-                origin, R = ref_pose
-                with self._lock:
-                    goal_ref = self._goal_ref.copy()
-                goal_world = R @ goal_ref + origin
-                self._pub_goal_marker.publish(
-                    _sphere(0, goal_world, (0.95, 0.15, 0.15, 0.85), WORLD_FRAME, stamp, 0.045)
-                )
+            # 红球：直接在 capture_output_ref 坐标系下发布 _goal_ref 位置
+            # 无需转换，RViz 会用该 frame 的 TF 自动定位
+            with self._lock:
+                goal_ref = self._goal_ref.copy()
+            self._pub_goal_marker.publish(
+                _sphere(0, goal_ref, (0.95, 0.15, 0.15, 0.85), OUTPUT_REF_FRAME, stamp, 0.045)
+            )
 
             if tool_world is not None:
                 self._pub_tool_marker.publish(
@@ -221,8 +220,8 @@ class ReachGoalKeyboardNode:
             f"{_BOLD}{_CYN}|  GP11 Reach Goal Keyboard Control    |{_RST}",
             f"{_BOLD}{_CYN}+--------------------------------------+{_RST}",
             f"",
-            f"  TF ({ANCHOR_LINK}) : {tf_status}   {init_flag}",
-            f"  goal [ref]       : [{goal[0]:+.3f}  {goal[1]:+.3f}  {goal[2]:+.3f}]",
+            f"  TF ({OUTPUT_REF_FRAME}) : {tf_status}   {init_flag}",
+            f"  goal [output_ref]: [{goal[0]:+.3f}  {goal[1]:+.3f}  {goal[2]:+.3f}]",
             f"  goal [world]     : {goal_world_str}",
             f"  goal ↔ tool dist : {dist_str}",
             f"  step             : {_BOLD}{step:.3f} m{_RST}",
@@ -230,7 +229,7 @@ class ReachGoalKeyboardNode:
             f"  {_BOLD}W/S{_RST} X+/-   {_BOLD}A/D{_RST} Y+/-   {_BOLD}Q/E{_RST} Z+/-",
             f"  {_BOLD}R{_RST} reset到末端  {_BOLD}[{_RST} step-   {_BOLD}]{_RST} step+   {_BOLD}^C{_RST} quit",
             f"",
-            f"  red=goal  green=tool({TOOL_LINK})",
+            f"  red=goal(capture_output_ref)  green=tool({TOOL_LINK})",
             f"",
             f"  --- log ---",
         ]
@@ -329,9 +328,12 @@ def main() -> None:
         [a for a in sys.argv[1:] if not a.startswith("__")]
     )
 
-    global ANCHOR_LINK, TOOL_LINK, WORLD_FRAME
+    global ANCHOR_LINK, TOOL_LINK, WORLD_FRAME, OUTPUT_REF_FRAME
     ANCHOR_LINK, TOOL_LINK = _ANCHOR_TO_LINKS[args.anchor_side]
     WORLD_FRAME = args.world_frame
+    # anchor_side=right 时 output_orientation_body=right_second_leg，符号+1
+    # anchor_side=left  时 output_orientation_body=left_second_leg，符号-1
+    # capture_output_ref 由 anchor_world_tf_publisher 发布，frame 名固定
 
     node = ReachGoalKeyboardNode()
     node.run_keyboard()

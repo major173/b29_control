@@ -54,8 +54,9 @@
          适用于 Gazebo 仿真和实物，无需 /gazebo/link_states -->
     <node name="anchor_world_tf_publisher" pkg="b29_control"
           type="anchor_world_tf_publisher.py" output="screen">
-        <param name="anchor_link" value="left_second_leg"/>
-        <param name="rate"        value="50.0"/>
+        <param name="anchor_link"  value="left_second_leg"/>
+        <param name="anchor_side"  value="left"/>
+        <param name="rate"         value="50.0"/>
     </node>
 
     <!-- RViz -->
