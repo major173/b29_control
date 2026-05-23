@@ -178,6 +178,7 @@ target_link_libraries(b29_hardware ${catkin_LIBRARIES})
 catkin_install_python(PROGRAMS
   scripts/gripper_passive_joint_relay.py
   scripts/anchor_world_tf_publisher.py
+  scripts/rl_inference_node.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

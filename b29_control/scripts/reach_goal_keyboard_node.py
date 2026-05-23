@@ -24,24 +24,25 @@ from visualization_msgs.msg import Marker
 #               训练侧用 l/r_gripper_left_up + l/r_gripper_right_up 的中点，
 #               Gazebo 中从动关节无 TF，用 gripper_tool（fixed，TF 存在）近似
 _ANCHOR_TO_LINKS = {
-    "left":  ("left_second_leg",  "r_gripper_left_uprod"),  # 左臂固定，右臂运动
-    "right": ("right_second_leg", "l_gripper_left_up"),     # 右臂固定，左臂运动
+    "left": ("left_second_leg", "r_gripper_left_uprod"),  # 左臂固定，右臂运动
+    "right": ("right_second_leg", "l_gripper_left_up"),  # 右臂固定，左臂运动
 }
 
 ANCHOR_LINK = "left_second_leg"
-TOOL_LINK   = "r_gripper_left_uprod"
-WORLD_FRAME = "world"   # 实物部署时改为 "base_link"，或通过 --world_frame 指定
-OUTPUT_REF_FRAME = "capture_output_ref"  # capture 输出参考坐标系，由 anchor_world_tf_publisher 发布
-STEP_DEFAULT     = 0.02
+TOOL_LINK = "r_gripper_left_uprod"
+WORLD_FRAME = "world"  # 实物部署时改为 "base_link"，或通过 --world_frame 指定
+# obs_ref frame = ANCHOR_LINK，与训练侧 obs_ref_body 一致
+OBS_REF_FRAME = ANCHOR_LINK  # 随 ANCHOR_LINK 联动
+STEP_DEFAULT = 0.02
 
-_RST  = "\033[0m"
+_RST = "\033[0m"
 _BOLD = "\033[1m"
-_RED  = "\033[31m"
-_GRN  = "\033[32m"
-_YLW  = "\033[33m"
-_CYN  = "\033[36m"
+_RED = "\033[31m"
+_GRN = "\033[32m"
+_YLW = "\033[33m"
+_CYN = "\033[36m"
 _HOME = "\033[H"
-_ED   = "\033[J"
+_ED = "\033[J"
 
 
 def _write(text: str) -> None:
@@ -52,9 +53,9 @@ def _write(text: str) -> None:
 def _quat_to_rot(q) -> np.ndarray:
     x, y, z, w = q
     return np.array([
-        [1 - 2*(y*y + z*z),  2*(x*y - z*w),    2*(x*z + y*w)],
-        [2*(x*y + z*w),      1 - 2*(x*x + z*z), 2*(y*z - x*w)],
-        [2*(x*z - y*w),      2*(y*z + x*w),     1 - 2*(x*x + y*y)],
+        [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+        [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+        [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
     ], dtype=np.float32)
 
 
@@ -65,11 +66,11 @@ class ReachGoalKeyboardNode:
         self._spin_thread = threading.Thread(target=rospy.spin, daemon=True)
         self._spin_thread.start()
 
-        self._tf   = tf.TransformListener()
+        self._tf = tf.TransformListener()
         self._lock = threading.RLock()  # 可重入锁，避免同线程嵌套死锁
 
-        self._goal_ref  = np.zeros(3, dtype=np.float32)
-        self._step      = STEP_DEFAULT
+        self._goal_ref = np.zeros(3, dtype=np.float32)
+        self._step = STEP_DEFAULT
         self._log_msgs: list[str] = []
         self._initialized = False
 
@@ -102,8 +103,8 @@ class ReachGoalKeyboardNode:
             return None
 
     def _get_ref_pose(self):
-        """world → capture_output_ref 的位姿 (origin, R)。"""
-        return self._lookup(WORLD_FRAME, OUTPUT_REF_FRAME)
+        """world → obs_ref (ANCHOR_LINK) 的位姿 (origin, R)。"""
+        return self._lookup(WORLD_FRAME, OBS_REF_FRAME)
 
     def _get_tool_pos_world(self):
         """运动端 gripper_tool 在 world 下的位置。"""
@@ -121,13 +122,13 @@ class ReachGoalKeyboardNode:
     def _init_goal_from_tool(self) -> None:
         deadline = time.time() + 10.0
         while time.time() < deadline and not rospy.is_shutdown():
-            ref_pose   = self._get_ref_pose()
+            ref_pose = self._get_ref_pose()
             tool_world = self._get_tool_pos_world()
             if ref_pose is not None and tool_world is not None:
                 origin, R = ref_pose
                 goal_ref = R.T @ (tool_world - origin)
                 with self._lock:
-                    self._goal_ref    = goal_ref.astype(np.float32)
+                    self._goal_ref = goal_ref.astype(np.float32)
                     self._initialized = True
                 self._publish_goal()
                 self._log(f"{_GRN}初始化目标 = 末端当前位置{_RST}")
@@ -144,14 +145,14 @@ class ReachGoalKeyboardNode:
     def _marker_loop(self) -> None:
         while self._running and not rospy.is_shutdown():
             tool_world = self._get_tool_pos_world()
-            stamp      = self._wall_stamp()
+            stamp = self._wall_stamp()
 
-            # 红球：直接在 capture_output_ref 坐标系下发布 _goal_ref 位置
-            # 无需转换，RViz 会用该 frame 的 TF 自动定位
+            # 红球：在 obs_ref (ANCHOR_LINK) 坐标系下发布 _goal_ref 位置
+            # RViz 通过 TF 自动定位到世界坐标
             with self._lock:
                 goal_ref = self._goal_ref.copy()
             self._pub_goal_marker.publish(
-                _sphere(0, goal_ref, (0.95, 0.15, 0.15, 0.85), OUTPUT_REF_FRAME, stamp, 0.045)
+                _sphere(0, goal_ref, (0.95, 0.15, 0.15, 0.85), OBS_REF_FRAME, stamp, 0.045)
             )
 
             if tool_world is not None:
@@ -191,25 +192,25 @@ class ReachGoalKeyboardNode:
     # ------------------------------------------------------------------ #
 
     def _render_ui(self) -> None:
-        ref_pose   = self._get_ref_pose()
+        ref_pose = self._get_ref_pose()
         tool_world = self._get_tool_pos_world()
         with self._lock:
-            goal  = self._goal_ref.copy()
-            step  = self._step
-            logs  = list(self._log_msgs)
+            goal = self._goal_ref.copy()
+            step = self._step
+            logs = list(self._log_msgs)
             ready = self._initialized
 
         tf_status = f"{_GRN}OK{_RST}" if ref_pose is not None else f"{_RED}等待 TF...{_RST}"
 
         goal_world_str = "—"
-        dist_str       = "—"
+        dist_str = "—"
         if ref_pose is not None:
-            origin, R  = ref_pose
-            gw         = R @ goal + origin
+            origin, R = ref_pose
+            gw = R @ goal + origin
             goal_world_str = f"[{gw[0]:+.3f}  {gw[1]:+.3f}  {gw[2]:+.3f}]"
             if tool_world is not None:
                 dist = float(np.linalg.norm(gw - tool_world))
-                c    = _GRN if dist < 0.05 else (_YLW if dist < 0.20 else _RED)
+                c = _GRN if dist < 0.05 else (_YLW if dist < 0.20 else _RED)
                 dist_str = f"{c}{dist:.3f} m{_RST}"
 
         init_flag = f"{_GRN}已初始化{_RST}" if ready else f"{_YLW}等待初始化...{_RST}"
@@ -220,16 +221,16 @@ class ReachGoalKeyboardNode:
             f"{_BOLD}{_CYN}|  GP11 Reach Goal Keyboard Control    |{_RST}",
             f"{_BOLD}{_CYN}+--------------------------------------+{_RST}",
             f"",
-            f"  TF ({OUTPUT_REF_FRAME}) : {tf_status}   {init_flag}",
-            f"  goal [output_ref]: [{goal[0]:+.3f}  {goal[1]:+.3f}  {goal[2]:+.3f}]",
-            f"  goal [world]     : {goal_world_str}",
+            f"  TF ({OBS_REF_FRAME}) : {tf_status}   {init_flag}",
+            f"  goal [obs_ref]: [{goal[0]:+.3f}  {goal[1]:+.3f}  {goal[2]:+.3f}]",
+            f"  goal [world]  : {goal_world_str}",
             f"  goal ↔ tool dist : {dist_str}",
             f"  step             : {_BOLD}{step:.3f} m{_RST}",
             f"",
             f"  {_BOLD}W/S{_RST} X+/-   {_BOLD}A/D{_RST} Y+/-   {_BOLD}Q/E{_RST} Z+/-",
             f"  {_BOLD}R{_RST} reset到末端  {_BOLD}[{_RST} step-   {_BOLD}]{_RST} step+   {_BOLD}^C{_RST} quit",
             f"",
-            f"  red=goal(capture_output_ref)  green=tool({TOOL_LINK})",
+            f"  red=goal(obs_ref={OBS_REF_FRAME})  green=tool({TOOL_LINK})",
             f"",
             f"  --- log ---",
         ]
@@ -243,7 +244,7 @@ class ReachGoalKeyboardNode:
 
     def run_keyboard(self) -> None:
         import tty, termios
-        fd  = sys.stdin.fileno()
+        fd = sys.stdin.fileno()
         old = termios.tcgetattr(fd)
 
         ui_thread = threading.Thread(target=self._ui_loop, daemon=True)
@@ -256,15 +257,21 @@ class ReachGoalKeyboardNode:
                 if ch in ('\x03', '\x04'):
                     break
                 s = self._step
-                if   ch in ('w', 'W'): self._try_move(np.array([ s, 0, 0], np.float32), f"X +{s:.3f}")
-                elif ch in ('s', 'S'): self._try_move(np.array([-s, 0, 0], np.float32), f"X -{s:.3f}")
-                elif ch in ('a', 'A'): self._try_move(np.array([0,  s, 0], np.float32), f"Y +{s:.3f}")
-                elif ch in ('d', 'D'): self._try_move(np.array([0, -s, 0], np.float32), f"Y -{s:.3f}")
-                elif ch in ('q', 'Q'): self._try_move(np.array([0, 0,  s], np.float32), f"Z +{s:.3f}")
-                elif ch in ('e', 'E'): self._try_move(np.array([0, 0, -s], np.float32), f"Z -{s:.3f}")
+                if ch in ('w', 'W'):
+                    self._try_move(np.array([s, 0, 0], np.float32), f"X +{s:.3f}")
+                elif ch in ('s', 'S'):
+                    self._try_move(np.array([-s, 0, 0], np.float32), f"X -{s:.3f}")
+                elif ch in ('a', 'A'):
+                    self._try_move(np.array([0, s, 0], np.float32), f"Y +{s:.3f}")
+                elif ch in ('d', 'D'):
+                    self._try_move(np.array([0, -s, 0], np.float32), f"Y -{s:.3f}")
+                elif ch in ('q', 'Q'):
+                    self._try_move(np.array([0, 0, s], np.float32), f"Z +{s:.3f}")
+                elif ch in ('e', 'E'):
+                    self._try_move(np.array([0, 0, -s], np.float32), f"Z -{s:.3f}")
                 elif ch == 'r':
                     # 重置到当前末端位置
-                    ref_pose  = self._get_ref_pose()
+                    ref_pose = self._get_ref_pose()
                     tool_world = self._get_tool_pos_world()
                     if ref_pose is not None and tool_world is not None:
                         origin, R = ref_pose
@@ -300,11 +307,11 @@ class ReachGoalKeyboardNode:
 def _sphere(mid, pos, rgba, frame_id, stamp, scale=0.04) -> Marker:
     m = Marker()
     m.header.frame_id = frame_id
-    m.header.stamp    = stamp
-    m.ns              = "reach_goal"
-    m.id              = mid
-    m.type            = Marker.SPHERE
-    m.action          = Marker.ADD
+    m.header.stamp = stamp
+    m.ns = "reach_goal"
+    m.id = mid
+    m.type = Marker.SPHERE
+    m.action = Marker.ADD
     m.pose.position.x = float(pos[0])
     m.pose.position.y = float(pos[1])
     m.pose.position.z = float(pos[2])

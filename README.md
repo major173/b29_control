@@ -8,9 +8,58 @@
 
 ---
 
-### Gazebo 仿真启动
+### 环境准备（首次配置）
 
-**终端 1：启动 Gazebo + 控制器 + TF**
+**1. 创建 conda 环境**
+
+```bash
+conda create -n b29 python=3.8 -y
+conda activate b29
+```
+
+**2. 安装推理依赖**
+
+```bash
+# 始终用 python3 -m pip，避免 PYTHONPATH 污染导致系统 pip 被调用
+python3 -m pip install numpy==1.23.5
+python3 -m pip install onnxruntime==1.19.2
+python3 -m pip install pyyaml
+python3 -m pip install rospkg catkin-pkg   # rospy 依赖，pip 安装替代系统路径
+```
+
+> **注意**：不要将 `/usr/lib/python3/dist-packages` 加入 `PYTHONPATH`，会导致 conda 工具链崩溃。
+
+**3. 配置 ROS 激活脚本**
+
+```bash
+CONDA_ENV_PATH=$(PYTHONPATH="" conda info --envs | grep "^b29 " | awk '{print $NF}')
+mkdir -p "$CONDA_ENV_PATH/etc/conda/activate.d"
+cat > "$CONDA_ENV_PATH/etc/conda/activate.d/ros_setup.sh" << 'EOF'
+export PYTHONPATH=$PYTHONPATH:/opt/ros/noetic/lib/python3/dist-packages
+source /opt/ros/noetic/setup.bash
+for _ws in "$HOME/usetest/B29" "$HOME/catkin_ws"; do
+    if [ -f "$_ws/devel/setup.bash" ]; then
+        source "$_ws/devel/setup.bash"
+        break
+    fi
+done
+unset _ws
+EOF
+conda deactivate && conda activate b29
+```
+
+**4. 验证环境**
+
+```bash
+python3 -c "import numpy, onnxruntime, yaml, rospkg; print('deps ok')"
+python3 -c "import rospy; from sensor_msgs.msg import JointState; print('ros ok')"
+```
+
+---
+
+### Gazebo 端到端闭环启动
+
+**终端 1：Gazebo + 控制器 + TF**
 
 ```bash
 cd ~/usetest/B29
@@ -18,141 +67,147 @@ source devel/setup.bash
 roslaunch b29_control reach_gazebo_stage1.launch
 ```
 
-启动内容：
-
-- Gazebo 空世界 + 机器人模型（`left_second_leg` 固定端）
-- `joint_state_controller` / `robot_state_controller`
-- 4 个腿部独立 `position_controller`（供 RL bridge 使用）
-- `robot_state_publisher`（`/joint_states` → `/tf`）
-- `anchor_world_tf_publisher`（发布 `world→base_link` 和 `world→capture_output_ref`）
-
-**终端 2：启动 RL bridge（接收网络关节目标并转发给控制器）**
+**终端 2：RL bridge（关节目标 → position controller）**
 
 ```bash
 cd ~/usetest/B29
 source devel/setup.bash
+conda activate b29
 rosrun b29_control gazebo_rl_bridge_node.py
 ```
 
-订阅 `/gp11/rl/joint_targets`，按顺序转发到 4 个 position controller：
-`[left_first_leg, left_second_leg, right_first_leg, right_second_leg]`
-
-**终端 3：启动目标点键盘控制节点**
+**终端 3：RL 推理节点**
 
 ```bash
-# anchor_side=left：左臂固定，右臂运动
-python3 src/b29_control/b29_control/scripts/reach_goal_keyboard_node.py --anchor_side left
-
-# anchor_side=right：右臂固定，左臂运动
-python3 src/b29_control/b29_control/scripts/reach_goal_keyboard_node.py --anchor_side right
+cd ~/usetest/B29
+conda activate b29
+python3 src/b29_control/b29_control/scripts/rl_inference_node.py
 ```
+
+启动后日志应显示：
+```
+[rl_inference] anchor_side=left active_dof=[left_first_leg_joint, ...]
+[rl_inference] onnx=.../models/reach/stage0.onnx
+[rl_inference] waiting for target_point...
+```
+
+**终端 4：目标点键盘控制**
+
+```bash
+cd ~/usetest/B29
+conda activate b29
+python3 src/b29_control/b29_control/scripts/reach_goal_keyboard_node.py --anchor_side left
+```
+
+启动后推理节点打印 `target_point received`，之后每 5 秒输出一次推理状态。
 
 键盘操作：
 
-| 按键     | 动作           |
-|--------|--------------|
-| W/S    | 目标点 X +/-    |
-| A/D    | 目标点 Y +/-    |
-| Q/E    | 目标点 Z +/-    |
-| R      | 重置目标点到当前末端位置 |
-| [ / ]  | 步长 -/+       |
-| Ctrl+C | 退出           |
+| 按键 | 动作 |
+|------|------|
+| W/S | 目标点 X +/- |
+| A/D | 目标点 Y +/- |
+| Q/E | 目标点 Z +/- |
+| R | 重置目标点到当前末端位置 |
+| [ / ] | 步长 -/+ |
+| Ctrl+C | 退出 |
 
-发布话题：`/gp11/rl/target_point_local`（`capture_output_ref` 坐标系下的 3D 目标点）
-
-**终端 4（可选）：手动发布关节目标测试**
+**验证闭环**
 
 ```bash
-rostopic pub /gp11/rl/joint_targets std_msgs/Float64MultiArray \
-  "data: [0.3, 0.5, -0.3, 0.5]" -r 50
+# 推理输出频率（应稳定 50Hz）
+rostopic hz /gp11/rl/joint_targets
+
+# 查看关节目标
+rostopic echo /gp11/rl/joint_targets -n 3
+
+# 查看观测向量（32D，obs[30:32] 应为 [0,1] 表示 left anchor）
+rostopic echo /gp11/rl/observation -n 1
+
+# 查看原始 action（4D，值在 [-1,1]）
+rostopic echo /gp11/rl/action_raw -n 1
 ```
 
 ---
 
 ### RViz 可视化
 
-**启动 RViz**
-
 ```bash
-# 方式一：随 launch 文件启动
+# 随 launch 启动
 roslaunch b29_control reach_gazebo_stage1.launch rviz:=true
-
-# 方式二：单独启动
+# 或单独启动
 rviz
 ```
 
-**RViz 配置要点**
+| 设置项 | 值 |
+|--------|-----|
+| Fixed Frame | `world` |
+| RobotModel | 添加 |
+| TF | 添加 |
+| Marker (红球) | `/gp11/rl/goal_marker`（目标点，`capture_output_ref` 坐标系） |
+| Marker (绿球) | `/gp11/rl/tool_marker`（运动端末端） |
 
-| 设置项         | 值                                                             |
-|-------------|---------------------------------------------------------------|
-| Fixed Frame | `world`                                                       |
-| RobotModel  | 添加，Topic: `/robot_description`                                |
-| TF          | 添加，查看坐标系树                                                     |
-| Marker (红球) | Topic: `/gp11/rl/goal_marker`，目标点位置（`capture_output_ref` 坐标系） |
-| Marker (绿球) | Topic: `/gp11/rl/tool_marker`，运动端末端当前位置（`world` 坐标系）          |
+**关键 TF 帧**
 
-**关键 TF 帧说明**
-
-| TF 帧                   | 含义                                               |
-|------------------------|--------------------------------------------------|
-| `world`                | 世界固定系，以 `left_second_leg` 为原点                    |
-| `left_second_leg`      | 固定端（anchor），在 `world` 下静止不动                      |
-| `base_link`            | 机体，随关节运动在 `world` 下漂移                            |
-| `capture_output_ref`   | capture 网络输出参考坐标系，原点 = `left_second_leg` 位置 + 偏移 |
-| `r_gripper_left_uprod` | 运动端末端（绿球跟踪位置）                                    |
+| TF 帧 | 含义 |
+|-------|------|
+| `world` | 世界固定系，以 `left_second_leg` 为原点 |
+| `left_second_leg` | 固定端，在 `world` 下静止不动 |
+| `base_link` | 机体，随关节运动漂移 |
+| `capture_output_ref` | capture 网络输出参考坐标系 |
+| `r_gripper_left_uprod` | 运动端末端（绿球跟踪） |
 
 ---
 
 ### 实机启动
 
-**终端 1：启动硬件接口 + 控制器**
+**终端 1：硬件接口**
 
 ```bash
-cd ~/usetest/B29
-source devel/setup.bash
+cd ~/usetest/B29 && source devel/setup.bash
 roslaunch b29_control start.launch
 ```
 
-**终端 2：启动 TF 发布（以固定端为世界基座）**
+**终端 2：TF 发布**
 
 ```bash
+conda activate b29
 rosrun b29_control anchor_world_tf_publisher.py \
-  _anchor_link:=left_second_leg \
-  _anchor_side:=left \
-  _rate:=50.0
+  _anchor_link:=left_second_leg _anchor_side:=left _rate:=50.0
 ```
 
-**终端 3：启动目标点键盘控制节点**
+**终端 3：RL 推理节点**
 
 ```bash
-python3 src/b29_control/b29_control/scripts/reach_goal_keyboard_node.py \
-  --anchor_side left \
-  --world_frame base_link
+conda activate b29
+python3 src/b29_control/b29_control/scripts/rl_inference_node.py
 ```
 
-> 实机无 `world` frame，使用 `--world_frame base_link`；RViz Fixed Frame 设为 `left_second_leg`。
+**终端 4：目标点键盘控制**
 
-**实机 RViz 配置**
+```bash
+conda activate b29
+python3 src/b29_control/b29_control/scripts/reach_goal_keyboard_node.py \
+  --anchor_side left --world_frame base_link
+```
 
-| 设置项         | 值                                    |
-|-------------|--------------------------------------|
-| Fixed Frame | `left_second_leg`（实机无 `world` frame） |
-| RobotModel  | 添加                                   |
-| Marker (红球) | Topic: `/gp11/rl/goal_marker`        |
-| Marker (绿球) | Topic: `/gp11/rl/tool_marker`        |
+> 实机无 `world` frame，RViz Fixed Frame 设为 `left_second_leg`。
 
 ---
 
 ### 节点与话题速查
 
-| 节点                            | 订阅                       | 发布                                                                          |
-|-------------------------------|--------------------------|-----------------------------------------------------------------------------|
-| `gazebo_rl_bridge_node`       | `/gp11/rl/joint_targets` | `*_position_controller/command` ×4                                          |
-| `reach_goal_keyboard_node`    | `/tf`                    | `/gp11/rl/target_point_local`，`/gp11/rl/goal_marker`，`/gp11/rl/tool_marker` |
-| `anchor_world_tf_publisher`   | `/tf`（TF buffer）         | `/tf`（`world→base_link`，`world→capture_output_ref`）                         |
-| `gripper_passive_joint_relay` | `/joint_states`          | `/joint_states`（从动夹爪关节，仅实机）                                                 |
+| 节点 | 订阅 | 发布 |
+|------|------|------|
+| `rl_inference_node` | `/joint_states`，`/gp11/rl/target_point_local` | `/gp11/rl/joint_targets`，`/gp11/rl/observation`，`/gp11/rl/action_raw` |
+| `gazebo_rl_bridge_node` | `/gp11/rl/joint_targets` | `*_position_controller/command` ×4 |
+| `reach_goal_keyboard_node` | `/tf` | `/gp11/rl/target_point_local`，`/gp11/rl/goal_marker`，`/gp11/rl/tool_marker` |
+| `anchor_world_tf_publisher` | `/tf`（TF buffer） | `/tf`（`world→base_link`，`world→capture_output_ref`） |
+| `gripper_passive_joint_relay` | `/joint_states` | `/joint_states`（从动夹爪，仅实机） |
 
 ---
+
+
 
 ### 硬件接口测试
 
