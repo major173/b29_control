@@ -9,7 +9,7 @@
 
 runtime:
   # 任务侧
-  anchor_side: "left"             # "right" / "left"，决定 active_side_one_hot；Gazebo 固定左臂
+  anchor_side: "left"             # "right" / "left"，必须与 launch anchor_side 参数一致
   active_dof_names: # 关节顺序，用 name 查询，绝不靠下标
     - left_first_leg_joint
     - left_second_leg_joint

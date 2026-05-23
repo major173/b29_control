@@ -32,7 +32,8 @@ ANCHOR_LINK = "left_second_leg"
 TOOL_LINK = "r_gripper_left_uprod"
 WORLD_FRAME = "world"  # 实物部署时改为 "base_link"，或通过 --world_frame 指定
 # obs_ref frame = ANCHOR_LINK，与训练侧 obs_ref_body 一致
-OBS_REF_FRAME = ANCHOR_LINK  # 随 ANCHOR_LINK 联动
+# 注意：OBS_REF_FRAME 在 main() 中根据 anchor_side 参数动态设置
+OBS_REF_FRAME = ANCHOR_LINK  # 默认值，会被 main() 覆盖
 STEP_DEFAULT = 0.02
 
 _RST = "\033[0m"
@@ -335,8 +336,9 @@ def main() -> None:
         [a for a in sys.argv[1:] if not a.startswith("__")]
     )
 
-    global ANCHOR_LINK, TOOL_LINK, WORLD_FRAME, OUTPUT_REF_FRAME
+    global ANCHOR_LINK, TOOL_LINK, WORLD_FRAME, OBS_REF_FRAME
     ANCHOR_LINK, TOOL_LINK = _ANCHOR_TO_LINKS[args.anchor_side]
+    OBS_REF_FRAME = ANCHOR_LINK  # 同步更新 obs_ref frame
     WORLD_FRAME = args.world_frame
     # anchor_side=right 时 output_orientation_body=right_second_leg，符号+1
     # anchor_side=left  时 output_orientation_body=left_second_leg，符号-1

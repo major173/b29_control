@@ -42,13 +42,20 @@ from reach_policy import (  # noqa: E402
     SafetyLimiter,
 )
 
+# ---- 导入训练侧正运动学 ---- #
+try:
+    from sim2sim_mujoco.gp11_reach_runtime import UrdfKinematicModel  # noqa: E402
+except ImportError:
+    UrdfKinematicModel = None  # type: ignore
+
 
 # ---- ROS 导入：在 main 内 lazy import 以便单元测试加载本文件 ---- #
 def _import_ros():
     import rospy  # type: ignore
     from sensor_msgs.msg import JointState  # type: ignore
     from std_msgs.msg import Float64MultiArray  # type: ignore
-    return rospy, JointState, Float64MultiArray
+    from visualization_msgs.msg import Marker  # type: ignore
+    return rospy, JointState, Float64MultiArray, Marker
 
 
 # --------------------------------------------------------------------------- #
@@ -57,10 +64,11 @@ def _import_ros():
 
 class RLInferenceNode:
     def __init__(self, cfg: Config) -> None:
-        rospy, JointState, Float64MultiArray = _import_ros()
+        rospy, JointState, Float64MultiArray, Marker = _import_ros()
         self._rospy = rospy
         self._JointState = JointState
         self._F64MA = Float64MultiArray
+        self._Marker = Marker
 
         self.cfg = cfg
         self.rt = cfg.runtime
@@ -93,6 +101,9 @@ class RLInferenceNode:
         self.pub_action_raw = rospy.Publisher(
             self.topics["action_raw"], Float64MultiArray, queue_size=1
         )
+        self.pub_fk_marker = rospy.Publisher(
+            "/gp11/rl/fk_target_marker", Marker, queue_size=1
+        )
 
         # ---- 订阅器 ---- #
         rospy.Subscriber(
@@ -111,6 +122,37 @@ class RLInferenceNode:
                       self.cfg.deploy.safety.enable,
                       self.cfg.deploy.safety.max_joint_vel,
                       self.cfg.deploy.safety.target_step_clip)
+
+        # obs_ref frame：与训练侧 obs_ref_body 一致（固定端 second_leg）
+        self._obs_ref_frame = f"{self.rt.anchor_side}_second_leg"
+
+        # 正运动学：用于计算 target_q → 期望末端位置
+        # anchor_side=left  → 右臂运动，tool=r_gripper_left_uprod/r_gripper_right_uprod
+        # anchor_side=right → 左臂运动，tool=l_gripper_left_up/l_gripper_right_up
+        _SIDE_TOOL_BODIES = {
+            "left":  ("r_gripper_left_uprod", "r_gripper_right_uprod"),
+            "right": ("l_gripper_left_up",    "l_gripper_right_up"),
+        }
+        self._kinematics = None
+        if UrdfKinematicModel is not None:
+            try:
+                urdf_path = _THIS_DIR.parent / "urdf" / "b29" / "b29_flat.urdf"
+                if urdf_path.exists():
+                    tool_left, tool_right = _SIDE_TOOL_BODIES[self.rt.anchor_side]
+                    self._kinematics = UrdfKinematicModel.from_urdf(
+                        urdf_path,
+                        tool_left_body=tool_left,
+                        tool_right_body=tool_right,
+                        orientation_body=f"{self.rt.anchor_side}_second_leg",
+                    )
+                    rospy.loginfo("[rl_inference] FK model loaded: tool=%s+%s", tool_left, tool_right)
+                else:
+                    rospy.logwarn("[rl_inference] FK URDF not found at %s, FK marker disabled", urdf_path)
+                    rospy.logwarn("[rl_inference] Run: rosrun xacro xacro %s > %s",
+                                  _THIS_DIR.parent / "urdf" / "b29" / "b29.urdf.xacro", urdf_path)
+            except Exception as e:
+                rospy.logwarn("[rl_inference] FK init failed: %s", e)
+                self._kinematics = None
 
     # ---- callbacks ---- #
     def _on_target_point(self, msg) -> None:
@@ -192,6 +234,31 @@ class RLInferenceNode:
         self.pub_obs.publish(self._F64MA(data=obs.tolist()))
         self.pub_action_raw.publish(self._F64MA(data=raw_action.tolist()))
 
+        # 发布正运动学期望末端位置（橙色球，obs_ref 坐标系）
+        stamp = self._rospy.Time.now()
+        if self._kinematics is not None:
+            try:
+                tool_mid, _ = self._kinematics.evaluate(target_q_safe)
+                fk_marker = self._Marker()
+                fk_marker.header.frame_id = self._obs_ref_frame
+                fk_marker.header.stamp = stamp
+                fk_marker.ns = "rl_fk_target"
+                fk_marker.id = 0
+                fk_marker.type = self._Marker.SPHERE
+                fk_marker.action = self._Marker.ADD
+                fk_marker.pose.position.x = float(tool_mid[0])
+                fk_marker.pose.position.y = float(tool_mid[1])
+                fk_marker.pose.position.z = float(tool_mid[2])
+                fk_marker.pose.orientation.w = 1.0
+                fk_marker.scale.x = fk_marker.scale.y = fk_marker.scale.z = 0.04
+                fk_marker.color.r = 0.95
+                fk_marker.color.g = 0.5
+                fk_marker.color.b = 0.05
+                fk_marker.color.a = 0.9
+                self.pub_fk_marker.publish(fk_marker)
+            except Exception:
+                pass
+
 
 # --------------------------------------------------------------------------- #
 # 入口                                                                        #
@@ -217,7 +284,7 @@ def _resolve_config_path(rospy) -> Path:
 
 
 def main() -> int:
-    rospy, _, _ = _import_ros()
+    rospy, _, _, _ = _import_ros()
     rospy.init_node("gp11_rl_inference", anonymous=False, disable_signals=False)
     cfg_path = _resolve_config_path(rospy)
     rospy.loginfo("[rl_inference] loading config: %s", cfg_path)

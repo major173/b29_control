@@ -10,10 +10,14 @@
 -->
 <launch>
     <arg name="use_sim_time" default="true"/>
+    <arg name="anchor_side"  default="left"/>   <!-- left 或 right，决定哪侧固定 -->
+    <arg name="rviz"         default="false"/>
+
     <param name="use_sim_time" value="$(arg use_sim_time)"/>
 
     <param name="robot_description"
-           command="xacro $(find b29_control)/urdf/b29/b29.urdf.xacro use_simulation:=true"/>
+           command="xacro $(find b29_control)/urdf/b29/b29.urdf.xacro
+                    use_simulation:=true anchor_side:=$(arg anchor_side)"/>
 
     <rosparam file="$(find b29_control)/config/gazebo_ros_control.yaml" command="load"/>
 
@@ -50,17 +54,15 @@
         <param name="publish_frequency" value="50.0"/>
     </node>
 
-    <!-- world → base_link 动态 TF：以固定端 left_second_leg 为世界基座
-         适用于 Gazebo 仿真和实物，无需 /gazebo/link_states -->
+    <!-- world → base_link 动态 TF：以固定端为世界基座 -->
     <node name="anchor_world_tf_publisher" pkg="b29_control"
           type="anchor_world_tf_publisher.py" output="screen">
-        <param name="anchor_link"  value="left_second_leg"/>
-        <param name="anchor_side"  value="left"/>
+        <param name="anchor_link"  value="$(arg anchor_side)_second_leg"/>
+        <param name="anchor_side"  value="$(arg anchor_side)"/>
         <param name="rate"         value="50.0"/>
     </node>
 
     <!-- RViz -->
-    <arg name="rviz" default="false"/>
     <node if="$(arg rviz)" name="rviz" pkg="rviz" type="rviz"
           args="-d $(find b29_control)/rviz/config.rviz" output="screen"/>
 </launch>

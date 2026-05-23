@@ -64,7 +64,10 @@ python3 -c "import rospy; from sensor_msgs.msg import JointState; print('ros ok'
 ```bash
 cd ~/usetest/B29
 source devel/setup.bash
+# 左臂固定（默认）
 roslaunch b29_control reach_gazebo_stage1.launch
+# 或右臂固定
+roslaunch b29_control reach_gazebo_stage1.launch anchor_side:=right
 ```
 
 **终端 2：RL bridge（关节目标 → position controller）**
@@ -96,8 +99,13 @@ python3 src/b29_control/b29_control/scripts/rl_inference_node.py
 ```bash
 cd ~/usetest/B29
 conda activate b29
+# 左臂固定（与 launch 参数一致）
 python3 src/b29_control/b29_control/scripts/reach_goal_keyboard_node.py --anchor_side left
+# 或右臂固定
+python3 src/b29_control/b29_control/scripts/reach_goal_keyboard_node.py --anchor_side right
 ```
+
+> **注意**：`anchor_side` 必须与 launch 文件参数一致，否则固定端/运动端不匹配。
 
 启动后推理节点打印 `target_point received`，之后每 5 秒输出一次推理状态。
 
@@ -121,12 +129,19 @@ rostopic hz /gp11/rl/joint_targets
 # 查看关节目标
 rostopic echo /gp11/rl/joint_targets -n 3
 
-# 查看观测向量（32D，obs[30:32] 应为 [0,1] 表示 left anchor）
+# 查看观测向量（32D，obs[30:32]：left=[0,1]，right=[1,0]）
 rostopic echo /gp11/rl/observation -n 1
 
 # 查看原始 action（4D，值在 [-1,1]）
 rostopic echo /gp11/rl/action_raw -n 1
 ```
+
+**切换固定端**
+
+| anchor_side | 固定端 | 运动端 | obs[30:32] |
+|-------------|--------|--------|------------|
+| left | left_second_leg | 右臂 | [0, 1] |
+| right | right_second_leg | 左臂 | [1, 0] |
 
 ---
 
