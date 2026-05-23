@@ -136,20 +136,28 @@ class RLInferenceNode:
         self._kinematics = None
         if UrdfKinematicModel is not None:
             try:
-                urdf_path = _THIS_DIR.parent / "urdf" / "b29" / "b29_flat.urdf"
-                if urdf_path.exists():
-                    tool_left, tool_right = _SIDE_TOOL_BODIES[self.rt.anchor_side]
-                    self._kinematics = UrdfKinematicModel.from_urdf(
-                        urdf_path,
-                        tool_left_body=tool_left,
-                        tool_right_body=tool_right,
-                        orientation_body=f"{self.rt.anchor_side}_second_leg",
+                urdf_xacro = _THIS_DIR.parent / "urdf" / "b29" / "b29.urdf.xacro"
+                urdf_flat = _THIS_DIR.parent / "urdf" / "b29" / f"b29_flat_{self.rt.anchor_side}.urdf"
+
+                # 如果 flat URDF 不存在，自动生成
+                if not urdf_flat.exists():
+                    import subprocess
+                    rospy.loginfo("[rl_inference] Generating flat URDF: %s", urdf_flat)
+                    result = subprocess.run(
+                        ["rosrun", "xacro", "xacro", str(urdf_xacro), f"anchor_side:={self.rt.anchor_side}"],
+                        capture_output=True, text=True, check=True
                     )
-                    rospy.loginfo("[rl_inference] FK model loaded: tool=%s+%s", tool_left, tool_right)
-                else:
-                    rospy.logwarn("[rl_inference] FK URDF not found at %s, FK marker disabled", urdf_path)
-                    rospy.logwarn("[rl_inference] Run: rosrun xacro xacro %s > %s",
-                                  _THIS_DIR.parent / "urdf" / "b29" / "b29.urdf.xacro", urdf_path)
+                    urdf_flat.write_text(result.stdout)
+                    rospy.loginfo("[rl_inference] Flat URDF generated successfully")
+
+                tool_left, tool_right = _SIDE_TOOL_BODIES[self.rt.anchor_side]
+                self._kinematics = UrdfKinematicModel.from_urdf(
+                    urdf_flat,
+                    tool_left_body=tool_left,
+                    tool_right_body=tool_right,
+                    orientation_body=f"{self.rt.anchor_side}_second_leg",
+                )
+                rospy.loginfo("[rl_inference] FK model loaded: tool=%s+%s", tool_left, tool_right)
             except Exception as e:
                 rospy.logwarn("[rl_inference] FK init failed: %s", e)
                 self._kinematics = None

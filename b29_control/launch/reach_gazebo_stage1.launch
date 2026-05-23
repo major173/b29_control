@@ -10,7 +10,7 @@
 -->
 <launch>
     <arg name="use_sim_time" default="true"/>
-    <arg name="anchor_side"  default="left"/>   <!-- left 或 right，决定哪侧固定 -->
+    <arg name="anchor_side"  default="left"/>   <!-- left/right/base: 固定左端/右端/base_link -->
     <arg name="rviz"         default="false"/>
 
     <param name="use_sim_time" value="$(arg use_sim_time)"/>
@@ -54,10 +54,11 @@
         <param name="publish_frequency" value="50.0"/>
     </node>
 
-    <!-- world → base_link 动态 TF：以固定端为世界基座 -->
+    <!-- world → base_link 动态 TF：以固定端为世界基座
+         anchor_side=base 时 base_link 已固定到 world，节点直接 spin 无需发布 -->
     <node name="anchor_world_tf_publisher" pkg="b29_control"
           type="anchor_world_tf_publisher.py" output="screen">
-        <param name="anchor_link"  value="$(arg anchor_side)_second_leg"/>
+        <param name="anchor_link"  value="$(eval 'base_link' if arg('anchor_side') == 'base' else arg('anchor_side') + '_second_leg')"/>
         <param name="anchor_side"  value="$(arg anchor_side)"/>
         <param name="rate"         value="50.0"/>
     </node>

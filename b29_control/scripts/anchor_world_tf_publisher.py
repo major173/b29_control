@@ -131,6 +131,23 @@ def main():
     ap = rospy.get_param("~anchor_pitch", 0.0)
     aw_param = rospy.get_param("~anchor_yaw", 0.0)
 
+    # anchor_side=base 时，base_link 已被 Gazebo 固定在 world
+    # 发布静态 world → base_link identity TF，使完整 TF 链可用
+    if anchor_side == "base":
+        rospy.loginfo("[anchor_world_tf] anchor_side=base, publishing static world→base_link identity TF")
+        static_br = tf2_ros.StaticTransformBroadcaster()
+        t = TransformStamped()
+        t.header.stamp = rospy.Time.now()
+        t.header.frame_id = "world"
+        t.child_frame_id = "base_link"
+        t.transform.translation.x = 0.0
+        t.transform.translation.y = 0.0
+        t.transform.translation.z = 0.0
+        t.transform.rotation.w = 1.0
+        static_br.sendTransform(t)
+        rospy.spin()
+        return
+
     output_body, sign = _SIDE_SPECS.get(anchor_side, _SIDE_SPECS["left"])
     signed_distance = sign * _OUTPUT_REFERENCE_DISTANCE
 

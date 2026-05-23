@@ -2,7 +2,7 @@
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="gp11">
 
     <xacro:arg name="use_simulation" default="true"/>
-    <xacro:arg name="anchor_side"    default="left"/>  <!-- left 或 right，决定哪侧固定 -->
+    <xacro:arg name="anchor_side" default="left"/>  <!-- left/right/base: 固定左端/右端/base_link -->
     <xacro:include filename="$(find b29_control)/urdf/common/imu.urdf.xacro"/>
 
     <!-- ==================== base ==================== -->
@@ -544,13 +544,38 @@
         </limit>
     </gazebo>
 
-    <gazebo>
-        <joint name="world_fixed_joint" type="fixed">
-            <parent>world</parent>
-            <child>$(arg anchor_side)_second_leg</child>
-            <pose>0 0 -0.25 0 0 0</pose>
-        </joint>
-    </gazebo>
+    <xacro:property name="anchor_side_val" value="$(arg anchor_side)"/>
+
+    <!-- 固定到世界坐标系：根据 anchor_side 参数选择固定点 -->
+    <xacro:if value="${anchor_side_val == 'base'}">
+        <gazebo>
+            <joint name="world_fixed_joint" type="fixed">
+                <parent>world</parent>
+                <child>base_link</child>
+                <pose>0 0 0 0 0 0</pose>
+            </joint>
+        </gazebo>
+    </xacro:if>
+
+    <xacro:if value="${anchor_side_val == 'left'}">
+        <gazebo>
+            <joint name="world_fixed_joint" type="fixed">
+                <parent>world</parent>
+                <child>left_second_leg</child>
+                <pose>0 0 -0.25 0 0 0</pose>
+            </joint>
+        </gazebo>
+    </xacro:if>
+
+    <xacro:if value="${anchor_side_val == 'right'}">
+        <gazebo>
+            <joint name="world_fixed_joint" type="fixed">
+                <parent>world</parent>
+                <child>right_second_leg</child>
+                <pose>0 0 -0.25 0 0 0</pose>
+            </joint>
+        </gazebo>
+    </xacro:if>
 
     <xacro:if value="$(arg use_simulation)">
         <gazebo>
