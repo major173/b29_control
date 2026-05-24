@@ -81,6 +81,9 @@ class RLInferenceNode:
         self._latest_dq: np.ndarray | None = None
         self._latest_torque: np.ndarray = np.zeros(4, dtype=np.float32)
         self._latest_target_pos: np.ndarray | None = None
+        self._dq_filtered: np.ndarray = np.zeros(4, dtype=np.float32)
+        self._dq_alpha: float = float(cfg.deploy.dq_alpha)
+        self._prev_target_q: np.ndarray | None = None  # 用于检测突变
         # 训练里 goal_x_axis_in_ref 来自目标姿态，部署阶段先用 +X 轴占位，
         # 后续若需要支持姿态目标再扩展话题契约。
         self._target_x_axis: np.ndarray = np.array([1.0, 0.0, 0.0], dtype=np.float32)
@@ -123,9 +126,9 @@ class RLInferenceNode:
         # obs_ref frame：与训练侧 obs_ref_body 一致（固定端 second_leg）
         self._obs_ref_frame = f"{self.rt.anchor_side}_second_leg"
 
-        # 正运动学：用于计算 target_q → 期望末端位置
-        # anchor_side=left  → 右臂运动，tool=r_gripper_left_uprod/r_gripper_right_uprod
-        # anchor_side=right → 左臂运动，tool=l_gripper_left_up/l_gripper_right_up
+        # 正运动学：用训练侧 URDF（换根后），与训练时 obs_ref 坐标系一致
+        # anchor_side=left  → gp11_scene_left_gripper_root_coacd.urdf
+        # anchor_side=right → gp11_scene_right_gripper_root_coacd.urdf
         _SIDE_TOOL_BODIES = {
             "left":  ("r_gripper_left_uprod", "r_gripper_right_uprod"),
             "right": ("l_gripper_left_up",    "l_gripper_right_up"),
@@ -134,9 +137,7 @@ class RLInferenceNode:
         self._obs_ref_origin: np.ndarray | None = None
         self._obs_ref_rot: np.ndarray | None = None
         try:
-            # 动态导入，绕过 gp11_reach_runtime 模块级的 import mujoco
             import importlib, os
-            # 确保 b29_locomotion 在 sys.path（conda 激活脚本可能未生效）
             for _candidate in [
                 os.environ.get("B29_LOCOMOTION_ROOT", ""),
                 str(Path.home() / "usetest" / "RL" / "b29_locomotion"),
@@ -146,21 +147,16 @@ class RLInferenceNode:
             _runtime_mod = importlib.import_module("sim2sim_mujoco.gp11_reach_runtime")
             _UrdfKinematicModel = getattr(_runtime_mod, "UrdfKinematicModel")
 
-            urdf_xacro = _THIS_DIR.parent / "urdf" / "b29" / "b29.urdf.xacro"
-            urdf_flat = _THIS_DIR.parent / "urdf" / "b29" / f"b29_flat_{self.rt.anchor_side}.urdf"
-            if not urdf_flat.exists():
-                import subprocess
-                rospy.loginfo("[rl_inference] Generating flat URDF: %s", urdf_flat)
-                result = subprocess.run(
-                    ["rosrun", "xacro", "xacro", str(urdf_xacro), f"anchor_side:={self.rt.anchor_side}"],
-                    capture_output=True, text=True, check=True
-                )
-                urdf_flat.write_text(result.stdout)
-                rospy.loginfo("[rl_inference] Flat URDF generated successfully")
+            # 使用包内预置的训练侧 URDF（与训练时 obs_ref 坐标系一致，不依赖外部路径）
+            _SIDE_URDF = {
+                "left":  _THIS_DIR.parent / "models" / "gp11_urdf" / "gp11_scene_left_gripper_root_coacd.urdf",
+                "right": _THIS_DIR.parent / "models" / "gp11_urdf" / "gp11_scene_right_gripper_root_coacd.urdf",
+            }
+            urdf_path = _SIDE_URDF[self.rt.anchor_side]
 
             tool_left, tool_right = _SIDE_TOOL_BODIES[self.rt.anchor_side]
             self._kinematics = _UrdfKinematicModel.from_urdf(
-                urdf_flat,
+                urdf_path,
                 tool_left_body=tool_left,
                 tool_right_body=tool_right,
                 orientation_body=f"{self.rt.anchor_side}_second_leg",
@@ -168,7 +164,8 @@ class RLInferenceNode:
             nom = self._kinematics.nominal_link_transform(self._obs_ref_frame)
             self._obs_ref_origin = nom[:3, 3].astype(np.float32)
             self._obs_ref_rot    = nom[:3, :3].astype(np.float32)
-            rospy.loginfo("[rl_inference] FK model loaded: tool=%s+%s", tool_left, tool_right)
+            rospy.loginfo("[rl_inference] FK loaded (training URDF): tool=%s+%s obs_ref_x=%s",
+                          tool_left, tool_right, self._obs_ref_rot[0].tolist())
         except Exception as e:
             rospy.logwarn("[rl_inference] FK init failed: %s", e)
             import traceback
@@ -210,6 +207,10 @@ class RLInferenceNode:
         with self._lock:
             self._latest_q = q
             self._latest_dq = dq
+            # 低通滤波：消除 Gazebo 速度估算噪声（有限差分放大高频抖动）
+            self._dq_filtered = (self._dq_alpha * dq
+                                 + (1.0 - self._dq_alpha) * self._dq_filtered)
+            dq_filtered = self._dq_filtered.copy()
             self._latest_torque = torque
             target_pos = self._latest_target_pos
             target_x_axis = self._target_x_axis
@@ -218,7 +219,7 @@ class RLInferenceNode:
             self._rospy.loginfo_throttle(2.0, "[rl_inference] waiting for target_point...")
             return
 
-        self._step(q, dq, torque, target_pos, target_x_axis)
+        self._step(q, dq_filtered, torque, target_pos, target_x_axis)
 
     # ---- 推理一步 ---- #
     def _step(
@@ -241,6 +242,21 @@ class RLInferenceNode:
         raw_action, action, target_q_raw = self.runner.step(obs)
         target_q_safe = self.safety.apply(target_q_raw, q)
 
+        # ---- 抽搐检测：与上一步对比，发现突变立即打印 ----
+        if self._prev_target_q is not None:
+            delta = target_q_safe - self._prev_target_q
+            if np.any(np.abs(delta) > 0.05):  # 单步超过 0.05 rad 认为是突变
+                self._rospy.logwarn(
+                    "[rl_inference] JUMP detected! delta_target=%s "
+                    "raw_action=%s dq_norm=%s q_norm=%s goal=%s",
+                    np.round(delta, 3).tolist(),
+                    np.round(raw_action, 3).tolist(),
+                    np.round(dq / np.array([4.,4.,4.,4.]), 3).tolist(),
+                    np.round((q - np.array([-0.,0.,-0.,0.])) / np.array([1.1,4.71,1.1,4.71]), 3).tolist(),
+                    np.round(target_pos, 3).tolist(),
+                )
+        self._prev_target_q = target_q_safe.copy()
+
         self._rospy.loginfo_throttle(
             5.0,
             "[rl_inference] goal=[%.3f,%.3f,%.3f] q=[%.2f,%.2f,%.2f,%.2f] "
@@ -258,11 +274,21 @@ class RLInferenceNode:
         self.pub_action_raw.publish(self._F64MA(data=raw_action.tolist()))
 
         # 发布橙球：FK(target_q_safe) 在 obs_ref 坐标系
+        # 用动态 anchor 变换（不依赖 nominal），正确处理关节运动后的坐标
         stamp = self._rospy.Time.now()
-        if self._kinematics is not None and self._obs_ref_origin is not None:
+        if self._kinematics is not None:
             try:
-                tgt_root, _ = self._kinematics.evaluate(target_q_safe)
-                tgt_ref = self._obs_ref_rot.T @ (tgt_root - self._obs_ref_origin)
+                anchor_name = self._obs_ref_frame  # e.g. "left_second_leg"
+
+                # target_q 的变换
+                tgt_transforms = self._kinematics._compute_link_transforms(target_q_safe)
+                T_anchor = tgt_transforms[anchor_name]          # anchor 在 base_link 下
+                T_tool_l = tgt_transforms[self._kinematics.tool_left_body]
+                T_tool_r = tgt_transforms[self._kinematics.tool_right_body]
+                tool_base = 0.5 * (T_tool_l[:3, 3] + T_tool_r[:3, 3])
+                # 转到 anchor 坐标系：p_anchor = R_anchor.T @ (p_base - t_anchor)
+                tgt_ref = T_anchor[:3, :3].T @ (tool_base - T_anchor[:3, 3])
+
                 fm = self._Marker()
                 fm.header.frame_id = self._obs_ref_frame
                 fm.header.stamp = stamp

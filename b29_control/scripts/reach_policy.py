@@ -90,6 +90,7 @@ class DeployParams:
     control_rate_hz: float
     topics: Dict[str, str]
     safety: SafetyParams
+    dq_alpha: float              # 速度低通滤波系数
     mujoco_runtime_dir: str
     mujoco_seed: int
     mujoco_publish_target_point: bool
@@ -147,6 +148,7 @@ class Config:
                 target_step_clip=float(sf_raw["target_step_clip"]),
                 deadman_required=bool(sf_raw.get("deadman_required", False)),
             ),
+            dq_alpha=float(dp_raw.get("obs_filter", {}).get("dq_alpha", 1.0)),
             mujoco_runtime_dir=str(mj_raw.get("runtime_dir",
                                               "sim2sim_mujoco/gp11_description/runtime")),
             mujoco_seed=int(mj_raw.get("seed", 0)),

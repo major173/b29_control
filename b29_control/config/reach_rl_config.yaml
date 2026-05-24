@@ -62,6 +62,11 @@ deploy:
     target_step_clip: 0.10      # 单步 |Δq_target| 上限 (rad)；实机起步建议 0.02
     deadman_required: false     # true=必须收到 /gp11/rl/deadman 心跳才发布
 
+  # 观测预处理（Gazebo 速度有限差分噪声，需低通滤波）
+  obs_filter:
+    dq_alpha: 0.2               # 速度低通系数 [0,1]：越小越平滑但响应越慢
+                                # Gazebo 仿真建议 0.1~0.2；实机建议 0.3~0.5（噪声较小）
+
   # MuJoCo 仿真（仅 mujoco_sim_node 使用）
   mujoco:
     runtime_dir: "sim2sim_mujoco/gp11_description/runtime"  # urdf 解包目录

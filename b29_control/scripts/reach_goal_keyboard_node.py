@@ -12,28 +12,24 @@ from __future__ import annotations
 import numpy as np
 import rospy
 import sys
+import os
 import tf
 import threading
 import time
 from std_msgs.msg import Float64MultiArray
+from pathlib import Path
 from visualization_msgs.msg import Marker
 
 # anchor_side → (obs_ref_link, tool_link)
-# obs_ref_link: 固定臂 second_leg（与训练侧 obs_ref_body 一致）
-# tool_link   : 运动臂夹爪末端 fixed link（left/right_gripper_tool），
-#               训练侧用 l/r_gripper_left_up + l/r_gripper_right_up 的中点，
-#               Gazebo 中从动关节无 TF，用 gripper_tool（fixed，TF 存在）近似
 _ANCHOR_TO_LINKS = {
-    "left": ("left_second_leg", "r_gripper_left_uprod"),  # 左臂固定，右臂运动
-    "right": ("right_second_leg", "l_gripper_left_up"),  # 右臂固定，左臂运动
+    "left": ("left_second_leg", "r_gripper_left_uprod"),
+    "right": ("right_second_leg", "l_gripper_left_up"),
 }
 
 ANCHOR_LINK = "left_second_leg"
 TOOL_LINK = "r_gripper_left_uprod"
-WORLD_FRAME = "world"  # 实物部署时改为 "base_link"，或通过 --world_frame 指定
-# obs_ref frame = ANCHOR_LINK，与训练侧 obs_ref_body 一致
-# 注意：OBS_REF_FRAME 在 main() 中根据 anchor_side 参数动态设置
-OBS_REF_FRAME = ANCHOR_LINK  # 默认值，会被 main() 覆盖
+WORLD_FRAME = "world"
+OBS_REF_FRAME = ANCHOR_LINK
 STEP_DEFAULT = 0.02
 
 _RST = "\033[0m"
@@ -61,19 +57,27 @@ def _quat_to_rot(q) -> np.ndarray:
 
 
 class ReachGoalKeyboardNode:
-    def __init__(self) -> None:
+    def __init__(self, kinematics=None, tool_left_body=None, tool_right_body=None,
+                 active_joint_names=None) -> None:
         rospy.init_node("reach_goal_keyboard", anonymous=False)
 
         self._spin_thread = threading.Thread(target=rospy.spin, daemon=True)
         self._spin_thread.start()
 
         self._tf = tf.TransformListener()
-        self._lock = threading.RLock()  # 可重入锁，避免同线程嵌套死锁
+        self._lock = threading.RLock()
 
         self._goal_ref = np.zeros(3, dtype=np.float32)
         self._step = STEP_DEFAULT
         self._log_msgs: list[str] = []
         self._initialized = False
+
+        # FK 模型（训练侧 URDF）
+        self._kinematics = kinematics
+        self._tool_left_body = tool_left_body
+        self._tool_right_body = tool_right_body
+        self._active_joint_names = active_joint_names or []
+        self._latest_q: np.ndarray | None = None
 
         self._pub_goal = rospy.Publisher(
             "/gp11/rl/target_point_local", Float64MultiArray, queue_size=1, latch=True
@@ -81,10 +85,14 @@ class ReachGoalKeyboardNode:
         self._pub_goal_marker = rospy.Publisher("/gp11/rl/goal_marker", Marker, queue_size=1)
         self._pub_tool_marker = rospy.Publisher("/gp11/rl/tool_marker", Marker, queue_size=1)
 
+        if self._kinematics is not None:
+            from sensor_msgs.msg import JointState
+            rospy.Subscriber("/joint_states", JointState, self._on_joint_states, queue_size=1)
+
         self._running = True
         threading.Thread(target=self._marker_loop, daemon=True).start()
 
-        time.sleep(1.5)  # 等 TF 缓存填充
+        time.sleep(1.5)
         self._init_goal_from_tool()
 
     # ------------------------------------------------------------------ #
@@ -103,14 +111,38 @@ class ReachGoalKeyboardNode:
             rospy.logwarn_throttle(5.0, f"TF error {source}: {e}")
             return None
 
+    def _on_joint_states(self, msg) -> None:
+        if not self._active_joint_names:
+            return
+        name_to_idx = {n: i for i, n in enumerate(msg.name)}
+        try:
+            q = np.array([msg.position[name_to_idx[n]] for n in self._active_joint_names],
+                         dtype=np.float32)
+            with self._lock:
+                self._latest_q = q
+        except KeyError:
+            pass
+
     def _get_ref_pose(self):
         """world → obs_ref (ANCHOR_LINK) 的位姿 (origin, R)。"""
         return self._lookup(WORLD_FRAME, OBS_REF_FRAME)
 
     def _get_tool_pos_ref(self):
-        """运动端在 obs_ref (ANCHOR_LINK) 坐标系下的位置。"""
-        r = self._lookup(OBS_REF_FRAME, TOOL_LINK)
-        return r[0] if r is not None else None
+        """运动端在训练侧 obs_ref 坐标系下的位置，用 FK 计算（不依赖 TF）。"""
+        with self._lock:
+            q = self._latest_q
+        if q is None or self._kinematics is None:
+            return None
+        try:
+            # 用训练侧 URDF 的动态 anchor 变换
+            transforms = self._kinematics._compute_link_transforms(q)
+            T_anchor = transforms[ANCHOR_LINK]
+            T_l = transforms[self._tool_left_body]
+            T_r = transforms[self._tool_right_body]
+            tool_base = 0.5 * (T_l[:3, 3] + T_r[:3, 3])
+            return (T_anchor[:3, :3].T @ (tool_base - T_anchor[:3, 3])).astype(np.float32)
+        except Exception:
+            return None
 
     def _wall_stamp(self):
         t = rospy.Time.now()
@@ -324,13 +356,45 @@ def main() -> None:
 
     global ANCHOR_LINK, TOOL_LINK, WORLD_FRAME, OBS_REF_FRAME
     ANCHOR_LINK, TOOL_LINK = _ANCHOR_TO_LINKS[args.anchor_side]
-    OBS_REF_FRAME = ANCHOR_LINK  # 同步更新 obs_ref frame
+    OBS_REF_FRAME = ANCHOR_LINK
     WORLD_FRAME = args.world_frame
-    # anchor_side=right 时 output_orientation_body=right_second_leg，符号+1
-    # anchor_side=left  时 output_orientation_body=left_second_leg，符号-1
-    # capture_output_ref 由 anchor_world_tf_publisher 发布，frame 名固定
 
-    node = ReachGoalKeyboardNode()
+    # 加载训练侧 URDF 做 FK（包内预置，不依赖外部路径）
+    _THIS_DIR = Path(__file__).resolve().parent
+    _SIDE_URDF = {
+        "left":  _THIS_DIR.parent / "models" / "gp11_urdf" / "gp11_scene_left_gripper_root_coacd.urdf",
+        "right": _THIS_DIR.parent / "models" / "gp11_urdf" / "gp11_scene_right_gripper_root_coacd.urdf",
+    }
+    _TOOL_BODIES = {
+        "left":  ("r_gripper_left_uprod", "r_gripper_right_uprod"),
+        "right": ("l_gripper_left_up",    "l_gripper_right_up"),
+    }
+    _ACTIVE_JOINT_NAMES = [
+        "left_first_leg_joint", "left_second_leg_joint",
+        "right_first_leg_joint", "right_second_leg_joint",
+    ]
+
+    km = None
+    tool_left = tool_right = None
+    try:
+        # UrdfKinematicModel 在 b29_locomotion/sim2sim_mujoco 中，需在 PYTHONPATH 里
+        for _p in [os.environ.get("B29_LOCOMOTION_ROOT", ""),
+                   str(Path.home() / "usetest/RL/b29_locomotion")]:
+            if _p and Path(_p).exists() and _p not in sys.path:
+                sys.path.insert(0, _p)
+        from sim2sim_mujoco.gp11_reach_runtime import UrdfKinematicModel
+        tool_left, tool_right = _TOOL_BODIES[args.anchor_side]
+        km = UrdfKinematicModel.from_urdf(
+            _SIDE_URDF[args.anchor_side],
+            tool_left_body=tool_left,
+            tool_right_body=tool_right,
+            orientation_body=f"{args.anchor_side}_second_leg",
+        )
+        print(f"[keyboard] FK loaded: anchor={args.anchor_side}")
+    except Exception as e:
+        print(f"[keyboard] FK load failed: {e}, falling back to TF only")
+
+    node = ReachGoalKeyboardNode(km, tool_left, tool_right, _ACTIVE_JOINT_NAMES)
     node.run_keyboard()
 
 
