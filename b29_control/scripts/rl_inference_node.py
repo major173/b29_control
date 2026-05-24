@@ -42,11 +42,8 @@ from reach_policy import (  # noqa: E402
     SafetyLimiter,
 )
 
-# ---- 导入训练侧正运动学 ---- #
-try:
-    from sim2sim_mujoco.gp11_reach_runtime import UrdfKinematicModel  # noqa: E402
-except ImportError:
-    UrdfKinematicModel = None  # type: ignore
+# ---- 导入训练侧正运动学（延迟到 __init__ 以避免 mujoco 依赖）---- #
+UrdfKinematicModel = None
 
 
 # ---- ROS 导入：在 main 内 lazy import 以便单元测试加载本文件 ---- #
@@ -134,33 +131,51 @@ class RLInferenceNode:
             "right": ("l_gripper_left_up",    "l_gripper_right_up"),
         }
         self._kinematics = None
-        if UrdfKinematicModel is not None:
-            try:
-                urdf_xacro = _THIS_DIR.parent / "urdf" / "b29" / "b29.urdf.xacro"
-                urdf_flat = _THIS_DIR.parent / "urdf" / "b29" / f"b29_flat_{self.rt.anchor_side}.urdf"
+        self._obs_ref_origin: np.ndarray | None = None
+        self._obs_ref_rot: np.ndarray | None = None
+        try:
+            # 动态导入，绕过 gp11_reach_runtime 模块级的 import mujoco
+            import importlib, os
+            # 确保 b29_locomotion 在 sys.path（conda 激活脚本可能未生效）
+            for _candidate in [
+                os.environ.get("B29_LOCOMOTION_ROOT", ""),
+                str(Path.home() / "usetest" / "RL" / "b29_locomotion"),
+            ]:
+                if _candidate and Path(_candidate).exists() and _candidate not in sys.path:
+                    sys.path.insert(0, _candidate)
+            _runtime_mod = importlib.import_module("sim2sim_mujoco.gp11_reach_runtime")
+            _UrdfKinematicModel = getattr(_runtime_mod, "UrdfKinematicModel")
 
-                # 如果 flat URDF 不存在，自动生成
-                if not urdf_flat.exists():
-                    import subprocess
-                    rospy.loginfo("[rl_inference] Generating flat URDF: %s", urdf_flat)
-                    result = subprocess.run(
-                        ["rosrun", "xacro", "xacro", str(urdf_xacro), f"anchor_side:={self.rt.anchor_side}"],
-                        capture_output=True, text=True, check=True
-                    )
-                    urdf_flat.write_text(result.stdout)
-                    rospy.loginfo("[rl_inference] Flat URDF generated successfully")
-
-                tool_left, tool_right = _SIDE_TOOL_BODIES[self.rt.anchor_side]
-                self._kinematics = UrdfKinematicModel.from_urdf(
-                    urdf_flat,
-                    tool_left_body=tool_left,
-                    tool_right_body=tool_right,
-                    orientation_body=f"{self.rt.anchor_side}_second_leg",
+            urdf_xacro = _THIS_DIR.parent / "urdf" / "b29" / "b29.urdf.xacro"
+            urdf_flat = _THIS_DIR.parent / "urdf" / "b29" / f"b29_flat_{self.rt.anchor_side}.urdf"
+            if not urdf_flat.exists():
+                import subprocess
+                rospy.loginfo("[rl_inference] Generating flat URDF: %s", urdf_flat)
+                result = subprocess.run(
+                    ["rosrun", "xacro", "xacro", str(urdf_xacro), f"anchor_side:={self.rt.anchor_side}"],
+                    capture_output=True, text=True, check=True
                 )
-                rospy.loginfo("[rl_inference] FK model loaded: tool=%s+%s", tool_left, tool_right)
-            except Exception as e:
-                rospy.logwarn("[rl_inference] FK init failed: %s", e)
-                self._kinematics = None
+                urdf_flat.write_text(result.stdout)
+                rospy.loginfo("[rl_inference] Flat URDF generated successfully")
+
+            tool_left, tool_right = _SIDE_TOOL_BODIES[self.rt.anchor_side]
+            self._kinematics = _UrdfKinematicModel.from_urdf(
+                urdf_flat,
+                tool_left_body=tool_left,
+                tool_right_body=tool_right,
+                orientation_body=f"{self.rt.anchor_side}_second_leg",
+            )
+            nom = self._kinematics.nominal_link_transform(self._obs_ref_frame)
+            self._obs_ref_origin = nom[:3, 3].astype(np.float32)
+            self._obs_ref_rot    = nom[:3, :3].astype(np.float32)
+            rospy.loginfo("[rl_inference] FK model loaded: tool=%s+%s", tool_left, tool_right)
+        except Exception as e:
+            rospy.logwarn("[rl_inference] FK init failed: %s", e)
+            import traceback
+            rospy.logwarn("[rl_inference] FK traceback: %s", traceback.format_exc())
+            self._kinematics = None
+            self._obs_ref_origin = None
+            self._obs_ref_rot = None
 
     # ---- callbacks ---- #
     def _on_target_point(self, msg) -> None:
@@ -242,28 +257,24 @@ class RLInferenceNode:
         self.pub_obs.publish(self._F64MA(data=obs.tolist()))
         self.pub_action_raw.publish(self._F64MA(data=raw_action.tolist()))
 
-        # 发布正运动学期望末端位置（橙色球，obs_ref 坐标系）
+        # 发布橙球：FK(target_q_safe) 在 obs_ref 坐标系
         stamp = self._rospy.Time.now()
-        if self._kinematics is not None:
+        if self._kinematics is not None and self._obs_ref_origin is not None:
             try:
-                tool_mid, _ = self._kinematics.evaluate(target_q_safe)
-                fk_marker = self._Marker()
-                fk_marker.header.frame_id = self._obs_ref_frame
-                fk_marker.header.stamp = stamp
-                fk_marker.ns = "rl_fk_target"
-                fk_marker.id = 0
-                fk_marker.type = self._Marker.SPHERE
-                fk_marker.action = self._Marker.ADD
-                fk_marker.pose.position.x = float(tool_mid[0])
-                fk_marker.pose.position.y = float(tool_mid[1])
-                fk_marker.pose.position.z = float(tool_mid[2])
-                fk_marker.pose.orientation.w = 1.0
-                fk_marker.scale.x = fk_marker.scale.y = fk_marker.scale.z = 0.04
-                fk_marker.color.r = 0.95
-                fk_marker.color.g = 0.5
-                fk_marker.color.b = 0.05
-                fk_marker.color.a = 0.9
-                self.pub_fk_marker.publish(fk_marker)
+                tgt_root, _ = self._kinematics.evaluate(target_q_safe)
+                tgt_ref = self._obs_ref_rot.T @ (tgt_root - self._obs_ref_origin)
+                fm = self._Marker()
+                fm.header.frame_id = self._obs_ref_frame
+                fm.header.stamp = stamp
+                fm.ns = "rl_fk_target"
+                fm.id = 0
+                fm.type = self._Marker.SPHERE
+                fm.action = self._Marker.ADD
+                fm.pose.position.x, fm.pose.position.y, fm.pose.position.z = float(tgt_ref[0]), float(tgt_ref[1]), float(tgt_ref[2])
+                fm.pose.orientation.w = 1.0
+                fm.scale.x = fm.scale.y = fm.scale.z = 0.04
+                fm.color.r, fm.color.g, fm.color.b, fm.color.a = 0.95, 0.50, 0.05, 0.90
+                self.pub_fk_marker.publish(fm)
             except Exception:
                 pass
 

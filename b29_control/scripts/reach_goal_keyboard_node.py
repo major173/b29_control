@@ -107,9 +107,9 @@ class ReachGoalKeyboardNode:
         """world → obs_ref (ANCHOR_LINK) 的位姿 (origin, R)。"""
         return self._lookup(WORLD_FRAME, OBS_REF_FRAME)
 
-    def _get_tool_pos_world(self):
-        """运动端 gripper_tool 在 world 下的位置。"""
-        r = self._lookup(WORLD_FRAME, TOOL_LINK)
+    def _get_tool_pos_ref(self):
+        """运动端在 obs_ref (ANCHOR_LINK) 坐标系下的位置。"""
+        r = self._lookup(OBS_REF_FRAME, TOOL_LINK)
         return r[0] if r is not None else None
 
     def _wall_stamp(self):
@@ -123,19 +123,15 @@ class ReachGoalKeyboardNode:
     def _init_goal_from_tool(self) -> None:
         deadline = time.time() + 10.0
         while time.time() < deadline and not rospy.is_shutdown():
-            ref_pose = self._get_ref_pose()
-            tool_world = self._get_tool_pos_world()
-            if ref_pose is not None and tool_world is not None:
-                origin, R = ref_pose
-                goal_ref = R.T @ (tool_world - origin)
+            tool_ref = self._get_tool_pos_ref()
+            if tool_ref is not None:
                 with self._lock:
-                    self._goal_ref = goal_ref.astype(np.float32)
+                    self._goal_ref = tool_ref.astype(np.float32)
                     self._initialized = True
                 self._publish_goal()
-                self._log(f"{_GRN}初始化目标 = 末端当前位置{_RST}")
+                self._log(f"{_GRN}初始化目标 [{tool_ref[0]:+.3f},{tool_ref[1]:+.3f},{tool_ref[2]:+.3f}]{_RST}")
                 return
             time.sleep(0.1)
-        # TF 超时，退回零点并告警
         self._log(f"{_YLW}TF 超时，goal_ref 保持 [0,0,0]{_RST}")
         self._publish_goal()
 
@@ -145,20 +141,20 @@ class ReachGoalKeyboardNode:
 
     def _marker_loop(self) -> None:
         while self._running and not rospy.is_shutdown():
-            tool_world = self._get_tool_pos_world()
+            tool_ref = self._get_tool_pos_ref()
             stamp = self._wall_stamp()
 
-            # 红球：在 obs_ref (ANCHOR_LINK) 坐标系下发布 _goal_ref 位置
-            # RViz 通过 TF 自动定位到世界坐标
+            # 红球：目标点，obs_ref 坐标系
             with self._lock:
                 goal_ref = self._goal_ref.copy()
             self._pub_goal_marker.publish(
                 _sphere(0, goal_ref, (0.95, 0.15, 0.15, 0.85), OBS_REF_FRAME, stamp, 0.045)
             )
 
-            if tool_world is not None:
+            # 绿球：TF 查 left_second_leg → r_gripper_left_uprod
+            if tool_ref is not None:
                 self._pub_tool_marker.publish(
-                    _sphere(1, tool_world, (0.15, 0.90, 0.20, 0.85), WORLD_FRAME, stamp, 0.030)
+                    _sphere(1, tool_ref, (0.15, 0.90, 0.20, 0.85), OBS_REF_FRAME, stamp, 0.030)
                 )
 
             time.sleep(0.02)  # 50Hz
@@ -193,26 +189,20 @@ class ReachGoalKeyboardNode:
     # ------------------------------------------------------------------ #
 
     def _render_ui(self) -> None:
-        ref_pose = self._get_ref_pose()
-        tool_world = self._get_tool_pos_world()
+        tool_ref = self._get_tool_pos_ref()
         with self._lock:
             goal = self._goal_ref.copy()
             step = self._step
             logs = list(self._log_msgs)
             ready = self._initialized
 
-        tf_status = f"{_GRN}OK{_RST}" if ref_pose is not None else f"{_RED}等待 TF...{_RST}"
+        tf_status = f"{_GRN}OK{_RST}" if tool_ref is not None else f"{_RED}等待 TF...{_RST}"
 
-        goal_world_str = "—"
         dist_str = "—"
-        if ref_pose is not None:
-            origin, R = ref_pose
-            gw = R @ goal + origin
-            goal_world_str = f"[{gw[0]:+.3f}  {gw[1]:+.3f}  {gw[2]:+.3f}]"
-            if tool_world is not None:
-                dist = float(np.linalg.norm(gw - tool_world))
-                c = _GRN if dist < 0.05 else (_YLW if dist < 0.20 else _RED)
-                dist_str = f"{c}{dist:.3f} m{_RST}"
+        if tool_ref is not None:
+            dist = float(np.linalg.norm(goal - tool_ref))
+            c = _GRN if dist < 0.05 else (_YLW if dist < 0.20 else _RED)
+            dist_str = f"{c}{dist:.3f} m{_RST}"
 
         init_flag = f"{_GRN}已初始化{_RST}" if ready else f"{_YLW}等待初始化...{_RST}"
 
@@ -224,14 +214,13 @@ class ReachGoalKeyboardNode:
             f"",
             f"  TF ({OBS_REF_FRAME}) : {tf_status}   {init_flag}",
             f"  goal [obs_ref]: [{goal[0]:+.3f}  {goal[1]:+.3f}  {goal[2]:+.3f}]",
-            f"  goal [world]  : {goal_world_str}",
             f"  goal ↔ tool dist : {dist_str}",
             f"  step             : {_BOLD}{step:.3f} m{_RST}",
             f"",
             f"  {_BOLD}W/S{_RST} X+/-   {_BOLD}A/D{_RST} Y+/-   {_BOLD}Q/E{_RST} Z+/-",
             f"  {_BOLD}R{_RST} reset到末端  {_BOLD}[{_RST} step-   {_BOLD}]{_RST} step+   {_BOLD}^C{_RST} quit",
             f"",
-            f"  red=goal(obs_ref={OBS_REF_FRAME})  green=tool({TOOL_LINK})",
+            f"  red=goal  green=tool({TOOL_LINK})  frame={OBS_REF_FRAME}",
             f"",
             f"  --- log ---",
         ]
@@ -271,15 +260,12 @@ class ReachGoalKeyboardNode:
                 elif ch in ('e', 'E'):
                     self._try_move(np.array([0, 0, -s], np.float32), f"Z -{s:.3f}")
                 elif ch == 'r':
-                    # 重置到当前末端位置
-                    ref_pose = self._get_ref_pose()
-                    tool_world = self._get_tool_pos_world()
-                    if ref_pose is not None and tool_world is not None:
-                        origin, R = ref_pose
+                    tool_ref = self._get_tool_pos_ref()
+                    if tool_ref is not None:
                         with self._lock:
-                            self._goal_ref = (R.T @ (tool_world - origin)).astype(np.float32)
+                            self._goal_ref = tool_ref.astype(np.float32)
                         self._publish_goal()
-                        self._log(f"{_CYN}reset → 末端当前位置{_RST}")
+                        self._log(f"{_CYN}reset → [{tool_ref[0]:+.3f},{tool_ref[1]:+.3f},{tool_ref[2]:+.3f}]{_RST}")
                     else:
                         self._log(f"{_YLW}reset 失败：TF 不可用{_RST}")
                 elif ch == '[':
