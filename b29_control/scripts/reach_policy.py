@@ -31,11 +31,10 @@ reach_policy.py — GP11 Reach 任务的策略运行时核心模块
 
 from __future__ import annotations
 
+import numpy as np
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
-
-import numpy as np
 
 
 # --------------------------------------------------------------------------- #
@@ -80,8 +79,8 @@ class RuntimeParams:
 @dataclass
 class SafetyParams:
     enable: bool
-    max_joint_vel: float          # rad/s
-    target_step_clip: float       # rad
+    max_joint_vel: float  # rad/s
+    target_step_clip: float  # rad
     deadman_required: bool
 
 
@@ -211,13 +210,13 @@ class JointMapper:
 class ObservationBuilder:
     """逐位复刻 gp11_reach_runtime.build_actor_observation。
 
-    维度： q_norm(4) + dq_norm(4) + last_action(4) + torque_norm(4)
+    维度： q_norm(4) + dq_norm(4) + last_action(4)
          + lower_margin_norm(4) + upper_margin_norm(4)
          + goal_pos_in_ref(3) + goal_x_axis_in_ref(3)
-         + active_side_one_hot(2) = 32
+         + active_side_one_hot(2) = 28
     """
 
-    OBS_SIZE = 32
+    OBS_SIZE = 28
 
     def __init__(self, runtime: RuntimeParams) -> None:
         self._rt = runtime
@@ -230,26 +229,24 @@ class ObservationBuilder:
         self._side_one_hot = rt.active_side_one_hot.copy()
 
     def build(
-        self,
-        *,
-        q: np.ndarray,
-        dq: np.ndarray,
-        last_action: np.ndarray,
-        joint_torques: np.ndarray,
-        goal_pos_in_ref: np.ndarray,
-        goal_x_axis_in_ref: np.ndarray,
+            self,
+            *,
+            q: np.ndarray,
+            dq: np.ndarray,
+            last_action: np.ndarray,
+            joint_torques: np.ndarray,  # 保留参数兼容性，但不使用
+            goal_pos_in_ref: np.ndarray,
+            goal_x_axis_in_ref: np.ndarray,
     ) -> np.ndarray:
         q = _require_vector("q", q, 4)
         dq = _require_vector("dq", dq, 4)
         last_action = _require_vector("last_action", last_action, 4)
-        joint_torques = _require_vector("joint_torques", joint_torques, 4)
         goal_pos = _require_vector("goal_pos_in_ref", goal_pos_in_ref, 3)
         goal_x_axis = _require_vector("goal_x_axis_in_ref", goal_x_axis_in_ref, 3)
 
         rt = self._rt
         q_norm = (q - self._q_mid) / self._q_half
         dq_norm = dq / self._vel_div
-        torque_norm = joint_torques / self._eff_div
         lower_margin = (q - rt.hard_lower) / self._range
         upper_margin = (rt.hard_upper - q) / self._range
 
@@ -258,7 +255,6 @@ class ObservationBuilder:
                 q_norm,
                 dq_norm,
                 last_action,
-                torque_norm,
                 lower_margin,
                 upper_margin,
                 goal_pos,
@@ -294,10 +290,10 @@ class ActionMapper:
 
 
 def compute_pd_torques(
-    q: np.ndarray,
-    dq: np.ndarray,
-    target_q: np.ndarray,
-    runtime: RuntimeParams,
+        q: np.ndarray,
+        dq: np.ndarray,
+        target_q: np.ndarray,
+        runtime: RuntimeParams,
 ) -> np.ndarray:
     """逐位复刻 gp11_reach_runtime.compute_pd_torques。"""
     q = _require_vector("q", q, 4)
@@ -329,7 +325,7 @@ class PolicyRunner:
         rt = cfg.runtime
         path_str = model_path or cfg.deploy.onnx_model_path
         if not path_str:
-            # 未配置路径时，自动查找脚本同级目录的 ../models/reach/stage0.onnx
+            # 未配置路径时，自动查找同包 models/reach/stage0.onnx
             _default = Path(__file__).resolve().parent.parent / "models" / "reach" / "stage0.onnx"
             path_str = str(_default)
         self.model_path = Path(path_str).expanduser().resolve()
