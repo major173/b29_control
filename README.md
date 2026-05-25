@@ -106,7 +106,10 @@ python3 src/b29_control/b29_control/scripts/reach_goal_keyboard_node.py --anchor
 python3 src/b29_control/b29_control/scripts/reach_goal_keyboard_node.py --anchor_side right
 ```
 
-> **注意**：`anchor_side` 必须与 launch 文件参数一致，否则固定端/运动端不匹配。
+> **注意**：
+>
+> - reach_rl_config.yaml参数`anchor_side` 必须与 launch 文件参数一致，否则固定端/运动端不匹配。
+> - URDF更新后执行`python3 src/b29_control/b29_control/scripts/update_gp11_urdf.py`同步更新用于FK解算的换根URDF
 
 启动后推理节点打印 `target_point received`，之后每 5 秒输出一次推理状态。
 
