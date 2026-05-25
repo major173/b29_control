@@ -423,6 +423,74 @@ class SafetyLimiter:
         return target.astype(np.float32, copy=False)
 
 
+# --------------------------------------------------------------------------- #
+# FK 加载工具（推理节点和键盘节点共用）                                           #
+# --------------------------------------------------------------------------- #
+
+_SIDE_TOOL_BODIES = {
+    "left":  ("r_gripper_left_uprod", "r_gripper_right_uprod"),
+    "right": ("l_gripper_left_up",    "l_gripper_right_up"),
+}
+
+_SIDE_URDF_NAMES = {
+    "left":  "gp11_scene_left_gripper_root_coacd.urdf",
+    "right": "gp11_scene_right_gripper_root_coacd.urdf",
+}
+
+
+def load_fk_model(anchor_side: str, urdf_dir: Optional[Path] = None):
+    """加载训练侧 FK 模型（UrdfKinematicModel）。
+
+    Returns:
+        (kinematics, obs_ref_origin, obs_ref_rot, tool_left_body, tool_right_body)
+        失败时返回 (None, None, None, None, None)
+    """
+    import importlib, os, sys
+
+    # 尝试多个路径找到 b29_locomotion
+    for _candidate in [
+        os.environ.get("B29_LOCOMOTION_ROOT", ""),
+        # 从 PYTHONPATH 里找已有的
+        next((p for p in sys.path if "b29_locomotion" in p), ""),
+        # 相对于本文件向上查找（scripts → b29_control → b29_control → src → B29 → usetest → ~ → RL/b29_locomotion）
+        str(Path(__file__).resolve().parent.parent.parent.parent.parent / "RL" / "b29_locomotion"),
+        str(Path.home() / "usetest" / "RL" / "b29_locomotion"),
+    ]:
+        if _candidate and Path(_candidate).exists() and _candidate not in sys.path:
+            sys.path.insert(0, _candidate)
+
+    try:
+        _mod = importlib.import_module("sim2sim_mujoco.gp11_reach_runtime")
+        _UrdfKinematicModel = getattr(_mod, "UrdfKinematicModel")
+    except Exception as e:
+        print(f"[load_fk_model] import failed: {e}")
+        return None, None, None, None, None
+
+    if urdf_dir is None:
+        urdf_dir = Path(__file__).resolve().parent.parent / "models" / "gp11_urdf"
+
+    urdf_path = urdf_dir / _SIDE_URDF_NAMES[anchor_side]
+    tool_left, tool_right = _SIDE_TOOL_BODIES[anchor_side]
+    obs_ref_body = f"{anchor_side}_second_leg"
+
+    try:
+        km = _UrdfKinematicModel.from_urdf(
+            urdf_path,
+            tool_left_body=tool_left,
+            tool_right_body=tool_right,
+            orientation_body=obs_ref_body,
+        )
+        nom = km.nominal_link_transform(obs_ref_body)
+        obs_ref_origin = nom[:3, 3].astype(np.float32)
+        obs_ref_rot    = nom[:3, :3].astype(np.float32)
+        return km, obs_ref_origin, obs_ref_rot, tool_left, tool_right
+    except Exception as e:
+        import traceback
+        print(f"[load_fk_model] failed: {e}")
+        traceback.print_exc()
+        return None, None, None, None, None
+
+
 __all__ = [
     "Config",
     "RuntimeParams",
@@ -434,4 +502,5 @@ __all__ = [
     "PolicyRunner",
     "SafetyLimiter",
     "compute_pd_torques",
+    "load_fk_model",
 ]

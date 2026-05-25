@@ -12,13 +12,18 @@ from __future__ import annotations
 import numpy as np
 import rospy
 import sys
-import os
 import tf
 import threading
 import time
-from std_msgs.msg import Float64MultiArray
 from pathlib import Path
+from std_msgs.msg import Float64MultiArray
 from visualization_msgs.msg import Marker
+
+# reach_policy: ObservationBuilder共用，load_fk_model用训练侧URDF计算FK
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+from reach_policy import load_fk_model  # noqa: E402
 
 # anchor_side → (obs_ref_link, tool_link)
 _ANCHOR_TO_LINKS = {
@@ -359,40 +364,20 @@ def main() -> None:
     OBS_REF_FRAME = ANCHOR_LINK
     WORLD_FRAME = args.world_frame
 
-    # 加载训练侧 URDF 做 FK（包内预置，不依赖外部路径）
+    # 加载训练侧 FK 模型（包内预置 URDF，不依赖外部路径）
     _THIS_DIR = Path(__file__).resolve().parent
-    _SIDE_URDF = {
-        "left":  _THIS_DIR.parent / "models" / "gp11_urdf" / "gp11_scene_left_gripper_root_coacd.urdf",
-        "right": _THIS_DIR.parent / "models" / "gp11_urdf" / "gp11_scene_right_gripper_root_coacd.urdf",
-    }
-    _TOOL_BODIES = {
-        "left":  ("r_gripper_left_uprod", "r_gripper_right_uprod"),
-        "right": ("l_gripper_left_up",    "l_gripper_right_up"),
-    }
     _ACTIVE_JOINT_NAMES = [
         "left_first_leg_joint", "left_second_leg_joint",
         "right_first_leg_joint", "right_second_leg_joint",
     ]
-
-    km = None
-    tool_left = tool_right = None
-    try:
-        # UrdfKinematicModel 在 b29_locomotion/sim2sim_mujoco 中，需在 PYTHONPATH 里
-        for _p in [os.environ.get("B29_LOCOMOTION_ROOT", ""),
-                   str(Path.home() / "usetest/RL/b29_locomotion")]:
-            if _p and Path(_p).exists() and _p not in sys.path:
-                sys.path.insert(0, _p)
-        from sim2sim_mujoco.gp11_reach_runtime import UrdfKinematicModel
-        tool_left, tool_right = _TOOL_BODIES[args.anchor_side]
-        km = UrdfKinematicModel.from_urdf(
-            _SIDE_URDF[args.anchor_side],
-            tool_left_body=tool_left,
-            tool_right_body=tool_right,
-            orientation_body=f"{args.anchor_side}_second_leg",
-        )
+    km, _, _, tool_left, tool_right = load_fk_model(
+        args.anchor_side,
+        urdf_dir=_THIS_DIR.parent / "models" / "gp11_urdf",
+    )
+    if km is not None:
         print(f"[keyboard] FK loaded: anchor={args.anchor_side}")
-    except Exception as e:
-        print(f"[keyboard] FK load failed: {e}, falling back to TF only")
+    else:
+        print("[keyboard] FK load failed, _get_tool_pos_ref will return None")
 
     node = ReachGoalKeyboardNode(km, tool_left, tool_right, _ACTIVE_JOINT_NAMES)
     node.run_keyboard()

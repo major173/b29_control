@@ -40,6 +40,7 @@ from reach_policy import (  # noqa: E402
     ObservationBuilder,
     PolicyRunner,
     SafetyLimiter,
+    load_fk_model,
 )
 
 # ---- 导入训练侧正运动学（延迟到 __init__ 以避免 mujoco 依赖）---- #
@@ -126,53 +127,17 @@ class RLInferenceNode:
         # obs_ref frame：与训练侧 obs_ref_body 一致（固定端 second_leg）
         self._obs_ref_frame = f"{self.rt.anchor_side}_second_leg"
 
-        # 正运动学：用训练侧 URDF（换根后），与训练时 obs_ref 坐标系一致
-        # anchor_side=left  → gp11_scene_left_gripper_root_coacd.urdf
-        # anchor_side=right → gp11_scene_right_gripper_root_coacd.urdf
-        _SIDE_TOOL_BODIES = {
-            "left":  ("r_gripper_left_uprod", "r_gripper_right_uprod"),
-            "right": ("l_gripper_left_up",    "l_gripper_right_up"),
-        }
-        self._kinematics = None
-        self._obs_ref_origin: np.ndarray | None = None
-        self._obs_ref_rot: np.ndarray | None = None
-        try:
-            import importlib, os
-            for _candidate in [
-                os.environ.get("B29_LOCOMOTION_ROOT", ""),
-                str(Path.home() / "usetest" / "RL" / "b29_locomotion"),
-            ]:
-                if _candidate and Path(_candidate).exists() and _candidate not in sys.path:
-                    sys.path.insert(0, _candidate)
-            _runtime_mod = importlib.import_module("sim2sim_mujoco.gp11_reach_runtime")
-            _UrdfKinematicModel = getattr(_runtime_mod, "UrdfKinematicModel")
-
-            # 使用包内预置的训练侧 URDF（与训练时 obs_ref 坐标系一致，不依赖外部路径）
-            _SIDE_URDF = {
-                "left":  _THIS_DIR.parent / "models" / "gp11_urdf" / "gp11_scene_left_gripper_root_coacd.urdf",
-                "right": _THIS_DIR.parent / "models" / "gp11_urdf" / "gp11_scene_right_gripper_root_coacd.urdf",
-            }
-            urdf_path = _SIDE_URDF[self.rt.anchor_side]
-
-            tool_left, tool_right = _SIDE_TOOL_BODIES[self.rt.anchor_side]
-            self._kinematics = _UrdfKinematicModel.from_urdf(
-                urdf_path,
-                tool_left_body=tool_left,
-                tool_right_body=tool_right,
-                orientation_body=f"{self.rt.anchor_side}_second_leg",
+        # 正运动学：用包内预置训练侧 URDF，确保 obs_ref 坐标系与训练一致
+        self._kinematics, self._obs_ref_origin, self._obs_ref_rot, \
+            self._tool_left_body, self._tool_right_body = load_fk_model(
+                self.rt.anchor_side,
+                urdf_dir=_THIS_DIR.parent / "models" / "gp11_urdf",
             )
-            nom = self._kinematics.nominal_link_transform(self._obs_ref_frame)
-            self._obs_ref_origin = nom[:3, 3].astype(np.float32)
-            self._obs_ref_rot    = nom[:3, :3].astype(np.float32)
-            rospy.loginfo("[rl_inference] FK loaded (training URDF): tool=%s+%s obs_ref_x=%s",
-                          tool_left, tool_right, self._obs_ref_rot[0].tolist())
-        except Exception as e:
-            rospy.logwarn("[rl_inference] FK init failed: %s", e)
-            import traceback
-            rospy.logwarn("[rl_inference] FK traceback: %s", traceback.format_exc())
-            self._kinematics = None
-            self._obs_ref_origin = None
-            self._obs_ref_rot = None
+        if self._kinematics is not None:
+            rospy.loginfo("[rl_inference] FK loaded: anchor=%s obs_ref_x=%s",
+                          self.rt.anchor_side, self._obs_ref_rot[0].tolist())
+        else:
+            rospy.logwarn("[rl_inference] FK unavailable: fk_target_marker disabled")
 
     # ---- callbacks ---- #
     def _on_target_point(self, msg) -> None:
@@ -301,8 +266,8 @@ class RLInferenceNode:
                 fm.scale.x = fm.scale.y = fm.scale.z = 0.04
                 fm.color.r, fm.color.g, fm.color.b, fm.color.a = 0.95, 0.50, 0.05, 0.90
                 self.pub_fk_marker.publish(fm)
-            except Exception:
-                pass
+            except Exception as e:
+                self._rospy.logwarn_throttle(5.0, "[rl_inference] FK marker failed: %s", e)
 
 
 # --------------------------------------------------------------------------- #

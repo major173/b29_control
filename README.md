@@ -82,12 +82,13 @@ rosrun b29_control gazebo_rl_bridge_node.py
 **终端 3：RL 推理节点**
 
 ```bash
-cd ~/usetest/B29
+cd DIR_TO_B29
 conda activate b29
 python3 src/b29_control/b29_control/scripts/rl_inference_node.py
 ```
 
 启动后日志应显示：
+
 ```
 [rl_inference] anchor_side=left active_dof=[left_first_leg_joint, ...]
 [rl_inference] onnx=.../models/reach/stage0.onnx
@@ -111,14 +112,14 @@ python3 src/b29_control/b29_control/scripts/reach_goal_keyboard_node.py --anchor
 
 键盘操作：
 
-| 按键 | 动作 |
-|------|------|
-| W/S | 目标点 X +/- |
-| A/D | 目标点 Y +/- |
-| Q/E | 目标点 Z +/- |
-| R | 重置目标点到当前末端位置 |
-| [ / ] | 步长 -/+ |
-| Ctrl+C | 退出 |
+| 按键     | 动作           |
+|--------|--------------|
+| W/S    | 目标点 X +/-    |
+| A/D    | 目标点 Y +/-    |
+| Q/E    | 目标点 Z +/-    |
+| R      | 重置目标点到当前末端位置 |
+| [ / ]  | 步长 -/+       |
+| Ctrl+C | 退出           |
 
 **验证闭环**
 
@@ -138,10 +139,10 @@ rostopic echo /gp11/rl/action_raw -n 1
 
 **切换固定端**
 
-| anchor_side | 固定端 | 运动端 | obs[30:32] |
-|-------------|--------|--------|------------|
-| left | left_second_leg | 右臂 | [0, 1] |
-| right | right_second_leg | 左臂 | [1, 0] |
+| anchor_side | 固定端              | 运动端 | obs[30:32] |
+|-------------|------------------|-----|------------|
+| left        | left_second_leg  | 右臂  | [0, 1]     |
+| right       | right_second_leg | 左臂  | [1, 0]     |
 
 ---
 
@@ -154,23 +155,24 @@ roslaunch b29_control reach_gazebo_stage1.launch rviz:=true
 rviz
 ```
 
-| 设置项 | 值 |
-|--------|-----|
-| Fixed Frame | `world` |
-| RobotModel | 添加 |
-| TF | 添加 |
-| Marker (红球) | `/gp11/rl/goal_marker`（目标点，`capture_output_ref` 坐标系） |
-| Marker (绿球) | `/gp11/rl/tool_marker`（运动端末端） |
+| 设置项         | 值                                                              |
+|-------------|----------------------------------------------------------------|
+| Fixed Frame | `world`                                                        |
+| RobotModel  | 添加                                                             |
+| TF          | 添加                                                             |
+| Marker (红球) | `/gp11/rl/goal_marker`（目标点，obs_ref 坐标系）                        |
+| Marker (绿球) | `/gp11/rl/tool_marker`（当前末端，FK(current_q)，obs_ref 坐标系）         |
+| Marker (橙球) | `/gp11/rl/fk_target_marker`（网络输出期望末端，FK(target_q)，obs_ref 坐标系） |
 
 **关键 TF 帧**
 
-| TF 帧 | 含义 |
-|-------|------|
-| `world` | 世界固定系，以 `left_second_leg` 为原点 |
-| `left_second_leg` | 固定端，在 `world` 下静止不动 |
-| `base_link` | 机体，随关节运动漂移 |
-| `capture_output_ref` | capture 网络输出参考坐标系 |
-| `r_gripper_left_uprod` | 运动端末端（绿球跟踪） |
+| TF 帧                   | 含义                            |
+|------------------------|-------------------------------|
+| `world`                | 世界固定系，以 `left_second_leg` 为原点 |
+| `left_second_leg`      | 固定端，在 `world` 下静止不动           |
+| `base_link`            | 机体，随关节运动漂移                    |
+| `capture_output_ref`   | capture 网络输出参考坐标系             |
+| `r_gripper_left_uprod` | 运动端末端（绿球跟踪）                   |
 
 ---
 
@@ -212,17 +214,15 @@ python3 src/b29_control/b29_control/scripts/reach_goal_keyboard_node.py \
 
 ### 节点与话题速查
 
-| 节点 | 订阅 | 发布 |
-|------|------|------|
-| `rl_inference_node` | `/joint_states`，`/gp11/rl/target_point_local` | `/gp11/rl/joint_targets`，`/gp11/rl/observation`，`/gp11/rl/action_raw` |
-| `gazebo_rl_bridge_node` | `/gp11/rl/joint_targets` | `*_position_controller/command` ×4 |
-| `reach_goal_keyboard_node` | `/tf` | `/gp11/rl/target_point_local`，`/gp11/rl/goal_marker`，`/gp11/rl/tool_marker` |
-| `anchor_world_tf_publisher` | `/tf`（TF buffer） | `/tf`（`world→base_link`，`world→capture_output_ref`） |
-| `gripper_passive_joint_relay` | `/joint_states` | `/joint_states`（从动夹爪，仅实机） |
+| 节点                            | 订阅                                            | 发布                                                                                                                       |
+|-------------------------------|-----------------------------------------------|--------------------------------------------------------------------------------------------------------------------------|
+| `rl_inference_node`           | `/joint_states`，`/gp11/rl/target_point_local` | `/gp11/rl/joint_targets`，`/gp11/rl/observation`，`/gp11/rl/action_raw`，`/gp11/rl/tool_marker`，`/gp11/rl/fk_target_marker` |
+| `gazebo_rl_bridge_node`       | `/gp11/rl/joint_targets`                      | `*_position_controller/command` ×4                                                                                       |
+| `reach_goal_keyboard_node`    | `/joint_states`，`/tf`                         | `/gp11/rl/target_point_local`，`/gp11/rl/goal_marker`                                                                     |
+| `anchor_world_tf_publisher`   | `/tf`（TF buffer）                              | `/tf`（`world→base_link`）                                                                                                 |
+| `gripper_passive_joint_relay` | `/joint_states`                               | `/joint_states`（从动夹爪，仅实机）                                                                                                |
 
 ---
-
-
 
 ### 硬件接口测试
 
