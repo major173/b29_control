@@ -326,11 +326,19 @@ class PolicyRunner:
 
         rt = cfg.runtime
         path_str = model_path or cfg.deploy.onnx_model_path
+        _models_dir = Path(__file__).resolve().parent.parent / "models" / "reach"
         if not path_str:
-            # 未配置路径时，自动查找同包 models/reach/stage0.onnx
-            _default = Path(__file__).resolve().parent.parent / "models" / "reach" / "stage0.onnx"
-            path_str = str(_default)
-        self.model_path = Path(path_str).expanduser().resolve()
+            # 空字符串：用默认 stage0.onnx
+            path_str = str(_models_dir / "stage0.onnx")
+
+        candidate = Path(path_str).expanduser()
+        if not candidate.is_absolute() or not candidate.exists():
+            # 非绝对路径或绝对路径不存在：在 models/reach/ 目录下查找
+            local = _models_dir / candidate.name
+            if local.exists():
+                candidate = local
+
+        self.model_path = candidate.resolve()
         if not self.model_path.exists():
             raise FileNotFoundError(f"ONNX model not found: {self.model_path}")
         self._session = ort.InferenceSession(
