@@ -63,7 +63,8 @@ def _quat_to_rot(q) -> np.ndarray:
 
 class ReachGoalKeyboardNode:
     def __init__(self, kinematics=None, tool_left_body=None, tool_right_body=None,
-                 active_joint_names=None) -> None:
+                 active_joint_names=None,
+                 obs_ref_origin=None, obs_ref_rot=None) -> None:
         rospy.init_node("reach_goal_keyboard", anonymous=False)
 
         self._spin_thread = threading.Thread(target=rospy.spin, daemon=True)
@@ -83,6 +84,10 @@ class ReachGoalKeyboardNode:
         self._tool_right_body = tool_right_body
         self._active_joint_names = active_joint_names or []
         self._latest_q: np.ndarray | None = None
+        # obs_ref nominal transform（训练侧固定，与 anchor_side 对应的 obs_ref_body 在 q=0 时的变换）
+        # 用 nominal 而非动态 FK，保证与训练侧坐标系一致
+        self._obs_ref_origin: np.ndarray | None = obs_ref_origin  # shape (3,)
+        self._obs_ref_rot: np.ndarray | None = obs_ref_rot        # shape (3, 3)
 
         self._pub_goal = rospy.Publisher(
             "/gp11/rl/target_point_local", Float64MultiArray, queue_size=1, latch=True
@@ -133,19 +138,24 @@ class ReachGoalKeyboardNode:
         return self._lookup(WORLD_FRAME, OBS_REF_FRAME)
 
     def _get_tool_pos_ref(self):
-        """运动端在训练侧 obs_ref 坐标系下的位置，用 FK 计算（不依赖 TF）。"""
+        """运动端在训练侧 obs_ref 坐标系下的位置，用 FK 计算（不依赖 TF）。
+
+        坐标系原点使用 nominal anchor transform（obs_ref_origin/rot），
+        与训练侧 build_reference_frame_from_nominal 保持一致。
+        """
         with self._lock:
             q = self._latest_q
         if q is None or self._kinematics is None:
             return None
+        if self._obs_ref_origin is None or self._obs_ref_rot is None:
+            return None
         try:
-            # 用训练侧 URDF 的动态 anchor 变换
             transforms = self._kinematics._compute_link_transforms(q)
-            T_anchor = transforms[ANCHOR_LINK]
             T_l = transforms[self._tool_left_body]
             T_r = transforms[self._tool_right_body]
             tool_base = 0.5 * (T_l[:3, 3] + T_r[:3, 3])
-            return (T_anchor[:3, :3].T @ (tool_base - T_anchor[:3, 3])).astype(np.float32)
+            # 用 nominal obs_ref（与训练侧一致），而非动态 T_anchor
+            return (self._obs_ref_rot.T @ (tool_base - self._obs_ref_origin)).astype(np.float32)
         except Exception:
             return None
 
@@ -370,7 +380,7 @@ def main() -> None:
         "left_first_leg_joint", "left_second_leg_joint",
         "right_first_leg_joint", "right_second_leg_joint",
     ]
-    km, _, _, tool_left, tool_right = load_fk_model(
+    km, obs_ref_origin, obs_ref_rot, tool_left, tool_right = load_fk_model(
         args.anchor_side,
         urdf_dir=_THIS_DIR.parent / "models" / "gp11_urdf",
     )
@@ -379,7 +389,8 @@ def main() -> None:
     else:
         print("[keyboard] FK load failed, _get_tool_pos_ref will return None")
 
-    node = ReachGoalKeyboardNode(km, tool_left, tool_right, _ACTIVE_JOINT_NAMES)
+    node = ReachGoalKeyboardNode(km, tool_left, tool_right, _ACTIVE_JOINT_NAMES,
+                                 obs_ref_origin=obs_ref_origin, obs_ref_rot=obs_ref_rot)
     node.run_keyboard()
 
 
