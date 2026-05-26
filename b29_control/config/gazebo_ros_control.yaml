@@ -1,9 +1,9 @@
 gazebo_ros_control:
   pid_gains:
     left_first_leg_joint:
-      p: 200.0
+      p: 300.0
       i: 0.
-      d: 60.0
+      d: 80.0
       i_clamp_max: 0.0
       i_clamp_min: 0.0
       antiwindup: true
@@ -12,7 +12,7 @@ gazebo_ros_control:
     left_second_leg_joint:
       p: 15.0
       i: 0.
-      d: 1.0
+      d: 3.0
       i_clamp_max: 0.0
       i_clamp_min: 0.0
       antiwindup: true
@@ -37,9 +37,9 @@ gazebo_ros_control:
       publish_state: true
 
     right_first_leg_joint:
-      p: 200.0
+      p: 300.0
       i: 0.
-      d: 60.0
+      d: 80.0
       i_clamp_max: 0.0
       i_clamp_min: 0.0
       antiwindup: true
@@ -48,7 +48,7 @@ gazebo_ros_control:
     right_second_leg_joint:
       p: 15.0
       i: 0.
-      d: 1.0
+      d: 3.0
       i_clamp_max: 0.0
       i_clamp_min: 0.0
       antiwindup: true
