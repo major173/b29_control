@@ -181,6 +181,7 @@ catkin_install_python(PROGRAMS
         scripts/gazebo_rl_bridge_node.py
         scripts/reach_goal_keyboard_node.py
         scripts/update_gp11_urdf.py
+        scripts/urdf_kinematics.py
         DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

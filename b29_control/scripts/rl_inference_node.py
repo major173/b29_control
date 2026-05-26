@@ -137,7 +137,8 @@ class RLInferenceNode:
             rospy.loginfo("[rl_inference] FK loaded: anchor=%s obs_ref_x=%s",
                           self.rt.anchor_side, self._obs_ref_rot[0].tolist())
         else:
-            rospy.logwarn("[rl_inference] FK unavailable: fk_target_marker disabled")
+            rospy.loginfo("[rl_inference] FK unavailable (b29_locomotion not found): "
+                          "tool/fk markers disabled, inference unaffected")
 
     # ---- callbacks ---- #
     def _on_target_point(self, msg) -> None:

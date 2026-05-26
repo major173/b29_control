@@ -439,31 +439,21 @@ _SIDE_URDF_NAMES = {
 
 
 def load_fk_model(anchor_side: str, urdf_dir: Optional[Path] = None):
-    """加载训练侧 FK 模型（UrdfKinematicModel）。
+    """加载 FK 模型（UrdfKinematicModel）。
 
-    Returns:
-        (kinematics, obs_ref_origin, obs_ref_rot, tool_left_body, tool_right_body)
-        失败时返回 (None, None, None, None, None)
+    优先使用本地 urdf_kinematics.py（无外部依赖），
+    不可用时回退到 b29_locomotion/sim2sim_mujoco。
     """
-    import importlib, os, sys
+    import sys
 
-    # 尝试多个路径找到 b29_locomotion
-    for _candidate in [
-        os.environ.get("B29_LOCOMOTION_ROOT", ""),
-        # 从 PYTHONPATH 里找已有的
-        next((p for p in sys.path if "b29_locomotion" in p), ""),
-        # 相对于本文件向上查找（scripts → b29_control → b29_control → src → B29 → usetest → ~ → RL/b29_locomotion）
-        str(Path(__file__).resolve().parent.parent.parent.parent.parent / "RL" / "b29_locomotion"),
-        str(Path.home() / "usetest" / "RL" / "b29_locomotion"),
-    ]:
-        if _candidate and Path(_candidate).exists() and _candidate not in sys.path:
-            sys.path.insert(0, _candidate)
+    # 使用本地 urdf_kinematics.py（纯 Python，零外部依赖）
+    _scripts_dir = str(Path(__file__).resolve().parent)
+    if _scripts_dir not in sys.path:
+        sys.path.insert(0, _scripts_dir)
 
     try:
-        _mod = importlib.import_module("sim2sim_mujoco.gp11_reach_runtime")
-        _UrdfKinematicModel = getattr(_mod, "UrdfKinematicModel")
-    except Exception as e:
-        print(f"[load_fk_model] import failed: {e}")
+        from urdf_kinematics import UrdfKinematicModel as _UrdfKinematicModel
+    except Exception:
         return None, None, None, None, None
 
     if urdf_dir is None:
