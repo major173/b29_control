@@ -8,88 +8,19 @@ b29_controller:
     type: robot_state_controller/RobotStateController
     publish_rate: 100
 
-  imu_sensor_controller:
-    type: imu_sensor_controller/ImuSensorController
-    publish_rate: 50
+  left_first_leg_joint_position_controller:
+    type: position_controllers/JointPositionController
+    joint: left_first_leg_joint
 
-  b29_smc_auto_controller:
-    type: b29_smc_auto_controller/B29SmcAutoController
-    publish_rate: 50
-    posture_roll_limit: 0.035
-    posture_pitch_limit: 0.035
-    joint_names:
-      left_first_leg_joint: "left_first_leg_joint"
-      left_second_leg_joint: "left_second_leg_joint"
-      left_rod_joint: "l_gripper_left_drive_joint"
-      right_first_leg_joint: "right_first_leg_joint"
-      right_second_leg_joint: "right_second_leg_joint"
-      right_rod_joint: "r_gripper_left_drive_joint"
-      left_friction_wheel_joint: "left_friction_wheel_joint"
-      right_friction_wheel_joint: "right_friction_wheel_joint"
-    imu_names: "base_imu"
-    auto_state_name: "auto_state"
-    use_sensor_input: false
-    use_auto_state: true
-    output_mode: "normal" # "normal", "safe_hold"
+  left_second_leg_joint_position_controller:
+    type: position_controllers/JointPositionController
+    joint: left_second_leg_joint
 
+  right_first_leg_joint_position_controller:
+    type: position_controllers/JointPositionController
+    joint: right_first_leg_joint
 
-  # # Position Controllers --------------------------------------
-  # b29_joint_controller:
-  #   type: b29_controllers/B29JointController
-  #   max_odom_vel: 10.0
-  #   friction_radius: 0.0405
-  #   release_rod_pos: 0.01
-  #   move_rod_pos: 0.04
-  #   fixed_rod_pos: 0.05
-  #   fixed_check_vel: 0.3
-  #   fixed_check_period: 0.1
+  right_second_leg_joint_position_controller:
+    type: position_controllers/JointPositionController
+    joint: right_second_leg_joint
 
-  #   release_refer_angle: -0.23
-
-  #   clamp_try_vel_: 3.0;    # 尝试夹紧时给摩擦轮的速度 (rad/s)
-  #   clamp_stall_vel_th_: 0.3    # 认为堵转的速度阈值
-  #   clamp_stall_duration_: 0.4    # 堵转需要持续的时间（防抖）
-  #   clamp_step_size_: 0.001  # 每次推杆推进的步长（m），建议 0.5~1mm
-  #   clamp_backoff_: 0.001  # 夹紧成功后回退一点点距离，释放应力
-
-  #   joint_names:
-  #     left_first_leg_joint: "left_first_leg_joint"
-  #     left_second_leg_joint: "left_second_leg_joint"
-  #     left_rod_joint: "left_rod_joint"
-  #     right_first_leg_joint: "right_first_leg_joint"
-  #     right_second_leg_joint: "right_second_leg_joint"
-  #     right_rod_joint: "right_rod_joint"
-  #     left_friction_wheel_joint: "left_friction_wheel_joint"
-  #     right_friction_wheel_joint: "right_friction_wheel_joint"
-
-  # left_first_leg_joint_position_controller:
-  #   type: position_controllers/JointPositionController
-  #   joint: left_first_leg_joint
-
-  # left_second_leg_joint_position_controller:
-  #   type: position_controllers/JointPositionController
-  #   joint: left_second_leg_joint
-
-  # left_rod_joint_position_controller:
-  #   type: position_controllers/JointPositionController
-  #   joint: left_rod_joint
-
-  # right_first_leg_joint_position_controller:
-  #   type: position_controllers/JointPositionController
-  #   joint: right_first_leg_joint
-
-  # right_second_leg_joint_position_controller:
-  #   type: position_controllers/JointPositionController
-  #   joint: right_second_leg_joint
-
-  # right_rod_joint_position_controller:
-  #   type: position_controllers/JointPositionController
-  #   joint: right_rod_joint
-
-  # left_friction_wheel_joint_velocity_controller:
-  #   type: velocity_controllers/JointVelocityController
-  #   joint: left_friction_wheel_joint
-
-  # right_friction_wheel_joint_velocity_controller:
-  #   type: velocity_controllers/JointVelocityController
-  #   joint: right_friction_wheel_joint
