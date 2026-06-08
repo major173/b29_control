@@ -1,6 +1,7 @@
 steering_engine_hw:
   serial:
     port: "/dev/ttyACM0"
+    # port: "/dev/ttyUSB0"
     baudrate: 115200
   imu:
     orientation_covariance_diagonal: [0.0012, 0.0012, 0.0012]
