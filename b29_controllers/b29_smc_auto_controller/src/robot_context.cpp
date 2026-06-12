@@ -9,6 +9,7 @@ namespace
 {
 constexpr double kCruiseSpeedMps = 0.10;
 constexpr double kApproachSpeedMps = 0.03;
+constexpr double kCrossObstaclesDistanceM = 0.30;
 constexpr std::uint32_t kReconnectTimeoutTicks = 250;
 constexpr std::uint32_t kAutoInitTimeoutTicks = 100;
 }
@@ -61,7 +62,7 @@ void RobotContext::tick50Hz()
     start();
   }
 
-  const int current_state_id = fsm_.getState().getId();
+  const int current_state_id = currentStateId();
 
   if (input_.emergency_stop || hasSafetyFault())
   {
@@ -140,7 +141,7 @@ void RobotContext::tick50Hz()
   if (current_state_id == RobotFSM::Idle.getId() && auto_start_requested_)
   {
     fsm_.evAutoStart();
-    auto_start_requested_ = (fsm_.getState().getId() == RobotFSM::Idle.getId());
+    auto_start_requested_ = (currentStateId() == RobotFSM::Idle.getId());
     return;
   }
 
@@ -157,7 +158,7 @@ void RobotContext::tick50Hz()
 void RobotContext::setInputSnapshot(const b29_smc_auto_controller::AutoInputSnapshot& input)
 {
   const bool allow_auto_start_latch =
-      !started_ || (fsm_.getState().getId() == RobotFSM::Idle.getId());
+      !started_ || (currentStateId() == RobotFSM::Idle.getId());
 
   if (allow_auto_start_latch && input.auto_start_requested && !last_input_auto_start_requested_)
   {
@@ -230,6 +231,21 @@ b29_smc_auto_controller::AutoStateTrace RobotContext::buildTraceMessage(const ro
   return trace;
 }
 
+bool RobotContext::isSafeStop() const
+{
+  return currentStateId() == RobotFSM::SafeStop.getId();
+}
+
+bool RobotContext::isCommsLoss() const
+{
+  return currentStateId() == RobotFSM::CommsLoss.getId();
+}
+
+bool RobotContext::isTraversing() const
+{
+  return currentStateId() == RobotFSM::Traversing.getId();
+}
+
 bool RobotContext::isLowerAlive() const
 {
   return input_.lower_alive;
@@ -255,6 +271,11 @@ bool RobotContext::isObstacleDetected() const
   return input_.obstacle_detected;
 }
 
+bool RobotContext::isObstacleWithinCrossObstaclesDistance() const
+{
+  return input_.obstacle_detected && input_.range_to_obstacle <= kCrossObstaclesDistanceM;
+}
+
 void RobotContext::setCruiseCommand()
 {
   setDriveMode(robot_fsm::DriveMode::Forward);
@@ -269,6 +290,13 @@ void RobotContext::setApproachCommand()
   setTargetSpeed(getApproachSpeed());
   command_.freeze_joints = false;
   setCommandReason("approach_command");
+}
+
+void RobotContext::setWheelStop()
+{
+  stopAllMotors();
+  command_.freeze_joints = false;
+  setCommandReason("waiting_obstacle_crossing");
 }
 
 void RobotContext::setSafeStopCommand(const std::string& reason)
@@ -382,7 +410,7 @@ bool RobotContext::isObstacleNotDetected() const
 
 bool RobotContext::hasSafetyFault() const
 {
-  return input_.joint_fault || input_.grip_fault || !input_.imu_ready;;
+  return input_.joint_fault || input_.grip_fault || !input_.imu_ready;
 }
 
 std::string RobotContext::safetyStopReason(std::string_view fallback) const
@@ -504,6 +532,15 @@ double RobotContext::getCruiseSpeed() const
 double RobotContext::getApproachSpeed() const
 {
   return kApproachSpeedMps;
+}
+
+int RobotContext::currentStateId() const
+{
+  if (!started_)
+  {
+    return -1;
+  }
+  return const_cast<RobotFSMContext&>(fsm_).getState().getId();
 }
 
 void RobotContext::stopAllMotors()

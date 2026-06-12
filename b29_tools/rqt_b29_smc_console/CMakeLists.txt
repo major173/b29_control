@@ -6,13 +6,14 @@ find_package(catkin REQUIRED COMPONENTS
   rqt_gui
   rqt_gui_py
   python_qt_binding
+  std_srvs
   b29_smc_auto_controller
 )
 
 catkin_python_setup()
 
 catkin_package(
-  CATKIN_DEPENDS b29_smc_auto_controller
+  CATKIN_DEPENDS b29_smc_auto_controller std_srvs
 )
 
 install(DIRECTORY resource

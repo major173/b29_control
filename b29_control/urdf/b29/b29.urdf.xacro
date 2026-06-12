@@ -49,7 +49,7 @@
     </link>
 
     <joint name="left_first_leg_joint" type="continuous">
-        <origin xyz="-0.299916107911189 -0.00183492089258142 0.0379999999994639" rpy="0 0 0"/>
+        <origin xyz="0.30008 0.0018349 0.038" rpy="0 0 0"/>
         <parent link="base_link"/>
         <child link="left_first_leg"/>
         <axis xyz="0 1 0"/>
@@ -78,7 +78,7 @@
     </link>
 
     <joint name="left_second_leg_joint" type="continuous">
-        <origin xyz="-0.07 -0.01359 0.22765" rpy="0 0 0"/>
+        <origin xyz="0.07 -0.01359 0.22765" rpy="0 0 0"/>
         <parent link="left_first_leg"/>
         <child link="left_second_leg"/>
         <axis xyz="0 0 -1"/>
@@ -219,6 +219,7 @@
         <parent link="l_gripper_right_drive"/>
         <child link="l_gripper_right_up"/>
         <axis xyz="-1 0 0"/>
+        <mimic joint="l_gripper_left_drive_joint" multiplier="1" offset="0"/>
         <limit lower="-0.015" upper="0.015" effort="50" velocity="0.2"/>
         <dynamics damping="150.0" friction="5.0"/>
     </joint>
@@ -252,7 +253,7 @@
     </link>
 
     <joint name="right_first_leg_joint" type="continuous">
-        <origin xyz="0.30008 0.0018349 0.038" rpy="0 0 0"/>
+        <origin xyz="-0.299916107911189 -0.00183492089258142 0.0379999999994639" rpy="0 0 0"/>
         <parent link="base_link"/>
         <child link="right_first_leg"/>
         <axis xyz="0 1 0"/>
@@ -281,7 +282,7 @@
     </link>
 
     <joint name="right_second_leg_joint" type="continuous">
-        <origin xyz="0.07 -0.0018099 0.22765" rpy="0 0 0"/>
+        <origin xyz="-0.07 -0.0018099 0.22765" rpy="0 0 0"/>
         <parent link="right_first_leg"/>
         <child link="right_second_leg"/>
         <axis xyz="0 0 -1"/>
@@ -423,6 +424,7 @@
         <parent link="r_gripper_right_drive"/>
         <child link="r_gripper_right_uprod"/>
         <axis xyz="-1 0 0"/>
+        <mimic joint="r_gripper_left_drive_joint" multiplier="1" offset="0"/>
         <limit lower="-0.015" upper="0.015" effort="50" velocity="0.2"/>
         <dynamics damping="150.0" friction="5.0"/>
     </joint>
@@ -449,7 +451,7 @@
     <transmission name="trans_left_second_leg_joint">
         <type>transmission_interface/SimpleTransmission</type>
         <actuator name="left_second_leg_motor">
-            <mechanicalReduction>1</mechanicalReduction>
+            <mechanicalReduction>-1</mechanicalReduction>
         </actuator>
         <joint name="left_second_leg_joint">
             <offset>0</offset>
@@ -494,7 +496,7 @@
     <transmission name="trans_right_second_leg_joint">
         <type>transmission_interface/SimpleTransmission</type>
         <actuator name="right_second_leg_motor">
-            <mechanicalReduction>1</mechanicalReduction>
+            <mechanicalReduction>-1</mechanicalReduction>
         </actuator>
         <joint name="right_second_leg_joint">
             <offset>0</offset>
@@ -531,7 +533,7 @@
             <child>left_second_leg</child>
             <pose>0 0 -0.25 0 0 0</pose>
         </joint>
-    </gazebo>
+        </gazebo>
 
     <xacro:if value="$(arg use_simulation)">
         <gazebo>

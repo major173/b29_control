@@ -5,6 +5,7 @@ import yaml
 import rospy
 
 from b29_smc_auto_controller.msg import AutoDebugOverride
+from std_srvs.srv import Trigger
 
 
 FIELD_MAP = {
@@ -74,17 +75,25 @@ def build_message(event: dict) -> AutoDebugOverride:
     return msg
 
 
+def resolve_service_name(namespace: str, service_name: str) -> str:
+    if service_name.startswith("/"):
+        return service_name
+    return f"{namespace.rstrip('/')}/{service_name}"
+
+
 def main() -> None:
     rospy.init_node("b29_smc_replay")
     topic_name = rospy.get_param("~topic", "/b29_controller/b29_smc_auto_controller/debug_override")
     scenario_param = rospy.get_param("~scenario")
     scenario_path = resolve_scenario_path(scenario_param)
+    controller_namespace = rospy.get_param("~controller_namespace", "/b29_controller/b29_smc_auto_controller")
 
     with open(scenario_path, "r", encoding="utf-8") as handle:
         scenario = yaml.safe_load(handle)
 
     events = scenario.get("events", [])
     publisher = rospy.Publisher(topic_name, AutoDebugOverride, queue_size=1)
+    service_proxies = {}
     rate = rospy.Rate(50)
     start_time = rospy.Time.now()
     index = 0
@@ -93,9 +102,17 @@ def main() -> None:
       elapsed = (rospy.Time.now() - start_time).to_sec()
       event = events[index]
       if elapsed >= float(event["time"]):
-          msg = build_message(event)
-          msg.header.stamp = rospy.Time.now()
-          publisher.publish(msg)
+          if "service" in event:
+              service_name = resolve_service_name(controller_namespace, event["service"])
+              if service_name not in service_proxies:
+                  service_proxies[service_name] = rospy.ServiceProxy(service_name, Trigger)
+              response = service_proxies[service_name]()
+              if not response.success:
+                  raise RuntimeError(f"service {service_name} rejected event: {response.message}")
+          else:
+              msg = build_message(event)
+              msg.header.stamp = rospy.Time.now()
+              publisher.publish(msg)
           index += 1
       rate.sleep()
 

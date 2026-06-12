@@ -2,6 +2,9 @@
 <launch>
   <arg name="use_sim_time" default="false"/>
   <arg name="use_simulation" default="false"/>
+  <arg name="validation" default="false"/>
+  <arg name="use_rviz" default="true"/>
+  <arg name="rviz_config" default="$(find b29_control)/rviz/config.rviz"/>
   <arg name="model" default="$(find b29_control)/urdf/b29/b29.urdf.xacro"/>
 
   <param name="use_sim_time" value="$(arg use_sim_time)"/>
@@ -10,11 +13,15 @@
 
   <rosparam file="$(find b29_control)/config/hardware.yaml" command="load"/>
   <rosparam file="$(find b29_control)/config/controller.yaml" command="load"/>
+  <rosparam if="$(arg validation)"
+            file="$(find b29_control)/config/joint_validation_controllers.yaml"
+            command="load"/>
 
   <node name="b29_hardware" pkg="b29_control" type="b29_hardware" respawn="false"
         output="screen"/>
 
-  <node name="controller_spawner"
+  <node unless="$(arg validation)"
+        name="controller_spawner"
         pkg="controller_manager"
         type="spawner"
         output="screen"
@@ -22,6 +29,15 @@
               b29_controller/robot_state_controller
               b29_controller/imu_sensor_controller
               b29_controller/b29_smc_auto_controller"/>
+
+  <node if="$(arg validation)"
+        name="controller_spawner"
+        pkg="controller_manager"
+        type="spawner"
+        output="screen"
+        args="b29_controller/joint_state_controller
+              b29_controller/robot_state_controller
+              b29_controller/imu_sensor_controller"/>
               
   <!-- <node name="controller_spawner"
         pkg="controller_manager"
@@ -46,4 +62,11 @@
         type="relay"
         output="screen"
         args="/base_imu /imu/data" />
+
+  <node if="$(arg use_rviz)"
+        name="rviz"
+        pkg="rviz"
+        type="rviz"
+        output="screen"
+        args="-d $(arg rviz_config)"/>
 </launch>

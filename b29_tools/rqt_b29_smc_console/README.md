@@ -26,6 +26,18 @@
 - 显示最新 `current_state`、`previous_state`、`last_event`、`output_mode`
 - 显示最近一次状态切换或命令原因 `reason`
 
+### Debug Validation Tabs
+
+- `Overview`：RobotFSM、基础命令来源、`output_mode`、调试门禁和仿真标识
+- `Crossing`：越障主 FSM、脱缆 Step、Step7 判定值、retry、人工干预和 PlannerControl
+- `Command & Safety`：effective command、六关节目标、dispatch 结果和软件急停锁存
+- `Inputs`：debug obstacle 和 RobotContext 输入快照
+- `Actions`：软件急停、人工复位、Planner release、障碍物覆盖、Auto Start、Pause、Comms Loss
+
+验证 tabs 和整个插件视图均支持滚动。rqt dock 缩小时可以继续访问全部字段和动作按钮，不需要保持固定窗口尺寸。
+
+`EMERGENCY STOP` 不弹确认框；`Manual Reset` 和 `Planner Release` 会要求确认。动作区用于调试验证，可能改变机器人机构状态。正式 controller 中 `debug_validation/enabled=false` 时会忽略 override，但软件急停服务始终有效。
+
 ### Sensor Input
 
 - 提供传感器输入编辑区
@@ -94,5 +106,6 @@ rosrun rqt_b29_smc_console rqt_b29_smc_console
 
 - 仍可显示基础界面结构
 - 不会发布真实 `sensor_input`、`debug_override` 或 `workflow` 请求
+- 不会调用 `planner_release`、`software_emergency_stop` 或 `manual_reset` 服务
 - 不会订阅真实 `state_trace`
 - 适合本地检查布局和文案，不适合作为联调替代

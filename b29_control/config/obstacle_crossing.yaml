@@ -1,0 +1,15 @@
+b29_controller:
+  b29_smc_auto_controller:
+    robot_motion:
+      wait_for_planner_point_control_time: 10.0
+      wait_for_grip_respond_time: 5.0
+      disconnect_cable_step_motion_duration: 3.0
+      disconnect_cable_step_interval: 0.5
+      succeed_disconnect_cable_threshold: 0.17
+      disconnect_cable_second_joint_check_delta: 0.20
+      close_gripper_retry_limit: 2
+      disconnect_cable_retry_limit: 2
+      planner_regrip_retry_limit: 2
+      disconnect_cable_up_joint_position: 0.5
+      disconnect_cable_down_joint_position: 0.5
+      disconnect_cable_move_joint_position: 0.5

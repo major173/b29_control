@@ -31,11 +31,11 @@ CommandDispatcher::OutputMode CommandDispatcher::outputMode() const
   return output_mode_;
 }
 
-void CommandDispatcher::dispatch(const AutoControlCommand& command)
+bool CommandDispatcher::dispatch(const AutoControlCommand& command)
 {
   if (!configured_)
   {
-    return;
+    return false;
   }
 
   const bool hold_active = (output_mode_ == OutputMode::kSafeHold) || command.freeze_joints;
@@ -72,5 +72,7 @@ void CommandDispatcher::dispatch(const AutoControlCommand& command)
     }
     position_joint_handles_[i].setCommand(target_position);
   }
+
+  return true;
 }
 }  // namespace b29_smc_auto_controller

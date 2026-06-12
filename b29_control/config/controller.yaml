@@ -20,17 +20,40 @@ b29_controller:
     joint_names:
       left_first_leg_joint: "left_first_leg_joint"
       left_second_leg_joint: "left_second_leg_joint"
-      left_rod_joint: "l_gripper_left_drive_joint"
+      l_gripper_left_drive_joint: "l_gripper_left_drive_joint"
       right_first_leg_joint: "right_first_leg_joint"
       right_second_leg_joint: "right_second_leg_joint"
-      right_rod_joint: "r_gripper_left_drive_joint"
+      r_gripper_left_drive_joint: "r_gripper_left_drive_joint"
       left_friction_wheel_joint: "left_friction_wheel_joint"
       right_friction_wheel_joint: "right_friction_wheel_joint"
     imu_names: "base_imu"
     auto_state_name: "auto_state"
     use_sensor_input: false
     use_auto_state: true
+    debug_validation:
+      enabled: true
+      simulation_only: false
+    planner_control:
+      manual_release_enabled: true
     output_mode: "normal" # "normal", "safe_hold"
+    planner_input:
+      enabled: true
+      topic: "planner_joint_point"
+      point_timeout: 1.0
+      max_delta_per_cycle: 0.10
+    robot_motion:
+      wait_for_planner_point_control_time: 10.0
+      wait_for_grip_respond_time: 5.0
+      disconnect_cable_step_motion_duration: 3.0
+      disconnect_cable_step_interval: 0.5
+      succeed_disconnect_cable_threshold: 0.17
+      disconnect_cable_second_joint_check_delta: 0.20
+      close_gripper_retry_limit: 2
+      disconnect_cable_retry_limit: 2
+      planner_regrip_retry_limit: 2
+      disconnect_cable_up_joint_position: 0.5
+      disconnect_cable_down_joint_position: 0.5
+      disconnect_cable_move_joint_position: 0.5
 
 
   # # Position Controllers --------------------------------------
@@ -55,10 +78,10 @@ b29_controller:
   #   joint_names:
   #     left_first_leg_joint: "left_first_leg_joint"
   #     left_second_leg_joint: "left_second_leg_joint"
-  #     left_rod_joint: "left_rod_joint"
+  #     l_gripper_left_drive_joint: "l_gripper_left_drive_joint"
   #     right_first_leg_joint: "right_first_leg_joint"
   #     right_second_leg_joint: "right_second_leg_joint"
-  #     right_rod_joint: "right_rod_joint"
+  #     r_gripper_left_drive_joint: "r_gripper_left_drive_joint"
   #     left_friction_wheel_joint: "left_friction_wheel_joint"
   #     right_friction_wheel_joint: "right_friction_wheel_joint"
 
@@ -70,9 +93,9 @@ b29_controller:
   #   type: position_controllers/JointPositionController
   #   joint: left_second_leg_joint
 
-  # left_rod_joint_position_controller:
+  # l_gripper_left_drive_joint_position_controller:
   #   type: position_controllers/JointPositionController
-  #   joint: left_rod_joint
+  #   joint: l_gripper_left_drive_joint
 
   # right_first_leg_joint_position_controller:
   #   type: position_controllers/JointPositionController
@@ -82,9 +105,9 @@ b29_controller:
   #   type: position_controllers/JointPositionController
   #   joint: right_second_leg_joint
 
-  # right_rod_joint_position_controller:
+  # r_gripper_left_drive_joint_position_controller:
   #   type: position_controllers/JointPositionController
-  #   joint: right_rod_joint
+  #   joint: r_gripper_left_drive_joint
 
   # left_friction_wheel_joint_velocity_controller:
   #   type: velocity_controllers/JointVelocityController

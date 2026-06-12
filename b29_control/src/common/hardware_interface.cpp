@@ -362,11 +362,11 @@ void StRobotHW::setInterface() {
   const ActuatorSpec actuator_specs[] = {
       {"left_first_leg_motor", kLeftFirstLeg, false},
       {"left_second_leg_motor", kLeftSecondLeg, false},
-      {"left_rod_motor", kLeftRod, false},
+      {"l_gripper_left_drive_motor", kLeftRod, false},
       {"left_friction_wheel_motor", kLeftFrictionWheel, true},
       {"right_first_leg_motor", kRightFirstLeg, false},
       {"right_second_leg_motor", kRightSecondLeg, false},
-      {"right_rod_motor", kRightRod, false},
+      {"r_gripper_left_drive_motor", kRightRod, false},
       {"right_friction_wheel_motor", kRightFrictionWheel, true},
   };
 
@@ -422,11 +422,11 @@ bool StRobotHW::loadProtocolConfig(ros::NodeHandle &root_nh) {
   joint_to_actuator_.clear();
   joint_to_actuator_["left_first_leg_joint"] = kLeftFirstLeg;
   joint_to_actuator_["left_second_leg_joint"] = kLeftSecondLeg;
-  joint_to_actuator_["left_rod_joint"] = kLeftRod;
+  joint_to_actuator_["l_gripper_left_drive_joint"] = kLeftRod;
   joint_to_actuator_["left_friction_wheel_joint"] = kLeftFrictionWheel;
   joint_to_actuator_["right_first_leg_joint"] = kRightFirstLeg;
   joint_to_actuator_["right_second_leg_joint"] = kRightSecondLeg;
-  joint_to_actuator_["right_rod_joint"] = kRightRod;
+  joint_to_actuator_["r_gripper_left_drive_joint"] = kRightRod;
   joint_to_actuator_["right_friction_wheel_joint"] = kRightFrictionWheel;
 
   for (const auto &pair : joint_to_actuator_) {

@@ -13,6 +13,7 @@ find_package(catkin REQUIRED COMPONENTS
         sensor_msgs
         smclib
         std_msgs
+        std_srvs
         b29_control)
 
 set(SMC_VENDOR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/smc")
@@ -54,7 +55,8 @@ catkin_package(
         roscpp
         sensor_msgs
         smclib
-        std_msgs)
+        std_msgs
+        std_srvs)
 
 include_directories(
         include

@@ -30,9 +30,11 @@ public:
   virtual bool isPostureReady() const = 0;
   virtual bool isGripConfirmed() const = 0;
   virtual bool isObstacleDetected() const = 0;
+  virtual bool isObstacleWithinCrossObstaclesDistance() const = 0;
 
   virtual void setCruiseCommand() = 0;
   virtual void setApproachCommand() = 0;
+  virtual void setWheelStop() = 0;
   virtual void setSafeStopCommand(const std::string& reason) = 0;
   virtual void stopAllMotors() = 0;
   virtual void freezeAllJoints() = 0;

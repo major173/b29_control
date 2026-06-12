@@ -18,6 +18,7 @@
   <build_depend>sensor_msgs</build_depend>
   <build_depend>smclib</build_depend>
   <build_depend>std_msgs</build_depend>
+  <build_depend>std_srvs</build_depend>
   <build_depend>b29_control</build_depend>
 
   <build_export_depend>controller_interface</build_export_depend>
@@ -29,6 +30,7 @@
   <build_export_depend>sensor_msgs</build_export_depend>
   <build_export_depend>smclib</build_export_depend>
   <build_export_depend>std_msgs</build_export_depend>
+  <build_export_depend>std_srvs</build_export_depend>
   <build_export_depend>b29_control</build_export_depend>
   
   <exec_depend>controller_interface</exec_depend>
@@ -41,6 +43,7 @@
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>smclib</exec_depend>
   <exec_depend>std_msgs</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
   <exec_depend>b29_control</exec_depend>
 
   <test_depend>rostest</test_depend>

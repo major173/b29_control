@@ -1,0 +1,37 @@
+events:
+  - time: 0.2
+    fields:
+      - auto_start_requested
+      - lower_alive
+      - imu_ready
+      - posture_ready
+      - grip_confirmed
+      - obstacle_detected
+      - range_to_obstacle
+    auto_start_requested: true
+    lower_alive: true
+    imu_ready: true
+    posture_ready: true
+    grip_confirmed: true
+    obstacle_detected: false
+    range_to_obstacle: 0.0
+  - time: 0.4
+    fields:
+      - auto_start_requested
+    auto_start_requested: false
+  - time: 1.0
+    fields:
+      - obstacle_detected
+      - range_to_obstacle
+    obstacle_detected: true
+    range_to_obstacle: 0.20
+  - time: 20.0
+    service: planner_release
+  - time: 40.0
+    service: planner_release
+  - time: 42.0
+    fields:
+      - obstacle_detected
+      - range_to_obstacle
+    obstacle_detected: false
+    range_to_obstacle: 0.0

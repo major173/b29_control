@@ -10,6 +10,9 @@
 - 当前已实现状态、事件的逐项验证方法
 - 每一步的验收标准
 
+完整越障、Planner 手动放行、软件急停和 GUI 操作以
+`b29_control/docs/b29_smc_obstacle_crossing_debug_validation.md` 为准。本文保留外层 RobotFSM 的逐项验证步骤。
+
 当前文档只覆盖已经实现的状态机范围：
 
 - 状态：`Idle`、`AutoInit`、`Traversing`、`CommsLoss`、`SafeStop`
@@ -31,15 +34,15 @@
 - 已完成工作区构建：
 
 ```bash
-cd /home/yuchen/usetest/B29
+cd /home/yi/桌面/B29_ws
 catkin build b29_smc_auto_controller b29_control
-source /home/yuchen/usetest/B29/devel/setup.bash
+source devel/setup.bash
 ```
 
 - 当前 Gazebo 调试专用启动链路是：
 
 ```bash
-roslaunch b29_control start_smc_in_gazebo.launch
+roslaunch b29_control start_smc_in_gazebo.launch debug_output_mode:=safe_hold
 ```
 
 这个 launch 的设计点是：
@@ -47,9 +50,15 @@ roslaunch b29_control start_smc_in_gazebo.launch
 - 只启动 `joint_state_controller`
 - 只启动 `robot_state_controller`
 - 只启动 `b29_smc_auto_controller`
-- `output_mode` 固定为 `safe_hold`
+- 显式加载 `debug_validation/enabled=true`
+- 默认 `debug_output_mode=normal`，会推动 Gazebo 机构
+- 使用 `debug_output_mode:=safe_hold` 可只验证 trace 和仲裁
 
-所以它验证的是状态机和输入/追踪链路，不验证真实关节动作执行。
+只验证状态机和输入/追踪链路时使用：
+
+```bash
+roslaunch b29_control start_smc_in_gazebo.launch debug_output_mode:=safe_hold
+```
 
 ## Topic 说明
 
@@ -62,7 +71,7 @@ roslaunch b29_control start_smc_in_gazebo.launch
 推荐先开一个终端持续观察 trace：
 
 ```bash
-source /home/yuchen/usetest/B29/devel/setup.bash
+source /home/yi/桌面/B29_ws/devel/setup.bash
 rostopic echo /b29_controller/b29_smc_auto_controller/state_trace
 ```
 
@@ -207,7 +216,7 @@ rostopic pub -1 "$OVERRIDE_TOPIC" b29_smc_auto_controller/AutoDebugOverride \
 ### 步骤 0：启动 Gazebo FSM 调试链路
 
 ```bash
-source /home/yuchen/usetest/B29/devel/setup.bash
+source /home/yi/桌面/B29_ws/devel/setup.bash
 roslaunch b29_control start_smc_in_gazebo.launch
 ```
 
@@ -667,7 +676,7 @@ rostopic pub -1 "$OVERRIDE_TOPIC" b29_smc_auto_controller/AutoDebugOverride \
 建议最终按下面顺序走一遍，作为当前版本的 Gazebo FSM 最小回归：
 
 1. 启动 Gazebo
-2. 确认 `state_trace.output_mode == safe_hold`
+2. 根据目标确认 `state_trace.output_mode == safe_hold` 或 `normal`
 3. 默认或显式触发 `CommsLoss`
 4. 用 `sensor_input.lower_alive=true` 验证 `CommsLoss -> Idle`
 5. 用 `debug_override.auto_start_requested=true` 验证 `Idle -> AutoInit -> Traversing`
@@ -687,12 +696,7 @@ rostopic pub -1 "$OVERRIDE_TOPIC" b29_smc_auto_controller/AutoDebugOverride \
 - `state_trace` 能反映当前状态、主要转移和 `output_mode`
 - `safe_hold` 模式下状态机可运行而不执行真实动作
 
-当前通过 Gazebo 还不能确认的内容：
-
-- 完整越障状态图
-- 真实关节轨迹执行正确性
-- 真实轮速闭环控制
-- 实机侧通信时序和实时性问题
+`safe_hold` 下不能确认机构运动。Gazebo `normal` 可用于验证完整越障状态图、脱缆插值和轮速命令，但仍不能替代实机侧通信时序和实时性验证。
 
 ## 常见问题
 
@@ -717,7 +721,7 @@ rostopic pub -1 "$OVERRIDE_TOPIC" b29_smc_auto_controller/AutoDebugOverride \
 
 ### 4. 为什么在 `Traversing` 看不到机器人真的动
 
-因为 Gazebo 调试链路固定使用 `output_mode=safe_hold`。这是设计目标，不是故障。
+检查 `state_trace.output_mode`。使用 `debug_output_mode:=safe_hold` 时执行层会保持机构；默认 `normal` 才会推动 Gazebo 机构。
 
 ### 5. 为什么 `last_event` 看起来不像当前这一步
 

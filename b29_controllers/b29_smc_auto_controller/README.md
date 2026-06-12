@@ -21,7 +21,7 @@
 
 ## 推荐调试方式
 
-当前联调优先使用 [`rqt_b29_smc_console`](/home/yuchen/usetest/B29/src/b29_control/b29_tools/rqt_b29_smc_console/README.md)，而不是手写 `rostopic pub`。
+当前联调优先使用 [`rqt_b29_smc_console`](../../b29_tools/rqt_b29_smc_console/README.md)，而不是手写 `rostopic pub`。
 
 这个插件可以直接完成以下工作：
 
@@ -292,6 +292,9 @@ roslaunch b29_control start.launch
 - `/b29_controller/b29_smc_auto_controller/debug_override`
 - `/b29_controller/b29_smc_auto_controller/sensor_input`
 
+`debug_override` 仅在 `debug_validation/enabled=true` 时生效。正式 `start.launch` 默认关闭该门禁。Gazebo 完整越障调试、Planner 手动放行和软件急停命令见
+`b29_control/docs/b29_smc_obstacle_crossing_debug_validation.md`。
+
 状态追踪 topic：
 
 - `/b29_controller/b29_smc_auto_controller/state_trace`
@@ -324,7 +327,7 @@ roslaunch b29_control start.launch
 
 ## Gazebo 状态机验证
 
-如果目标是先验证状态机而不是验证执行层，建议使用 Gazebo 专用启动链路，并将控制器参数设为 `output_mode: safe_hold`。
+如果目标是先验证状态机而不是验证执行层，建议使用 Gazebo 专用启动链路，并传入 `debug_output_mode:=safe_hold`。Gazebo 调试 launch 默认是 `normal`，用于观察机构实际运动。
 
 验证重点：
 

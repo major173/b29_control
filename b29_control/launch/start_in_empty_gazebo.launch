@@ -11,7 +11,8 @@
 
     <arg name="model" default="$(find b29_control)/urdf/b29/b29.urdf.xacro"/>
     <arg name="gui" default="true"/>
-    <arg name="rvizconfig" default="$(find b29_control)/rviz/config.rviz"/>
+    <arg name="use_rviz" default="true"/>
+    <arg name="rviz_config" default="$(find b29_control)/rviz/config.rviz"/>
     <param name="robot_description" command="$(find xacro)/xacro $(arg model)"/>
     <param name="use_gui" value="$(arg gui)"/>
 

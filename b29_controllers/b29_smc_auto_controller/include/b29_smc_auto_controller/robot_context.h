@@ -31,17 +31,23 @@ public:
   void requestAutoStart();
   void setTraceOutputMode(b29_smc_auto_controller::CommandDispatcher::OutputMode mode);
   const b29_smc_auto_controller::AutoControlCommand& currentCommand() const;
+  double getCruiseSpeed() const;
   std::string currentStateName() const;
   b29_smc_auto_controller::AutoStateTrace buildTraceMessage(const ros::Time& stamp) const;
+  bool isSafeStop() const;
+  bool isCommsLoss() const;
+  bool isTraversing() const;
 
   bool isLowerAlive() const override;
   bool isImuReady() const override;
   bool isPostureReady() const override;
   bool isGripConfirmed() const override;
   bool isObstacleDetected() const override;
+  bool isObstacleWithinCrossObstaclesDistance() const override;
 
   void setCruiseCommand() override;
   void setApproachCommand() override;
+  void setWheelStop() override;
   void setSafeStopCommand(const std::string& reason) override;
   void stopAllMotors() override;
   void freezeAllJoints() override;
@@ -82,8 +88,8 @@ public:
   void logSafeStopToIdle();
 
 private:
-  double getCruiseSpeed() const;
   double getApproachSpeed() const;
+  int currentStateId() const;
   void setTargetSpeed(double speed_mps);
   void setDriveMode(robot_fsm::DriveMode mode);
 

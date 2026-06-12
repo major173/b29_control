@@ -41,6 +41,11 @@ class TraceEntry:
     transition_reason: str = ''
     command_reason: str = ''
     output_mode: str = ''
+    obstacle_crossing_stage: str = ''
+    obstacle_crossing_side: str = ''
+    disconnect_step: str = ''
+    planner_control_active: bool = False
+    software_emergency_stop_latched: bool = False
 
 
 @dataclass(frozen=True)

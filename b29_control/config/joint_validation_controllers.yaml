@@ -1,0 +1,28 @@
+b29_controller:
+  left_first_leg_joint_position_controller:
+    type: position_controllers/JointPositionController
+    joint: left_first_leg_joint
+
+  left_second_leg_joint_position_controller:
+    type: position_controllers/JointPositionController
+    joint: left_second_leg_joint
+
+  left_rod_joint_position_controller:
+    type: position_controllers/JointPositionController
+    joint: l_gripper_left_drive_joint
+
+  right_first_leg_joint_position_controller:
+    type: position_controllers/JointPositionController
+    joint: right_first_leg_joint
+
+  right_second_leg_joint_position_controller:
+    type: position_controllers/JointPositionController
+    joint: right_second_leg_joint
+
+  left_friction_wheel_joint_velocity_controller:
+    type: velocity_controllers/JointVelocityController
+    joint: left_friction_wheel_joint
+
+  right_friction_wheel_joint_velocity_controller:
+    type: velocity_controllers/JointVelocityController
+    joint: right_friction_wheel_joint

@@ -140,6 +140,8 @@ class WorkflowRunner:
         elif step.action == 'clear':
             field_name, _value = self._resolve_field_payload(step.payload, default_value=None)
             self._topic_facade.clear_override(field_name)
+        elif step.action == 'service':
+            self._call_service(step.payload)
         else:
             raise ValueError(f'Unsupported workflow action: {step.action}')
 
@@ -166,3 +168,19 @@ class WorkflowRunner:
         if 'field_name' in payload:
             return payload['field_name'], payload.get('value', default_value)
         raise ValueError('Workflow step payload must include field or field_name')
+
+    def _call_service(self, payload):
+        if not isinstance(payload, Mapping) or 'name' not in payload:
+            raise ValueError('Service workflow payload must include name')
+        services = {
+            'planner_release': self._topic_facade.call_planner_release,
+            'software_emergency_stop': self._topic_facade.call_software_emergency_stop,
+            'manual_reset': self._topic_facade.call_manual_reset,
+        }
+        try:
+            callback = services[payload['name']]
+        except KeyError as exc:
+            raise ValueError(f'Unsupported workflow service: {payload["name"]}') from exc
+        response = callback()
+        if hasattr(response, 'success') and not response.success:
+            raise RuntimeError(getattr(response, 'message', 'service rejected request'))

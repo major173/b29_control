@@ -10,22 +10,22 @@ steering_engine_hw:
     id_map:
       left_first_leg_joint: 1
       left_second_leg_joint: 6
-      left_rod_joint: 4
+      l_gripper_left_drive_joint: 4
       left_friction_wheel_joint: 3
       right_first_leg_joint: 2
       right_second_leg_joint: 5
-      right_rod_joint: 8
+      r_gripper_left_drive_joint: 8
       right_friction_wheel_joint: 7
     control_map:
       wheel_speed_targets:
         - left_friction_wheel_joint
         - right_friction_wheel_joint
       claw_speed_targets:
-        - left_rod_joint
-        - right_rod_joint
+        - l_gripper_left_drive_joint
+        - r_gripper_left_drive_joint
       claw_angle_targets:
-        - left_rod_joint
-        - right_rod_joint
+        - l_gripper_left_drive_joint
+        - r_gripper_left_drive_joint
       joint_angle_targets:
         - left_first_leg_joint
         - left_second_leg_joint

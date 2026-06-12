@@ -38,8 +38,8 @@ bool B29JointController::init(hardware_interface::RobotHW* robot_hw,
   // --------------------------------------------------------------------------
 
   // 加载关节名称
-  std::string left_first_leg_joint, left_second_leg_joint, left_rod_joint;
-  std::string right_first_leg_joint, right_second_leg_joint, right_rod_joint;
+  std::string left_first_leg_joint, left_second_leg_joint, l_gripper_left_drive_joint;
+  std::string right_first_leg_joint, right_second_leg_joint, r_gripper_left_drive_joint;
   std::string left_friction_wheel_joint, right_friction_wheel_joint;
   std::string base_imu;
 
@@ -50,7 +50,7 @@ bool B29JointController::init(hardware_interface::RobotHW* robot_hw,
       "joint_names/left_second_leg_joint", left_second_leg_joint, "left_second_leg_joint"
       );
   controller_nh.param<std::string>(
-      "joint_names/left_rod_joint", left_rod_joint, "left_rod_joint"
+      "joint_names/l_gripper_left_drive_joint", l_gripper_left_drive_joint, "l_gripper_left_drive_joint"
       );
   controller_nh.param<std::string>(
       "joint_names/right_first_leg_joint", right_first_leg_joint, "right_first_leg_joint"
@@ -59,7 +59,7 @@ bool B29JointController::init(hardware_interface::RobotHW* robot_hw,
       "joint_names/right_second_leg_joint", right_second_leg_joint, "right_second_leg_joint"
       );
   controller_nh.param<std::string>(
-      "joint_names/right_rod_joint", right_rod_joint, "right_rod_joint"
+      "joint_names/r_gripper_left_drive_joint", r_gripper_left_drive_joint, "r_gripper_left_drive_joint"
       );
   controller_nh.param<std::string>(
       "joint_names/left_friction_wheel_joint", left_friction_wheel_joint, "left_friction_wheel_joint"
@@ -74,11 +74,11 @@ bool B29JointController::init(hardware_interface::RobotHW* robot_hw,
 
   lf_handle_ = robot_hw->get<hardware_interface::PositionJointInterface>()->getHandle(left_first_leg_joint);
   ls_handle_ = robot_hw->get<hardware_interface::PositionJointInterface>()->getHandle(left_second_leg_joint);
-  lr_handle_ = robot_hw->get<hardware_interface::PositionJointInterface>()->getHandle(left_rod_joint);
+  lr_handle_ = robot_hw->get<hardware_interface::PositionJointInterface>()->getHandle(l_gripper_left_drive_joint);
   lf_wheel_handle_ = robot_hw->get<hardware_interface::VelocityJointInterface>()->getHandle(left_friction_wheel_joint);
   rf_handle_ = robot_hw->get<hardware_interface::PositionJointInterface>()->getHandle(right_first_leg_joint);
   rs_handle_ = robot_hw->get<hardware_interface::PositionJointInterface>()->getHandle(right_second_leg_joint);
-  rr_handle_ = robot_hw->get<hardware_interface::PositionJointInterface>()->getHandle(right_rod_joint);
+  rr_handle_ = robot_hw->get<hardware_interface::PositionJointInterface>()->getHandle(r_gripper_left_drive_joint);
   rf_wheel_handle_ = robot_hw->get<hardware_interface::VelocityJointInterface>()->getHandle(right_friction_wheel_joint);
   base_imu_handle_ = imu_sensor_interface_->getHandle(base_imu);
 
