@@ -165,7 +165,8 @@ rviz
 | TF          | 添加                                                             |
 | Marker (红球) | `/gp11/rl/goal_marker`（目标点，obs_ref 坐标系）                        |
 | Marker (绿球) | `/gp11/rl/tool_marker`（当前末端，FK(current_q)，obs_ref 坐标系）         |
-| Marker (橙球) | `/gp11/rl/fk_target_marker`（网络输出期望末端，FK(target_q)，obs_ref 坐标系） |
+| Marker (橙球) | `/gp11/rl/fk_target_marker`（SafetyLimiter 后实际下发的期望末端，FK(target_q_safe)，obs_ref 坐标系） |
+| Marker (蓝球) | `/gp11/rl/fk_target_raw_marker`（网络 raw joint target，未过 SafetyLimiter，FK(target_q_raw)，obs_ref 坐标系） |
 
 **关键 TF 帧**
 
@@ -219,7 +220,7 @@ python3 src/b29_control/b29_control/scripts/reach_goal_keyboard_node.py \
 
 | 节点                            | 订阅                                            | 发布                                                                                                                       |
 |-------------------------------|-----------------------------------------------|--------------------------------------------------------------------------------------------------------------------------|
-| `rl_inference_node`           | `/joint_states`，`/gp11/rl/target_point_local` | `/gp11/rl/joint_targets`，`/gp11/rl/observation`，`/gp11/rl/action_raw`，`/gp11/rl/tool_marker`，`/gp11/rl/fk_target_marker` |
+| `rl_inference_node`           | `/joint_states`，`/gp11/rl/target_point_local` | `/gp11/rl/joint_targets`，`/gp11/rl/joint_targets_raw`，`/gp11/rl/observation`，`/gp11/rl/action_raw`，`/gp11/rl/tool_marker`，`/gp11/rl/fk_target_marker`，`/gp11/rl/fk_target_raw_marker` |
 | `gazebo_rl_bridge_node`       | `/gp11/rl/joint_targets`                      | `*_position_controller/command` ×4                                                                                       |
 | `reach_goal_keyboard_node`    | `/joint_states`，`/tf`                         | `/gp11/rl/target_point_local`，`/gp11/rl/goal_marker`                                                                     |
 | `anchor_world_tf_publisher`   | `/tf`（TF buffer）                              | `/tf`（`world→base_link`）                                                                                                 |
@@ -540,4 +541,3 @@ unsigned char Get_CRC8_Check_Sum(unsigned char *pchMessage,unsigned int dwLength
 	return(ucCRC8);
 }
 ~~~
-

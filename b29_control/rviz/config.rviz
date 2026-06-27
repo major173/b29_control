@@ -11,6 +11,7 @@ Panels:
         - /Marker1
         - /Marker2
         - /Marker3
+        - /Marker4
       Splitter Ratio: 0.5
     Tree Height: 579
   - Class: rviz/Selection
@@ -198,7 +199,15 @@ Visualization Manager:
       Marker Topic: /gp11/rl/fk_target_marker
       Name: Marker
       Namespaces:
-        {}
+        rl_fk_target_safe: true
+      Queue Size: 100
+      Value: true
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /gp11/rl/fk_target_raw_marker
+      Name: Marker
+      Namespaces:
+        rl_fk_target_raw: true
       Queue Size: 100
       Value: true
   Enabled: true
@@ -229,7 +238,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/Orbit
-      Distance: 1.8613817691802979
+      Distance: 2.670292854309082
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -237,17 +246,17 @@ Visualization Manager:
         Value: false
       Field of View: 0.7853981852531433
       Focal Point:
-        X: 0.34347835183143616
-        Y: -0.006285170093178749
-        Z: -0.07467779517173767
+        X: -0.09022072702646255
+        Y: -0.3670700192451477
+        Z: -0.32596564292907715
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.44539955258369446
+      Pitch: 0.3553997576236725
       Target Frame: <Fixed Frame>
-      Yaw: 5.685838222503662
+      Yaw: 0.8526585102081299
     Saved: ~
 Window Geometry:
   Displays:
@@ -265,5 +274,5 @@ Window Geometry:
   Views:
     collapsed: false
   Width: 1387
-  X: 100
-  Y: 444
+  X: 195
+  Y: 326

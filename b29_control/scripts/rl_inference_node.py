@@ -105,6 +105,9 @@ class RLInferenceNode:
         self.pub_fk_marker = rospy.Publisher(
             "/gp11/rl/fk_target_marker", Marker, queue_size=1
         )
+        self.pub_fk_marker_raw = rospy.Publisher(
+            "/gp11/rl/fk_target_raw_marker", Marker, queue_size=1
+        )
 
         # ---- 订阅器 ---- #
         rospy.Subscriber(
@@ -239,36 +242,70 @@ class RLInferenceNode:
         self.pub_obs.publish(self._F64MA(data=obs.tolist()))
         self.pub_action_raw.publish(self._F64MA(data=raw_action.tolist()))
 
-        # 发布橙球：FK(target_q_safe) 在 obs_ref 坐标系
-        # 用动态 anchor 变换（不依赖 nominal），正确处理关节运动后的坐标
         stamp = self._rospy.Time.now()
         if self._kinematics is not None:
             try:
-                anchor_name = self._obs_ref_frame  # e.g. "left_second_leg"
-
-                # target_q 的变换
-                tgt_transforms = self._kinematics._compute_link_transforms(target_q_safe)
-                T_anchor = tgt_transforms[anchor_name]          # anchor 在 base_link 下
-                T_tool_l = tgt_transforms[self._kinematics.tool_left_body]
-                T_tool_r = tgt_transforms[self._kinematics.tool_right_body]
-                tool_base = 0.5 * (T_tool_l[:3, 3] + T_tool_r[:3, 3])
-                # 转到 anchor 坐标系：p_anchor = R_anchor.T @ (p_base - t_anchor)
-                tgt_ref = T_anchor[:3, :3].T @ (tool_base - T_anchor[:3, 3])
-
-                fm = self._Marker()
-                fm.header.frame_id = self._obs_ref_frame
-                fm.header.stamp = stamp
-                fm.ns = "rl_fk_target"
-                fm.id = 0
-                fm.type = self._Marker.SPHERE
-                fm.action = self._Marker.ADD
-                fm.pose.position.x, fm.pose.position.y, fm.pose.position.z = float(tgt_ref[0]), float(tgt_ref[1]), float(tgt_ref[2])
-                fm.pose.orientation.w = 1.0
-                fm.scale.x = fm.scale.y = fm.scale.z = 0.04
-                fm.color.r, fm.color.g, fm.color.b, fm.color.a = 0.95, 0.50, 0.05, 0.90
-                self.pub_fk_marker.publish(fm)
+                # 橙球：经过 SafetyLimiter 后真正下发的目标末端
+                self._publish_fk_marker(
+                    target_q_safe,
+                    stamp,
+                    self.pub_fk_marker,
+                    marker_ns="rl_fk_target_safe",
+                    marker_id=0,
+                    color=(0.95, 0.50, 0.05, 0.90),
+                    diameter=0.04,
+                )
+                # 蓝球：网络输出映射后的 raw joint target（未经过 SafetyLimiter）
+                self._publish_fk_marker(
+                    target_q_raw,
+                    stamp,
+                    self.pub_fk_marker_raw,
+                    marker_ns="rl_fk_target_raw",
+                    marker_id=1,
+                    color=(0.10, 0.55, 0.95, 0.90),
+                    diameter=0.032,
+                )
             except Exception as e:
                 self._rospy.logwarn_throttle(5.0, "[rl_inference] FK marker failed: %s", e)
+
+    def _publish_fk_marker(
+        self,
+        target_q: np.ndarray,
+        stamp,
+        publisher,
+        *,
+        marker_ns: str,
+        marker_id: int,
+        color: tuple[float, float, float, float],
+        diameter: float,
+    ) -> None:
+        anchor_name = self._obs_ref_frame
+        transforms = self._kinematics._compute_link_transforms(target_q)
+        T_anchor = transforms[anchor_name]
+        T_tool_l = transforms[self._kinematics.tool_left_body]
+        T_tool_r = transforms[self._kinematics.tool_right_body]
+        tool_base = 0.5 * (T_tool_l[:3, 3] + T_tool_r[:3, 3])
+        tgt_ref = T_anchor[:3, :3].T @ (tool_base - T_anchor[:3, 3])
+
+        marker = self._Marker()
+        marker.header.frame_id = self._obs_ref_frame
+        marker.header.stamp = stamp
+        marker.ns = marker_ns
+        marker.id = marker_id
+        marker.type = self._Marker.SPHERE
+        marker.action = self._Marker.ADD
+        marker.pose.position.x = float(tgt_ref[0])
+        marker.pose.position.y = float(tgt_ref[1])
+        marker.pose.position.z = float(tgt_ref[2])
+        marker.pose.orientation.w = 1.0
+        marker.scale.x = diameter
+        marker.scale.y = diameter
+        marker.scale.z = diameter
+        marker.color.r = color[0]
+        marker.color.g = color[1]
+        marker.color.b = color[2]
+        marker.color.a = color[3]
+        publisher.publish(marker)
 
 
 # --------------------------------------------------------------------------- #
