@@ -19,7 +19,7 @@ bool StRobotHW::init(ros::NodeHandle &root_nh, ros::NodeHandle &robot_hw_nh) {
   serial::stopbits_t st = serial::stopbits_t::stopbits_one;
 
   std::string port_name = "/dev/usbSteering";
-  int baudrate = 115200;
+  int baudrate = 921600;
   root_nh.getParam("/steering_engine_hw/serial/port", port_name);
   root_nh.getParam("/steering_engine_hw/serial/baudrate", baudrate);
   serial_.setPort(port_name);
@@ -767,7 +767,13 @@ void StRobotHW::processRxBuffer(const ros::Time& time) {
         }
       }
       if (!found) {
-        rx_buffer_.clear();
+        const bool keep_header_prefix =
+            !rx_buffer_.empty() && rx_buffer_.back() == header[0];
+        if (keep_header_prefix) {
+          rx_buffer_.assign(1, header[0]);
+        } else {
+          rx_buffer_.clear();
+        }
         return;
       }
       rx_buffer_.erase(rx_buffer_.begin(), rx_buffer_.begin() + header_pos);

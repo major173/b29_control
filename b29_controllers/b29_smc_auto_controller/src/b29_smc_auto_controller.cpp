@@ -44,6 +44,7 @@ void B29SmcAutoController::starting(const ros::Time& time)
     return;
   }
 
+  smc_update_accumulator_ = ros::Duration(0.0);
   robot_context_.start();
   sensor_input_.header.stamp = time;
 
@@ -70,13 +71,23 @@ void B29SmcAutoController::starting(const ros::Time& time)
   state_trace_pub_.publish(robot_context_.buildTraceMessage(time));
 }
 
-void B29SmcAutoController::update(const ros::Time& time, const ros::Duration& /*period*/)
+void B29SmcAutoController::update(const ros::Time& time, const ros::Duration& period)
 {
   if (!initialized_)
   {
     return;
   }
 
+  smc_update_accumulator_ += period;
+  if (smc_update_accumulator_.toSec() < kSmcUpdatePeriodSec)
+  {
+    return;
+  }
+  smc_update_accumulator_ -= ros::Duration(kSmcUpdatePeriodSec);
+  if (smc_update_accumulator_.toSec() >= kSmcUpdatePeriodSec)
+  {
+    smc_update_accumulator_ = ros::Duration(0.0);
+  }
   
   bool use_data_fault_ = ((use_auto_state_ && use_sensor_input_) == true) || 
                          ((use_auto_state_ || use_sensor_input_) == false);
@@ -112,6 +123,7 @@ void B29SmcAutoController::stopping(const ros::Time& time)
     return;
   }
 
+  smc_update_accumulator_ = ros::Duration(0.0);
   AutoControlCommand safe_stop;
   command_dispatcher_.dispatch(safe_stop);
   AutoStateTrace trace = robot_context_.buildTraceMessage(time);

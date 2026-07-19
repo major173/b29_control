@@ -42,6 +42,7 @@ public:
 private:
   static constexpr std::size_t kPositionJointCount = CommandDispatcher::kPositionJointCount;
   static constexpr std::size_t kWheelJointCount = CommandDispatcher::kWheelJointCount;
+  static constexpr double kSmcUpdatePeriodSec = 0.02;
 
   bool initInterfaces(hardware_interface::RobotHW* robot_hw);
   bool loadParameters(ros::NodeHandle& controller_nh);
@@ -81,6 +82,7 @@ private:
   ros::Subscriber sensor_input_sub_;
   ros::Subscriber debug_override_sub_;
   ros::Publisher state_trace_pub_;
+  ros::Duration smc_update_accumulator_{0.0};
   bool initialized_{false};
 };
 }  // namespace b29_smc_auto_controller

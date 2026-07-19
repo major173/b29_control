@@ -1,8 +1,9 @@
 steering_engine_hw:
+  control_loop_rate_hz: 200
   serial:
     port: "/dev/ttyACM0"
     # port: "/dev/ttyUSB0"
-    baudrate: 115200
+    baudrate: 921600
   imu:
     orientation_covariance_diagonal: [0.0012, 0.0012, 0.0012]
     angular_velocity_covariance_diagonal: [0.0004, 0.0004, 0.0004]
