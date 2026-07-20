@@ -1,0 +1,287 @@
+<?xml version="1.0"?>
+<launch>
+  <!-- ================================================================
+       GP11 MoveIt — Real Robot (no Gazebo)
+
+       Prerequisite:
+         roslaunch b29_control start.launch use_rviz:=false
+
+       start.launch owns B29 hardware, /joint_states, TF, and the Planner
+       Adapter. This launch owns the only RViz instance;
+       do not run the legacy global-move_group real launch alongside it.
+
+       The b29_planner_adapter already provides the Action Server at
+       /gp11_moveit/reach_arm_controller/follow_joint_trajectory,
+       so we skip the GP11 trajectory_bridge.
+  ================================================================ -->
+
+  <arg name="anchor_mode"          default="auto"/>
+  <arg name="anchor_pose_provider" default="real_robot"/>
+  <arg name="rviz"                 default="true"/>
+  <arg name="rviz_config"          default="$(find gp11)/rviz/gp11_b29_live_moveit.rviz"/>
+  <!-- Plan-only by default. Set this explicitly to true only after the B29
+       adapter and the physical safety checks are ready for execution. -->
+  <arg name="enable_real_execution" default="false"/>
+  <!-- start.launch must be invoked with use_rviz:=false in this workflow. -->
+  <!-- The real UI intentionally uses RViz/MoveIt's native goal interaction,
+       just as the proven Gazebo workflow does.  The V3 to V9 custom target is
+       retained only as an opt-in diagnostic path, never as the default. -->
+  <arg name="launch_reach_target"  default="false"/>
+  <!-- Headless PointStamped -> MoveIt Action frontend. It is deliberately
+       opt-in until plan-only and graded real-robot validation are complete. -->
+  <arg name="launch_cartesian_goal_server" default="false"/>
+  <!-- Read-only chain-of-evidence monitor for MoveIt -> adapter -> SMC ->
+       encoder feedback. -->
+  <arg name="launch_execution_monitor" default="true"/>
+  <!-- Pure read-only time-aligned recorder.  It writes CSV + JSONL under
+       ~/.ros/gp11_blackbox and never publishes a controller command. -->
+  <arg name="launch_motion_blackbox" default="true"/>
+
+  <!-- Calibrated planning-world pose of the clamped anchor.  Identity is the
+       normal real-robot setting.  If changed, both the planning URDF and the
+       live TF bridge receive exactly the same transform. -->
+  <arg name="anchor_fixed_x" default="0.0"/>
+  <arg name="anchor_fixed_y" default="0.0"/>
+  <arg name="anchor_fixed_z" default="0.0"/>
+  <arg name="anchor_fixed_roll"  default="0.0"/>
+  <arg name="anchor_fixed_pitch" default="0.0"/>
+  <arg name="anchor_fixed_yaw"   default="0.0"/>
+
+  <!-- Connect GP11's anchor-rooted planning frame to B29's live TF tree.
+       This only adds world -> base_link; B29 remains authoritative for all
+       link transforms and joint states. -->
+  <node name="real_anchor_tf" pkg="gp11"
+        type="gp11_real_anchor_tf.py" output="screen">
+    <param name="anchor_mode" value="$(arg anchor_mode)"/>
+    <param name="world_frame" value="world"/>
+    <param name="base_frame" value="base_link"/>
+    <param name="left_anchor_link" value="l_gripper_left_drive"/>
+    <param name="right_anchor_link" value="r_gripper_left_drive"/>
+    <param name="rate" value="50.0"/>
+    <param name="anchor_fixed_x"     value="$(arg anchor_fixed_x)"/>
+    <param name="anchor_fixed_y"     value="$(arg anchor_fixed_y)"/>
+    <param name="anchor_fixed_z"     value="$(arg anchor_fixed_z)"/>
+    <param name="anchor_fixed_roll"  value="$(arg anchor_fixed_roll)"/>
+    <param name="anchor_fixed_pitch" value="$(arg anchor_fixed_pitch)"/>
+    <param name="anchor_fixed_yaw"   value="$(arg anchor_fixed_yaw)"/>
+  </node>
+
+  <!-- MoveIt anchor runtime  (real-robot mode) -->
+  <node name="moveit_anchor_runtime" pkg="gp11"
+        type="gp11_moveit_anchor_runtime.py" output="screen" clear_params="true">
+    <param name="anchor_mode"           value="$(arg anchor_mode)"/>
+    <param name="anchor_pose_provider"  value="$(arg anchor_pose_provider)"/>
+    <param name="start_trajectory_bridge" value="false"/>
+    <param name="allow_trajectory_execution" value="$(arg enable_real_execution)"/>
+    <!-- Use B29's TF + /joint_states directly; don't publish competing TF -->
+    <param name="start_robot_state_publisher" value="false"/>
+    <param name="start_filtered_joint_states" value="false"/>
+
+    <!-- Use B29's already-resolved URDF (from /robot_description param) -->
+    <param name="source_urdf_param" value="/robot_description"/>
+    <!-- Load anchored URDF into a separate namespace so move_group
+         uses it while /robot_description stays B29 URDF for rviz -->
+    <param name="moveit_param_namespace" value="/gp11_moveit"/>
+    <!-- Match the proven Gazebo UI: MoveGroup and RViz interaction stay at
+         root, while the re-rooted URDF above remains GP11-private. -->
+    <param name="move_group_namespace" value="/"/>
+    <param name="rviz"          value="$(arg rviz)"/>
+    <param name="rviz_config"   value="$(arg rviz_config)"/>
+    <param name="joint_states_topic"  value="/joint_states"/>
+    <param name="joint_state_timeout" value="0.5"/>
+    <!-- Refuse to start MoveIt/RViz when B29's state controller is absent.
+         Joint states alone are insufficient: the real and planning models
+         must be connected by base_link -> active gripper TF. -->
+    <param name="real_base_frame" value="base_link"/>
+    <param name="real_left_anchor_link" value="l_gripper_left_drive"/>
+    <param name="real_right_anchor_link" value="r_gripper_left_drive"/>
+    <param name="move_group_ready_timeout" value="15.0"/>
+    <!-- Start RViz only after MoveIt's action server is available, then let
+         the planning scene settle before native goal markers are created. -->
+    <param name="rviz_start_delay" value="0.5"/>
+    <!-- Adapter owns the 8 s feedback/tolerance watchdog.  Keep MoveIt's
+         outer duration monitor beyond that so it cannot preempt a slow but
+         still monitored real motion before the adapter applies its live
+         encoder-position hold and opens the next planning session. -->
+    <param name="allowed_execution_duration_scaling" value="1.0"/>
+    <param name="allowed_goal_duration_margin" value="105.0"/>
+    <!-- Match the cached-plan start gate. A person may be supporting the
+         mechanism between Plan and Execute, and the adapter replaces the
+         zero-time point with fresh encoders before commanding. Drifts above
+         25 degrees remain rejected by the Cartesian server. -->
+    <param name="allowed_start_tolerance" value="0.436332313"/>
+    <rosparam param="required_joint_names">
+      [left_first_leg_joint, left_second_leg_joint,
+       right_first_leg_joint, right_second_leg_joint]
+    </rosparam>
+    <!-- These are passive upper rods: B29 has no hardware state handle or
+         TF for them. Freeze their planning-only representation at the current
+         documented neutral geometry instead of fabricating /joint_states.
+         Change only after a physical calibration if a different value is
+         required. -->
+    <rosparam param="planning_fixed_joint_positions">
+      {l_gripper_right_up_joint: 0.0,
+       r_gripper_right_uprod_joint: 0.0}
+    </rosparam>
+    <!-- B29 remains the authoritative RL/encoder/TF coordinate system.
+         Do not override inverse_joint_axis_signs here: when the support chain
+         is re-rooted from gripper back to base, the generator's default -1
+         axis sign is the exact inverse kinematic transform.  Preserving the
+         source axis (+1 override) makes +yaw feedback appear as -yaw in the
+         anchored planning model and creates a growing closed-loop error. -->
+
+    <!-- Anchor offset params -->
+    <param name="anchor_fixed_x"     value="$(arg anchor_fixed_x)"/>
+    <param name="anchor_fixed_y"     value="$(arg anchor_fixed_y)"/>
+    <param name="anchor_fixed_z"     value="$(arg anchor_fixed_z)"/>
+    <param name="anchor_fixed_roll"  value="$(arg anchor_fixed_roll)"/>
+    <param name="anchor_fixed_pitch" value="$(arg anchor_fixed_pitch)"/>
+    <param name="anchor_fixed_yaw"   value="$(arg anchor_fixed_yaw)"/>
+
+    <!-- Real and Gazebo use different second-joint names.  Keep their OMPL
+         configuration separate so a real-robot fix cannot mutate the proven
+         Gazebo reference workflow. -->
+    <param name="kinematics_path"
+           value="$(find gp11)/config/gp11_moveit_kinematics_real.yaml"/>
+    <param name="joint_limits_path"
+           value="$(find gp11)/config/gp11_moveit_joint_limits_real.yaml"/>
+    <param name="ompl_path"
+           value="$(find gp11)/config/gp11_moveit_ompl_planning_real.yaml"/>
+    <param name="controllers_path"
+           value="$(find gp11)/config/gp11_moveit_controllers_real.yaml"/>
+    <param name="left_srdf_path"
+           value="$(find gp11)/config/gp11_moveit_left_anchor_real.srdf"/>
+    <param name="right_srdf_path"
+           value="$(find gp11)/config/gp11_moveit_right_anchor_real.srdf"/>
+  </node>
+
+  <!-- Bridge B29 grip state → GP11 attach topics -->
+  <node name="b29_attach_bridge" pkg="gp11"
+        type="gp11_b29_attach_bridge.py" output="screen"/>
+
+  <!-- A direct-drag target with workspace/IK/collision prechecks.  It sends
+       only MoveIt actions; it never publishes B29 hardware topics. -->
+  <node if="$(arg launch_reach_target)" name="real_reach_target" pkg="gp11"
+        type="gp11_real_reach_target.py" output="screen">
+    <param name="world_frame" value="world"/>
+    <param name="group_name" value="reach_arm"/>
+    <param name="move_group_action" value="/move_group"/>
+    <param name="execute_action" value="/execute_trajectory"/>
+    <param name="ik_service" value="/compute_ik"/>
+    <param name="display_trajectory_topic"
+           value="/move_group/display_planned_path"/>
+    <param name="velocity_scaling" value="0.20"/>
+    <param name="acceleration_scaling" value="0.15"/>
+    <param name="planning_action_timeout" value="10.0"/>
+    <param name="execution_action_timeout" value="110.0"/>
+    <param name="goal_joint_deadband" value="0.03"/>
+    <param name="session_rearm_timeout" value="3.0"/>
+    <!-- Independent last gate before the checked plan is handed to MoveIt
+         execution. These values mirror B29's physical/adapter bounds and
+         remain stricter than the adapter's own validation. -->
+    <param name="max_trajectory_velocity" value="1.20"/>
+    <param name="max_trajectory_acceleration" value="1.50"/>
+    <param name="max_trajectory_point_delta" value="0.10"/>
+    <param name="max_trajectory_duration" value="30.0"/>
+    <param name="max_trajectory_points" value="1000"/>
+    <rosparam param="trajectory_joint_position_bounds">
+      {left_first_leg_joint: [-1.10, 1.10],
+       left_second_leg_joint: [-12.5663706144, 12.5663706144],
+       right_first_leg_joint: [-1.10, 1.10],
+       right_second_leg_joint: [-12.5663706144, 12.5663706144]}
+    </rosparam>
+    <rosparam param="workspace_min">[-1.50, -1.50, -1.50]</rosparam>
+    <rosparam param="workspace_max">[ 1.50,  1.50,  1.50]</rosparam>
+  </node>
+
+  <!-- Formal no-RViz frontend. Planning caches one audited trajectory; a
+       second explicit Action carrying its one-time plan_id may execute it. -->
+  <node if="$(arg launch_cartesian_goal_server)"
+        name="cartesian_goal_server" pkg="gp11"
+        type="gp11_cartesian_goal_server.py" output="screen">
+    <param name="action_name" value="/gp11_moveit/reach_point"/>
+    <param name="world_frame" value="world"/>
+    <rosparam param="allowed_input_frames">[world, base_link]</rosparam>
+    <param name="group_name" value="reach_arm"/>
+    <param name="left_tip_link" value="right_gripper_tool"/>
+    <param name="right_tip_link" value="left_gripper_tool"/>
+    <param name="move_group_action" value="/move_group"/>
+    <param name="execute_action" value="/execute_trajectory"/>
+    <param name="ik_service" value="/compute_ik"/>
+    <param name="ik_goal_joint_tolerance" value="0.005"/>
+    <param name="position_tolerance" value="0.008"/>
+    <param name="min_position_tolerance" value="0.001"/>
+    <param name="max_position_tolerance" value="0.050"/>
+    <param name="velocity_scaling" value="0.20"/>
+    <param name="acceleration_scaling" value="0.15"/>
+    <param name="planning_action_timeout" value="10.0"/>
+    <param name="execution_action_timeout" value="110.0"/>
+    <param name="goal_joint_deadband" value="0.03"/>
+    <param name="joint_state_timeout" value="0.5"/>
+    <param name="control_state_timeout" value="0.5"/>
+    <param name="target_max_age" value="1.0"/>
+    <param name="tf_timeout" value="0.5"/>
+    <param name="session_rearm_timeout" value="3.0"/>
+    <param name="cached_plan_timeout" value="120.0"/>
+    <param name="cached_plan_start_tolerance" value="0.436332313"/>
+    <param name="max_trajectory_velocity" value="1.20"/>
+    <param name="max_trajectory_acceleration" value="1.50"/>
+    <param name="max_trajectory_point_delta" value="0.10"/>
+    <param name="max_trajectory_duration" value="30.0"/>
+    <param name="max_trajectory_points" value="1000"/>
+    <param name="large_flip_threshold" value="2.6179938779914944"/>
+    <!-- For the commissioned left-anchor 180-degree flip, reject the
+         geometrically equivalent negative branch only for left_second. The
+         free-arm right_second does not define the Cartesian endpoint and may
+         use either smooth approximately-180-degree direction in the adapter. -->
+    <param name="require_positive_large_flip_direction" value="true"/>
+    <param name="positive_direction_tolerance" value="0.00872664626"/>
+    <param name="positive_direction_constraint_margin" value="0.00872664626"/>
+    <rosparam param="positive_ik_seed_fractions">[0.50, 0.80, 0.95]</rosparam>
+    <rosparam param="trajectory_joint_position_bounds">
+      {left_first_leg_joint: [-1.10, 1.10],
+       left_second_leg_joint: [-12.5663706144, 12.5663706144],
+       right_first_leg_joint: [-1.10, 1.10],
+       right_second_leg_joint: [-12.5663706144, 12.5663706144]}
+    </rosparam>
+    <rosparam param="workspace_min">[-1.50, -1.50, -1.50]</rosparam>
+    <rosparam param="workspace_max">[ 1.50,  1.50,  1.50]</rosparam>
+    <param name="event_topic" value="/gp11_moveit/cartesian_goal/events"/>
+  </node>
+
+  <!-- This node is observability only: it gives RViz and rostopic users
+       explicit evidence of adapter/SMC acceptance and encoder feedback. -->
+  <node if="$(arg launch_execution_monitor)" name="real_execution_monitor"
+        pkg="gp11" type="gp11_real_execution_monitor.py" output="screen">
+    <param name="status_frame" value="base_link"/>
+    <param name="execute_goal_topic" value="/execute_trajectory/goal"/>
+    <param name="execute_result_topic" value="/execute_trajectory/result"/>
+  </node>
+
+  <!-- Black-box evidence for timeout/replan debugging: MoveIt trajectory,
+       adapter command, SMC final hardware target, encoders, marker and TF. -->
+  <node if="$(arg launch_motion_blackbox)" name="real_motion_blackbox"
+        pkg="gp11" type="gp11_real_motion_blackbox.py" output="screen">
+    <param name="output_directory" value="$(env HOME)/.ros/gp11_blackbox"/>
+    <param name="sample_rate" value="20.0"/>
+    <param name="world_frame" value="world"/>
+    <rosparam param="tf_frames">
+      [base_link, left_gripper_tool, right_gripper_tool]
+    </rosparam>
+    <param name="execute_goal_topic" value="/execute_trajectory/goal"/>
+    <param name="execute_result_topic" value="/execute_trajectory/result"/>
+    <param name="cartesian_goal_event_topic"
+           value="/gp11_moveit/cartesian_goal/events"/>
+  </node>
+
+  <!-- Read-only: records live/start/goal joint directions whenever RViz
+       publishes a planned path.  It never publishes commands or actions. -->
+  <node name="plan_direction_audit" pkg="gp11"
+        type="gp11_plan_direction_audit.py" output="screen">
+    <param name="display_trajectory_topic"
+           value="/move_group/display_planned_path"/>
+    <param name="large_flip_threshold" value="2.6179938779914944"/>
+    <param name="large_flip_right_second_target" value="3.141592653589793"/>
+  </node>
+
+</launch>

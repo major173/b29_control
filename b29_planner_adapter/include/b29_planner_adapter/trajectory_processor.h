@@ -51,11 +51,20 @@ public:
   bool normalize(const trajectory_msgs::JointTrajectory& input, NormalizedTrajectory& output,
                  std::string& error) const;
   void alignContinuousJoints(const JointVector& reference, NormalizedTrajectory& trajectory) const;
+  void anchorStartToReference(const JointVector& reference, NormalizedTrajectory& trajectory) const;
   void prependReferencePoint(const JointVector& reference, NormalizedTrajectory& trajectory) const;
   JointVector sample(const NormalizedTrajectory& trajectory, double trajectory_time) const;
   bool buildSamples(const NormalizedTrajectory& trajectory, double publish_rate, double requested_time_scale,
                     double max_delta, std::vector<JointVector>& samples, double& applied_time_scale,
                     std::string& error) const;
+  bool validateTotalDisplacement(const JointVector& reference,
+                                 const NormalizedTrajectory& trajectory,
+                                 const JointVector& limits,
+                                 std::string& error) const;
+  bool isOppositeMotionEvidence(std::size_t joint_index, double desired,
+                                double previous_actual, double actual,
+                                double target_threshold,
+                                double feedback_threshold) const;
   double jointError(std::size_t joint_index, double desired, double actual) const;
   const std::array<JointSpec, kPlannerJointCount>& jointSpecs() const;
 

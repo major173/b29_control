@@ -113,13 +113,16 @@ planner_control:
   manual_release_enabled: true
 ```
 
-进入 `PlannerControl` 后不会再因固定时间直接进入 `Regrip`。每次进入阶段会清除旧 release，必须在当前阶段重新调用：
+进入 `PlannerControl` 后不会因固定时间自动离开。每次进入阶段会清除旧 release，必须在当前阶段重新调用：
 
 ```bash
 rosservice call /b29_controller/b29_smc_auto_controller/planner_release
 ```
 
-非 `PlannerControl` 阶段调用会返回 `success=false`。正式模式中 `manual_release_enabled=false`，由正式 adapter 调用 `complete_planner_control` 完成会话。正式和调试放行后都进入 `RemoteControl`。
+非 `PlannerControl` 阶段调用会返回 `success=false`。服务只在下一控制周期将
+`PlannerControl` 切换到 `RemoteControl`，不会跳过 `PlannerControl`，也不会直接进入
+`Regrip`。正式模式中 `manual_release_enabled=false`，由正式 adapter 调用
+`complete_planner_control` 完成会话；正式和调试放行后都进入 `RemoteControl`。
 
 ### 4.1 RemoteControl 调试增量与完成上升沿
 
@@ -186,7 +189,8 @@ rosservice call /b29_controller/b29_smc_auto_controller/manual_reset
 - `Inputs`：调试输入和 RobotContext 输入
 - `Actions`：急停、reset、Planner release、障碍物输入、合法事件模拟
 
-动作按钮会影响仿真机构。`EMERGENCY STOP` 不弹确认框；`Manual Reset` 和 `Planner Release` 会要求确认。GUI 启动失败不会影响 controller。
+动作按钮会影响控制器输出；在 `output_mode: normal` 的真机环境中可能驱动实际机构。
+`EMERGENCY STOP` 不弹确认框；`Manual Reset` 和 `Planner Release` 会要求确认。GUI 启动失败不会影响 controller。
 
 ## 7. Trace 验收重点
 
@@ -271,9 +275,8 @@ rosrun b29_smc_auto_controller replay_scenario.py \
 git diff --check
 python3 -m py_compile \
   b29_controllers/b29_smc_auto_controller/scripts/replay_scenario.py \
-  b29_planner_adapter/scripts/send_test_trajectory.py \
   b29_tools/rqt_b29_smc_console/src/rqt_b29_smc_console/*.py
-catkin build b29_smc_auto_controller rqt_b29_smc_console b29_control
+catkin build b29_smc_auto_controller b29_planner_adapter rqt_b29_smc_console b29_control
 ```
 
 修改 `AutoStateTrace.msg` 会改变 ROS message MD5。依赖节点必须统一重新构建并同时部署。

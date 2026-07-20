@@ -733,6 +733,7 @@ AutoControlCommand B29SmcAutoController::buildEffectiveCommand(const ros::Time& 
   planner_override_applied_ = false;
   remote_control_completion_rising_edge_ = false;
   getCurrentJointStateToCommand(effective);
+  planner_session_.refreshReferenceIfUncommanded(currentPlannerReferencePositions(), time);
 
   if (isSafetyBlocked(effective))
   {

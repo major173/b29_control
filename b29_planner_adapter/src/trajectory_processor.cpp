@@ -157,6 +157,28 @@ void TrajectoryProcessor::prependReferencePoint(const JointVector& reference,
   trajectory.points.insert(trajectory.points.begin(), start);
 }
 
+void TrajectoryProcessor::anchorStartToReference(
+    const JointVector& reference, NormalizedTrajectory& trajectory) const
+{
+  if (trajectory.points.empty())
+  {
+    return;
+  }
+  if (trajectory.points.front().time_from_start > kTimeEpsilon)
+  {
+    prependReferencePoint(reference, trajectory);
+    return;
+  }
+
+  // MoveIt can retain the previous requested goal as a zero-time start after
+  // an execution timeout.  Never command that stale state.  A new execution
+  // always starts at the encoder snapshot captured when the Action arrived.
+  NormalizedPoint& start = trajectory.points.front();
+  start.positions = reference;
+  start.velocities.fill(0.0);
+  start.accelerations.fill(0.0);
+}
+
 JointVector TrajectoryProcessor::sample(const NormalizedTrajectory& trajectory, double trajectory_time) const
 {
   if (trajectory.points.empty())
@@ -237,6 +259,54 @@ bool TrajectoryProcessor::buildSamples(const NormalizedTrajectory& trajectory, d
   error = "unable to satisfy max_delta with uniform trajectory time scaling";
   samples.clear();
   return false;
+}
+
+bool TrajectoryProcessor::validateTotalDisplacement(
+    const JointVector& reference, const NormalizedTrajectory& trajectory,
+    const JointVector& limits, std::string& error) const
+{
+  if (trajectory.points.empty())
+  {
+    error = "trajectory contains no points";
+    return false;
+  }
+  for (std::size_t joint_index = 0; joint_index < kPlannerJointCount; ++joint_index)
+  {
+    if (!std::isfinite(limits[joint_index]) || limits[joint_index] <= 0.0)
+    {
+      error = "total displacement limits must be finite and positive";
+      return false;
+    }
+    for (const NormalizedPoint& point : trajectory.points)
+    {
+      const double displacement = std::abs(
+          jointError(joint_index, point.positions[joint_index], reference[joint_index]));
+      if (displacement > limits[joint_index] + kTimeEpsilon)
+      {
+        error = "trajectory total displacement exceeds safety limit for " +
+                joint_specs_[joint_index].output_name;
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+bool TrajectoryProcessor::isOppositeMotionEvidence(
+    std::size_t joint_index, double desired, double previous_actual, double actual,
+    double target_threshold, double feedback_threshold) const
+{
+  if (joint_index >= kPlannerJointCount || !std::isfinite(target_threshold) ||
+      !std::isfinite(feedback_threshold) || target_threshold <= 0.0 ||
+      feedback_threshold <= 0.0)
+  {
+    return false;
+  }
+  const double target_error = jointError(joint_index, desired, previous_actual);
+  const double feedback_step = jointError(joint_index, actual, previous_actual);
+  return std::abs(target_error) >= target_threshold &&
+         std::abs(feedback_step) >= feedback_threshold &&
+         target_error * feedback_step < 0.0;
 }
 
 double TrajectoryProcessor::jointError(std::size_t joint_index, double desired, double actual) const

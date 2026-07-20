@@ -1,0 +1,25 @@
+# Real-robot native RViz goal interaction.
+#
+# A dragged 6-DOF marker is converted into a joint goal by KDL before RViz
+# can draw the grey Goal State.  The Gazebo-era 0.1 s single search was often
+# too short for the re-rooted real chain, so RViz rejected the update and the
+# marker snapped back.  Keep this independent from the Gazebo config.
+
+left_arm:
+  kinematics_solver: kdl_kinematics_plugin/KDLKinematicsPlugin
+  kinematics_solver_search_resolution: 0.005
+  kinematics_solver_timeout: 0.5
+
+right_arm:
+  kinematics_solver: kdl_kinematics_plugin/KDLKinematicsPlugin
+  kinematics_solver_search_resolution: 0.005
+  kinematics_solver_timeout: 0.5
+
+reach_arm:
+  kinematics_solver: kdl_kinematics_plugin/KDLKinematicsPlugin
+  # The real cable mechanism has four actuated joints for a position target;
+  # do not reject an otherwise valid target merely because its tool roll is
+  # under-constrained.
+  position_only_ik: true
+  kinematics_solver_search_resolution: 0.005
+  kinematics_solver_timeout: 1.0

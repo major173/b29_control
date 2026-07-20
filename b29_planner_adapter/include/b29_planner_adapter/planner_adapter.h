@@ -11,6 +11,7 @@
 #include <control_msgs/FollowJointTrajectoryAction.h>
 #include <ros/ros.h>
 #include <sensor_msgs/JointState.h>
+#include <std_srvs/Trigger.h>
 
 #include <b29_smc_auto_controller/CompletePlannerControl.h>
 #include <b29_smc_auto_controller/PlannerControlState.h>
@@ -33,6 +34,8 @@ private:
     std::string planner_state_topic{"/b29_controller/b29_smc_auto_controller/planner_control_state"};
     std::string planner_command_topic{"/b29_controller/b29_smc_auto_controller/planner_joint_command"};
     std::string completion_service{"/b29_controller/b29_smc_auto_controller/complete_planner_control"};
+    std::string emergency_stop_service{
+        "/b29_controller/b29_smc_auto_controller/software_emergency_stop"};
     std::string joint_states_topic{"/joint_states"};
     double publish_rate{50.0};
     double time_scale{1.0};
@@ -40,6 +43,12 @@ private:
     double expected_smc_max_delta{0.10};
     JointVector start_tolerance{{0.08, 0.08, 0.08, 0.08}};
     JointVector path_tolerance{{0.50, 0.50, 0.50, 0.50}};
+    JointVector max_total_displacement{{12.5663706144, 12.5663706144, 12.5663706144,
+                                        12.5663706144}};
+    JointVector direction_target_threshold{{0.436332313, 0.436332313, 0.436332313,
+                                             0.436332313}};
+    JointVector direction_feedback_threshold{{0.003490659, 0.003490659, 0.003490659, 0.003490659}};
+    int direction_mismatch_samples{15};
     JointVector goal_position_tolerance{{0.02, 0.02, 0.02, 0.02}};
     JointVector goal_velocity_tolerance{{0.05, 0.05, 0.05, 0.05}};
     bool require_goal_velocity{true};
@@ -52,6 +61,14 @@ private:
     double completion_retry_interval{0.2};
     int completion_retry_count{3};
     double completion_transition_timeout{2.0};
+    double emergency_stop_service_timeout{0.5};
+  };
+
+  struct DirectionSafetyState
+  {
+    JointVector previous_actual{};
+    std::array<int, kPlannerJointCount> mismatch_counts{{0, 0, 0, 0}};
+    bool initialized{false};
   };
 
   struct PlannerStateSnapshot
@@ -80,15 +97,22 @@ private:
   bool getFreshPlannerState(b29_smc_auto_controller::PlannerControlState& state,
                             std::string& error) const;
   bool getFreshJointState(JointStateSnapshot& state, std::string& error) const;
+  bool waitForFirstCommandReference(
+      uint32_t session_id, const JointStateSnapshot& initial_joint_state,
+      b29_smc_auto_controller::PlannerControlState& state, std::string& error) const;
+  bool firstCommandWasExplicitlyRejected(uint32_t session_id, uint32_t sequence) const;
   bool buildGoalIndexMap(const std::vector<std::string>& goal_names,
                          std::array<std::size_t, kPlannerJointCount>& goal_index_for_output,
                          std::string& error) const;
   bool sendCommandAndAwait(uint32_t session_id, uint32_t sequence, const JointVector& positions,
+                           uint32_t& rejection_count,
                            const ros::WallTime& action_deadline, std::string& error);
   bool validateSession(uint32_t session_id, b29_smc_auto_controller::PlannerControlState& state,
                        std::string& error) const;
   bool validatePathTolerance(const JointVector& desired, const JointStateSnapshot& actual,
                              std::string& error) const;
+  bool validateMotionDirection(const JointVector& desired, const JointStateSnapshot& actual,
+                               DirectionSafetyState& state, std::string& error) const;
   bool goalWithinTolerance(const JointVector& desired, const JointStateSnapshot& actual) const;
   void publishFeedback(const std::vector<std::string>& goal_joint_names,
                        const std::array<std::size_t, kPlannerJointCount>& goal_index_for_output,
@@ -96,11 +120,21 @@ private:
   bool waitForFinalSettle(uint32_t session_id, uint32_t final_sequence, const JointVector& final_positions,
                           const std::vector<std::string>& goal_joint_names,
                           const std::array<std::size_t, kPlannerJointCount>& goal_index_for_output,
-                          const ros::WallTime& action_deadline, std::string& error);
+                          const ros::WallTime& action_deadline, DirectionSafetyState& direction_state,
+                          std::string& error);
   bool requestCompletion(uint32_t session_id, uint32_t final_sequence, std::string& error);
   bool waitForCompletionState(uint32_t session_id, const ros::WallTime& action_deadline,
                               std::string& error);
   bool preemptRequested(std::string& error);
+  bool publishCurrentPositionHold(std::string& detail);
+  bool publishHoldStepAndAwait(uint32_t session_id, uint32_t sequence,
+                               const JointVector& positions,
+                               const ros::WallTime& deadline, std::string& detail);
+  void rememberAcceptedCommand(uint32_t session_id, uint32_t sequence,
+                               const JointVector& positions);
+  bool triggerEmergencyStop(std::string& detail);
+  void recoverableAbort(int32_t error_code, const std::string& message);
+  void emergencyAbort(int32_t error_code, const std::string& message);
   void abortAction(int32_t error_code, const std::string& message);
 
   ros::NodeHandle node_handle_;
@@ -113,9 +147,14 @@ private:
   ros::Subscriber joint_state_subscriber_;
   ros::Publisher planner_command_publisher_;
   ros::ServiceClient completion_client_;
+  ros::ServiceClient emergency_stop_client_;
   mutable std::mutex planner_state_mutex_;
   mutable std::mutex joint_state_mutex_;
   PlannerStateSnapshot planner_state_snapshot_{};
   JointStateSnapshot joint_state_snapshot_{};
+  uint32_t last_accepted_session_id_{0};
+  uint32_t last_accepted_sequence_{0};
+  JointVector last_accepted_positions_{};
+  bool last_accepted_positions_available_{false};
 };
 }  // namespace b29_planner_adapter

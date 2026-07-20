@@ -1,0 +1,12 @@
+# Real-robot controller config: only reach_arm (4 joints).
+# b29_planner_adapter provides this action server.
+controller_list:
+  - name: /gp11_moveit/reach_arm_controller
+    action_ns: follow_joint_trajectory
+    type: FollowJointTrajectory
+    default: true
+    joints:
+      - right_first_leg_joint
+      - right_second_leg_joint
+      - left_first_leg_joint
+      - left_second_leg_joint

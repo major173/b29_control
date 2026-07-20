@@ -10,13 +10,14 @@ find_package(catkin REQUIRED COMPONENTS
   control_msgs
   roscpp
   sensor_msgs
+  std_srvs
   trajectory_msgs
 )
 
 catkin_package(
   INCLUDE_DIRS include
   LIBRARIES ${PROJECT_NAME}_trajectory ${PROJECT_NAME}
-  CATKIN_DEPENDS actionlib b29_smc_auto_controller control_msgs roscpp sensor_msgs trajectory_msgs
+  CATKIN_DEPENDS actionlib b29_smc_auto_controller control_msgs roscpp sensor_msgs std_srvs trajectory_msgs
 )
 
 include_directories(
@@ -48,11 +49,6 @@ if(CATKIN_ENABLE_TESTING)
     target_link_libraries(test_trajectory_processor ${PROJECT_NAME}_trajectory ${catkin_LIBRARIES})
   endif()
 endif()
-
-catkin_install_python(PROGRAMS
-  scripts/send_test_trajectory.py
-  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-)
 
 install(TARGETS ${PROJECT_NAME}_trajectory ${PROJECT_NAME} ${PROJECT_NAME}_node
   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}

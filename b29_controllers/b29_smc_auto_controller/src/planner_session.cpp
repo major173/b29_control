@@ -33,17 +33,35 @@ uint32_t PlannerSession::start(uint8_t crossing_side, const Positions& reference
   crossing_side_ = crossing_side;
   session_start_time_ = time;
   reference_positions_ = reference_positions;
+  reference_stamp_ = time;
   last_positions_ = Positions{};
   has_accepted_command_ = false;
   last_accepted_sequence_ = 0;
   last_rejected_sequence_ = 0;
   reject_reason_ = PlannerControlState::REJECT_NONE;
+  rejection_count_ = 0;
   last_command_receive_time_ = ros::Time{};
   exit_reason_ = PlannerControlState::EXIT_NONE;
   completion_request_pending_ = false;
   completion_request_session_id_ = 0;
   completion_request_final_sequence_ = 0;
   return session_id_;
+}
+
+bool PlannerSession::refreshReferenceIfUncommanded(
+    const Positions& reference_positions, const ros::Time& time)
+{
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!active_ || !accepting_commands_ || has_accepted_command_ ||
+      !std::all_of(reference_positions.begin(), reference_positions.end(),
+                   [](double position) { return std::isfinite(position); }))
+  {
+    return false;
+  }
+
+  reference_positions_ = reference_positions;
+  reference_stamp_ = time;
+  return true;
 }
 
 void PlannerSession::stop(uint8_t exit_reason, bool completed)
@@ -213,6 +231,13 @@ bool PlannerSession::latestCommandIsFresh(const ros::Time& time, Positions& posi
   return true;
 }
 
+bool PlannerSession::acceptedCommandTimedOut(const ros::Time& time) const
+{
+  std::lock_guard<std::mutex> lock(mutex_);
+  return active_ && has_accepted_command_ && !last_command_receive_time_.isZero() &&
+         (time - last_command_receive_time_).toSec() > config_.command_timeout;
+}
+
 bool PlannerSession::totalWatchdogExpired(const ros::Time& time) const
 {
   std::lock_guard<std::mutex> lock(mutex_);
@@ -239,10 +264,14 @@ PlannerControlState PlannerSession::buildState(const ros::Time& stamp) const
   state.last_accepted_sequence = last_accepted_sequence_;
   state.last_rejected_sequence = last_rejected_sequence_;
   state.reject_reason = reject_reason_;
+  state.rejection_count = rejection_count_;
   state.last_completed_session_id = last_completed_session_id_;
   state.exit_reason = exit_reason_;
   state.max_delta_per_command = config_.max_delta_per_command;
   state.command_timeout = config_.command_timeout;
+  std::copy(reference_positions_.begin(), reference_positions_.end(),
+            state.reference_positions.begin());
+  state.reference_stamp = reference_stamp_;
   return state;
 }
 
@@ -251,6 +280,7 @@ PlannerSession::CommandResult PlannerSession::rejectCommand(uint32_t sequence, u
 {
   last_rejected_sequence_ = sequence;
   reject_reason_ = reason;
+  ++rejection_count_;
   return CommandResult{false, false, reason, message};
 }
 

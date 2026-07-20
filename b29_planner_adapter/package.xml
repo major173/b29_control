@@ -13,9 +13,8 @@
   <depend>control_msgs</depend>
   <depend>roscpp</depend>
   <depend>sensor_msgs</depend>
+  <depend>std_srvs</depend>
   <depend>trajectory_msgs</depend>
-  <exec_depend>rospy</exec_depend>
-
   <test_depend>gtest</test_depend>
 
   <export/>

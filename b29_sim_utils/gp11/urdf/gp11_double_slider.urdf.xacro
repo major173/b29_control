@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="gp11">
+    <xacro:arg name="use_simulation" default="true"/>
+    <xacro:arg name="fix_to_world" default="true"/>
+    <xacro:arg name="base_x" default="0.030"/>
+    <xacro:arg name="base_y" default="1.002"/>
+    <xacro:arg name="base_z" default="1.550"/>
+    <xacro:arg name="base_yaw" default="-1.5707963"/>
+
+    <xacro:if value="$(arg fix_to_world)">
+        <link name="world"/>
+        <joint name="world_to_base" type="fixed">
+            <parent link="world"/>
+            <child link="base"/>
+            <origin xyz="$(arg base_x) $(arg base_y) $(arg base_z)"
+                    rpy="0 0 $(arg base_yaw)"/>
+        </joint>
+    </xacro:if>
+
+    <xacro:include filename="$(find gp11)/urdf/gp11_double_slider.urdf"/>
+
+    <xacro:macro name="position_transmission" params="joint_name">
+        <transmission name="trans_${joint_name}">
+            <type>transmission_interface/SimpleTransmission</type>
+            <actuator name="${joint_name}_motor">
+                <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+                <mechanicalReduction>1</mechanicalReduction>
+            </actuator>
+            <joint name="${joint_name}">
+                <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+            </joint>
+        </transmission>
+    </xacro:macro>
+
+    <xacro:macro name="velocity_transmission" params="joint_name">
+        <transmission name="trans_${joint_name}">
+            <type>transmission_interface/SimpleTransmission</type>
+            <actuator name="${joint_name}_motor">
+                <hardwareInterface>hardware_interface/VelocityJointInterface</hardwareInterface>
+                <mechanicalReduction>1</mechanicalReduction>
+            </actuator>
+            <joint name="${joint_name}">
+                <hardwareInterface>hardware_interface/VelocityJointInterface</hardwareInterface>
+            </joint>
+        </transmission>
+    </xacro:macro>
+
+    <xacro:position_transmission joint_name="left_first_leg_joint"/>
+    <xacro:position_transmission joint_name="left_second_leg_z"/>
+    <xacro:position_transmission joint_name="l_gripper_left_drive_joint"/>
+    <xacro:position_transmission joint_name="l_gripper_right_up_joint"/>
+    <xacro:position_transmission joint_name="right_first_leg_joint"/>
+    <xacro:position_transmission joint_name="right_second_leg_joint"/>
+    <xacro:position_transmission joint_name="r_gripper_left_drive_joint"/>
+    <xacro:position_transmission joint_name="r_gripper_right_uprod_joint"/>
+    <xacro:velocity_transmission joint_name="left_friction_whell_joint"/>
+    <xacro:velocity_transmission joint_name="right_friction_wheel_joint"/>
+
+    <xacro:if value="$(arg use_simulation)">
+        <gazebo>
+            <plugin name="gazebo_ros_control" filename="libgazebo_ros_control.so">
+                <robotNamespace>/</robotNamespace>
+                <robotParam>/robot_description</robotParam>
+                <robotSimType>gazebo_ros_control/DefaultRobotHWSim</robotSimType>
+            </plugin>
+        </gazebo>
+
+        <gazebo reference="l_gripper_left_up">
+            <gravity>false</gravity>
+            <selfCollide>false</selfCollide>
+        </gazebo>
+        <gazebo reference="left_friction_whell">
+            <mu1>2.0</mu1>
+            <mu2>2.0</mu2>
+            <kp>1000000.0</kp>
+            <kd>10.0</kd>
+            <maxVel>0.05</maxVel>
+            <minDepth>0.0005</minDepth>
+            <maxContacts>8</maxContacts>
+        </gazebo>
+        <gazebo reference="l_gripper_right_up">
+            <gravity>false</gravity>
+            <selfCollide>false</selfCollide>
+        </gazebo>
+        <gazebo reference="r_gripper_left_uprod">
+            <gravity>false</gravity>
+            <selfCollide>false</selfCollide>
+        </gazebo>
+        <gazebo reference="right_friction_wheel">
+            <mu1>2.0</mu1>
+            <mu2>2.0</mu2>
+            <kp>1000000.0</kp>
+            <kd>10.0</kd>
+            <maxVel>0.05</maxVel>
+            <minDepth>0.0005</minDepth>
+            <maxContacts>8</maxContacts>
+        </gazebo>
+        <gazebo reference="r_gripper_right_uprod">
+            <gravity>false</gravity>
+            <selfCollide>false</selfCollide>
+        </gazebo>
+
+        <gazebo reference="l_gripper_left_drive_joint">
+            <implicitSpringDamper>true</implicitSpringDamper>
+        </gazebo>
+        <gazebo reference="l_gripper_right_up_joint">
+            <implicitSpringDamper>true</implicitSpringDamper>
+        </gazebo>
+        <gazebo reference="r_gripper_left_drive_joint">
+            <implicitSpringDamper>true</implicitSpringDamper>
+        </gazebo>
+        <gazebo reference="r_gripper_right_uprod_joint">
+            <implicitSpringDamper>true</implicitSpringDamper>
+        </gazebo>
+        <gazebo reference="left_friction_whell_joint">
+            <implicitSpringDamper>true</implicitSpringDamper>
+        </gazebo>
+        <gazebo reference="right_friction_wheel_joint">
+            <implicitSpringDamper>true</implicitSpringDamper>
+        </gazebo>
+    </xacro:if>
+</robot>

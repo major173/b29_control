@@ -1,0 +1,59 @@
+<?xml version="1.0"?>
+<!-- Real-robot SRDF: B29 URDF uses base_link and left_second_leg_joint -->
+<robot name="gp11">
+  <group name="left_arm">
+    <chain base_link="l_gripper_left_drive" tip_link="base_link"/>
+  </group>
+
+  <group name="right_arm">
+    <chain base_link="base_link" tip_link="right_second_leg"/>
+  </group>
+
+  <group name="reach_arm">
+    <chain base_link="l_gripper_left_drive" tip_link="right_gripper_tool"/>
+  </group>
+
+  <group name="dual_arm">
+    <group name="left_arm"/>
+    <group name="right_arm"/>
+  </group>
+
+  <group_state name="home" group="left_arm">
+    <joint name="left_first_leg_joint" value="0.0"/>
+    <joint name="left_second_leg_joint" value="0.0"/>
+  </group_state>
+
+  <group_state name="home" group="right_arm">
+    <joint name="right_first_leg_joint" value="0.0"/>
+    <joint name="right_second_leg_joint" value="0.0"/>
+  </group_state>
+
+  <group_state name="home" group="dual_arm">
+    <joint name="left_first_leg_joint" value="0.0"/>
+    <joint name="left_second_leg_joint" value="0.0"/>
+    <joint name="right_first_leg_joint" value="0.0"/>
+    <joint name="right_second_leg_joint" value="0.0"/>
+  </group_state>
+
+  <group_state name="home" group="reach_arm">
+    <joint name="left_first_leg_joint" value="0.0"/>
+    <joint name="left_second_leg_joint" value="0.0"/>
+    <joint name="right_first_leg_joint" value="0.0"/>
+    <joint name="right_second_leg_joint" value="0.0"/>
+  </group_state>
+
+  <disable_collisions link1="base_link" link2="left_first_leg" reason="Adjacent"/>
+  <disable_collisions link1="base_link" link2="right_first_leg" reason="Adjacent"/>
+  <disable_collisions link1="left_first_leg" link2="left_second_leg" reason="Adjacent"/>
+  <disable_collisions link1="right_first_leg" link2="right_second_leg" reason="Adjacent"/>
+  <disable_collisions link1="left_second_leg" link2="l_gripper_left_drive" reason="Adjacent"/>
+  <disable_collisions link1="left_second_leg" link2="l_gripper_right_drive" reason="Adjacent"/>
+  <disable_collisions link1="right_second_leg" link2="r_gripper_left_drive" reason="Adjacent"/>
+  <disable_collisions link1="right_second_leg" link2="r_gripper_right_drive" reason="Adjacent"/>
+  <disable_collisions link1="l_gripper_left_drive" link2="l_gripper_left_up" reason="Adjacent"/>
+  <disable_collisions link1="l_gripper_right_drive" link2="l_gripper_right_up" reason="Adjacent"/>
+  <disable_collisions link1="r_gripper_left_drive" link2="r_gripper_left_uprod" reason="Adjacent"/>
+  <disable_collisions link1="r_gripper_right_drive" link2="r_gripper_right_uprod" reason="Adjacent"/>
+  <disable_collisions link1="l_gripper_left_up" link2="left_friction_wheel" reason="Adjacent"/>
+  <disable_collisions link1="r_gripper_left_uprod" link2="right_friction_wheel" reason="Adjacent"/>
+</robot>

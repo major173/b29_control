@@ -48,10 +48,12 @@ GP11 Action 中的输入顺序可以不同，adapter 始终按关节名映射。
 - `time_scale` 统一缩放整条轨迹。
 - 若 50 Hz 相邻输出超过 SMC 的单命令 delta 上限，会继续统一延长整条轨迹，不独立钳制某个关节。
 - 每次只发送一个序号，收到 `PlannerControlState.last_accepted_sequence` 确认后才推进下一点；未确认时只重发同一序号和同一内容。
+- 新会话在尚未接受序号 `1` 前，SMC 持续以实时编码器刷新首点参考；adapter 只有在该参考与收到 Action 时的反馈一致后才开始发送。
+- 轨迹在下发前检查相对当前反馈的总位移；运行中额外检查连续反向反馈证据。
 - 最终点确认后继续重发最终序号，等待四关节位置误差和可选速度误差连续满足 `settle_time`。
 - 完成服务受理后，还必须等到 SMC 发布匹配的 `last_completed_session_id` 和 `EXIT_COMPLETED`，Action 才返回成功。SMC 此时进入 `RemoteControl`，后续遥控和回夹不属于 MoveIt Action 的执行范围。
 
-会话变化、状态超时、反馈超时、安全撤权、命令拒绝、完成服务失败或异常退出都不会向 MoveIt 误报成功。失败后 SMC 保留最后一个已接受的关节目标，直到安全逻辑或后续人工流程接管。
+会话变化、状态超时、反馈超时、安全撤权、命令拒绝、完成服务失败或异常退出都不会向 MoveIt 误报成功。已接受命令后的可恢复失败或 Action 取消会先以不超过 `max_output_delta` 的步长下发当前位置保持；保持失败、反馈丢失或确认反向运动时，adapter 调用 SMC 的 `software_emergency_stop` 服务。首条命令在被 SMC 明确拒绝前不会触发软件急停。
 
 ## 配置与启动
 
@@ -78,6 +80,8 @@ roslaunch b29_planner_adapter planner_adapter.launch
 - `settle_time`、状态/反馈/确认/Action/完成握手超时；
 - 完成服务重试次数和间隔。
 
+未在 YAML 中显式覆盖时，安全默认值为：总位移上限每轴 `4π rad`；当目标误差至少 `25°` 且单次反馈向远离目标方向变化至少 `0.2°` 时，连续 `15` 个样本触发反向运动保护。`max_output_delta` 和现有容差仍以 `planner_adapter.yaml` 为准。
+
 空接口名、非法关节映射、非有限参数、非正超时、错误的固定输出顺序，或 `max_output_delta` 大于配置的 SMC 上限时，节点启动失败。收到 Action 时还会再次核对 SMC 状态消息中的实时 delta 上限。
 
 ## GP11 侧边界
@@ -88,16 +92,8 @@ roslaunch b29_planner_adapter planner_adapter.launch
 2. 保证 MoveIt controller 指向 adapter 的 Action。
 3. 将 GP11 的 `robot_description` 放入独立命名空间，避免覆盖 B29 全局参数。
 
-B29 工作区不修改 GP11 工程。完整背景见 [integration_context.md](docs/integration_context.md)，离线与集成验证见 [integration_test_plan.md](docs/integration_test_plan.md)。
-
-## 测试轨迹发送工具
-
-`send_test_trajectory.py` 可在 SMC 进入 `PlannerControl` 后，模拟 MoveIt 向 adapter 的
-`FollowJointTrajectory` Action 发送一条以当前关节反馈为基准的单向轨迹。默认在 `5s` 内左一反转 `10deg`，左二正转 `20deg`，右一和右二保持不动，不返回基线。工具默认
-只预览轨迹，不发送 Action；真机发送需同时指定 `--execute --confirm-real-hardware`。
-
-完整的前置检查、命令、预期状态变化和恢复方法见
-[test_moveit_trajectory_sender.md](docs/test_moveit_trajectory_sender.md)。
+B29 工作区不修改 GP11 工程。联调时应以本 README、`planner_adapter.yaml`、SMC 发布的
+`PlannerControlState` 和当前 MoveIt 配置为准。
 
 ## 构建与离线测试
 

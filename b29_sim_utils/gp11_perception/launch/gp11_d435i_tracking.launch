@@ -1,0 +1,42 @@
+<launch>
+  <arg name="launch_realsense" default="true"/>
+  <arg name="camera_name" default="camera"/>
+  <arg name="serial_no" default=""/>
+  <arg name="background_depth_path" default=""/>
+  <arg name="output_frame" default=""/>
+  <arg name="publish_target_to_moveit" default="false"/>
+  <arg name="launch_rviz" default="true"/>
+  <arg name="rviz_fixed_frame" default="camera_link"/>
+
+  <arg name="enable_sync" default="true"/>
+  <arg name="align_depth" default="false"/>
+  <arg name="enable_color" default="false"/>
+  <arg name="enable_gyro" default="true"/>
+  <arg name="enable_accel" default="true"/>
+  <arg name="unite_imu_method" default="linear_interpolation"/>
+  <arg name="clip_distance" default="2.5"/>
+  <arg name="initial_reset" default="false"/>
+
+  <include if="$(arg launch_realsense)" file="$(find realsense2_camera)/launch/rs_camera.launch">
+    <arg name="camera" value="$(arg camera_name)"/>
+    <arg name="serial_no" value="$(arg serial_no)"/>
+    <arg name="enable_sync" value="$(arg enable_sync)"/>
+    <arg name="align_depth" value="$(arg align_depth)"/>
+    <arg name="enable_color" value="$(arg enable_color)"/>
+    <arg name="enable_gyro" value="$(arg enable_gyro)"/>
+    <arg name="enable_accel" value="$(arg enable_accel)"/>
+    <arg name="unite_imu_method" value="$(arg unite_imu_method)"/>
+    <arg name="clip_distance" value="$(arg clip_distance)"/>
+    <arg name="initial_reset" value="$(arg initial_reset)"/>
+  </include>
+
+  <include file="$(find gp11_perception)/launch/gp11_single_camera_depth_line.launch">
+    <arg name="depth_topic" value="/$(arg camera_name)/depth/image_rect_raw"/>
+    <arg name="camera_info_topic" value="/$(arg camera_name)/depth/camera_info"/>
+    <arg name="background_depth_path" value="$(arg background_depth_path)"/>
+    <arg name="output_frame" value="$(arg output_frame)"/>
+    <arg name="publish_target_to_moveit" value="$(arg publish_target_to_moveit)"/>
+    <arg name="launch_rviz" value="$(arg launch_rviz)"/>
+    <arg name="rviz_fixed_frame" value="$(arg rviz_fixed_frame)"/>
+  </include>
+</launch>
