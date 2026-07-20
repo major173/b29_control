@@ -7,8 +7,8 @@
 
 namespace
 {
-constexpr double kCruiseSpeedMps = 0.10;
-constexpr double kApproachSpeedMps = 0.03;
+constexpr double kCruiseSpeedMps = -0.10;
+constexpr double kApproachSpeedMps = -0.03;
 constexpr double kCrossObstaclesDistanceM = 0.30;
 constexpr std::uint32_t kReconnectTimeoutTicks = 250;
 constexpr std::uint32_t kAutoInitTimeoutTicks = 100;

@@ -54,6 +54,12 @@
 - `auto_run_pause`
 
 这些字段由统一输入输出模型承载，不在本包内直接假设其他业务 handle 已经可用。
+障碍物翻越期间的重力补偿模式也通过 `AutoStateInterface` 传递：
+`B29SmcAutoController` 在 `AutoControlCommand::gravity_compensation_mode` 中生成最终意图，
+并写入 `AutoStateData::gravity_compensation_mode`；硬件层再把该字段打包为控制帧中的
+1 字节 `gravityCompensationMode`。取值约定为 `0=关闭`、`1=左第一腿部关节`、`2=右第一腿部关节`。
+单侧翻越时只开启当前松开夹爪的对侧第一腿部关节补偿。该字段不提供独立 ROS topic，避免绕过控制器状态机。
+每次开始新一侧脱缆前，控制器只接受当前闭合阶段内新的 `grip_confirmed: false -> true`。随后先进入 `OpenGripperBeforeGravityCompensation`，保持补偿关闭并张开当前越障侧夹爪，等待 `wait_for_grip_respond_time`；再进入 `EnableGravityCompensation`，保持该夹爪 `OPEN` 并等待 `gravity_compensation_enable_wait_time`（默认 `0.5s`），最后从脱缆 `Step3UpFirstJoint` 开始关节动作。
 当前边界是：
 
 - `B29SmcAutoController` 从 `JointStateInterface / PositionJointInterface / VelocityJointInterface / ImuSensorInterface(base_imu)` 读取已注册 handle
@@ -278,6 +284,32 @@
 - 当前用于在 `Traversing` 中持续刷新巡航命令
 
 
+
+## 正式 PlannerControl 接口
+
+生产模式通过 `planner_interface/mode: production` 启用三项强类型接口：
+
+- `planner_control_state`：50 Hz 发布会话 ID、当前侧、接收许可、接受/拒绝序号、delta 上限、命令超时和退出原因。
+- `planner_joint_command`：接收带 `session_id` 和严格递增 `sequence` 的四关节目标。
+- `complete_planner_control`：校验当前会话和最后接受序号后，将完成请求交给下一控制周期处理。
+
+四关节顺序固定为 `[left_first, left_second, right_first, right_second]`。每次进入 `PlannerControl` 时 `session_id` 递增，首点相对实时关节位置、后续点相对上一接受点都必须满足 `planner_interface/max_delta_per_command`。同序号同内容重发是幂等操作；同序号不同内容、旧会话、跳号、陈旧时间戳、NaN/Inf 和 delta 超限会被拒绝。
+
+生产模式不使用固定时间退出 PlannerControl。完成服务请求在控制周期中确认后，Planner 会话以 `EXIT_COMPLETED` 结束，越障 FSM 进入 `RemoteControl`，而不是直接进入 `Regrip`。`planner_interface/total_watchdog_timeout` 到期会进入 `ManualIntervention`。
+
+这里有两种不同的超时：
+
+- `planner_interface/command_timeout`：最近接受点超过该时长后不再作为新鲜 Planner 覆盖，但控制器仍保持最后下发目标，并允许接收同会话的下一新鲜序号。
+- `planner_interface/total_watchdog_timeout`：限制整个 PlannerControl 会话时长；到期后撤销 Planner 权限并进入人工干预。
+
+旧 `planner_joint_point` 输入已删除。`state_trace` 继续用于观测，`planner_release` 只用于调试阶段放行；生产模式若启用手动 release，控制器初始化会失败。正式 adapter 的实现和配置见 `b29_planner_adapter` 包。
+
+## Planner 后人工遥控
+
+`RemoteControlInterface` 从下位机反馈帧读取 `[left_first, left_second, right_first, right_second]`
+四个位置增量和阶段完成信号。增量单位为 `rad`，与 `joint_targets` 同方向，每个新反馈样本只累加一次，并按 `remote_control/max_increment_per_sample` 逐关节截断。
+
+`RemoteControl` 中停止驱动轮、保持当前侧夹爪张开、保持当前侧重力补偿策略。只有进入当前阶段后新的完成信号 `0 -> 1` 上升沿才进入 `Regrip`。回夹失败但未达 `regrip_retry_limit` 时，先进入 `ReopenBeforeRemoteControl` 张开夹爪，再回到 `RemoteControl`，不会重新执行 Planner。
 
 ## 运行与调试
 

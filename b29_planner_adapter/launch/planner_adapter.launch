@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<launch>
+  <arg name="config" default="$(find b29_planner_adapter)/config/planner_adapter.yaml"/>
+  <arg name="output" default="screen"/>
+
+  <node pkg="b29_planner_adapter" type="b29_planner_adapter_node"
+        name="b29_planner_adapter" output="$(arg output)">
+    <rosparam command="load" file="$(arg config)"/>
+  </node>
+</launch>

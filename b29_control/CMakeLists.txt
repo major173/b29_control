@@ -11,6 +11,7 @@ find_package(catkin REQUIRED COMPONENTS
         roscpp
         rospy
         serial
+        std_msgs
         urdf
 
         transmission_interface
@@ -113,7 +114,7 @@ find_package(catkin REQUIRED COMPONENTS
 catkin_package(
         INCLUDE_DIRS include
         # LIBRARIES b29_control
-        CATKIN_DEPENDS rm_common
+        CATKIN_DEPENDS rm_common std_msgs
         # DEPENDS system_lib
 )
 
@@ -175,6 +176,16 @@ target_link_libraries(b29_hardware ${catkin_LIBRARIES})
 #   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 # )
 
+catkin_install_python(PROGRAMS
+        scripts/anchor_world_tf_publisher.py
+        scripts/rl_inference_node.py
+        scripts/gazebo_rl_bridge_node.py
+        scripts/reach_goal_keyboard_node.py
+        scripts/update_gp11_urdf.py
+        scripts/urdf_kinematics.py
+        DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+
 ## Mark executables for installation
 ## See http://docs.ros.org/melodic/api/catkin/html/howto/format1/building_executables.html
 # install(TARGETS ${PROJECT_NAME}_node
@@ -190,11 +201,10 @@ target_link_libraries(b29_hardware ${catkin_LIBRARIES})
 # )
 
 ## Mark cpp header files for installation
-# install(DIRECTORY include/${PROJECT_NAME}/
-#   DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
-#   FILES_MATCHING PATTERN "*.h"
-#   PATTERN ".svn" EXCLUDE
-# )
+install(DIRECTORY include/
+  DESTINATION ${CATKIN_GLOBAL_INCLUDE_DESTINATION}
+  FILES_MATCHING PATTERN "*.h"
+)
 
 ## Mark other files for installation (e.g. launch and bag files, etc.)
 # install(FILES

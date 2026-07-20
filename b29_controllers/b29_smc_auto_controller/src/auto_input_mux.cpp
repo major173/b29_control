@@ -54,6 +54,12 @@ void AutoInputMux::setAutoState(const steering_engine_hw::AutoStateData& auto_st
   has_auto_state_ = true;
 }
 
+void AutoInputMux::setRemoteControl(const steering_engine_hw::RemoteControlData& remote_control)
+{
+  remote_control_ = remote_control;
+  has_remote_control_ = true;
+}
+
 AutoInputSnapshot AutoInputMux::buildSnapshot() const
 {
   AutoInputSnapshot snapshot;
@@ -79,6 +85,7 @@ AutoInputSnapshot AutoInputMux::buildSnapshot() const
   if (has_auto_state_)
   {
     snapshot.lower_alive = auto_state_.lower_alive;
+    snapshot.imu_ready = auto_state_.imu_ready;
     snapshot.grip_confirmed = auto_state_.grip_confirmed;
     snapshot.joint_fault = auto_state_.joint_fault;
     snapshot.grip_fault = auto_state_.grip_fault;
@@ -101,6 +108,17 @@ AutoInputSnapshot AutoInputMux::buildSnapshot() const
     snapshot.stamp = latestStamp(snapshot.stamp, control_request_.stamp);
   }
 
+  if (has_remote_control_)
+  {
+    snapshot.remote_control_joint_increments = remote_control_.joint_increments;
+    snapshot.remote_control_complete = remote_control_.stage_complete;
+    snapshot.remote_control_input_valid = remote_control_.valid;
+    snapshot.remote_control_sample_sequence = remote_control_.sample_sequence;
+    snapshot.remote_control_completion_rising_edge_sequence =
+        remote_control_.completion_rising_edge_sequence;
+    snapshot.stamp = latestStamp(snapshot.stamp, remote_control_.header.stamp);
+  }
+
   if (has_joint_state_)
   {
     snapshot.stamp = latestStamp(snapshot.stamp, joint_state_.header.stamp);
@@ -109,7 +127,6 @@ AutoInputSnapshot AutoInputMux::buildSnapshot() const
   if (has_base_imu_)
   {
     snapshot.posture_ready = isPostureWithinThreshold();
-    snapshot.imu_ready = isBaseImuReady();
     snapshot.stamp = latestStamp(snapshot.stamp, base_imu_.header.stamp);
   }
 
@@ -137,61 +154,6 @@ bool AutoInputMux::isPostureWithinThreshold() const
   const double pitch = std::asin(clampUnit(sinp));
 
   return std::abs(roll) <= config_.max_abs_roll_rad && std::abs(pitch) <= config_.max_abs_pitch_rad;
-}
-
-bool AutoInputMux::isBaseImuReady() const
-{
-  bool is_base_imu_ready = true;
-  static size_t imu_unchange_count = 0;
-  static sensor_msgs::Imu last_imu{};
-  constexpr size_t kMaxUnchangedCount = 10;
-
-  if (!has_base_imu_ || base_imu_.header.stamp.isZero())
-  {
-    is_base_imu_ready = false;
-  }
-
-    const auto finite = [](double value) {
-    return std::isfinite(value);
-  };
-
-  const auto& q = base_imu_.orientation;
-  const auto& gyro = base_imu_.angular_velocity;
-  const auto& acc = base_imu_.linear_acceleration;
-
-  const bool value_valid =
-      finite(q.x) && finite(q.y) && finite(q.z) && finite(q.w) &&
-      finite(gyro.x) && finite(gyro.y) && finite(gyro.z) &&
-      finite(acc.x) && finite(acc.y) && finite(acc.z);
-
-  if (!value_valid)
-  {
-    return false;
-  }
-
-  const double norm2 = q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w;
-  if (!std::isfinite(norm2) || norm2 < 1e-12)
-  {
-    return false;
-  }
-
-  if (!isBaseImuChange(base_imu_, last_imu))
-  {
-    ++imu_unchange_count;
-  }
-  else
-  {
-    imu_unchange_count = 0;
-  }
-
-  if (imu_unchange_count >= kMaxUnchangedCount)
-  {
-    is_base_imu_ready = false;
-  }
-
-  last_imu = base_imu_;
-
-  return is_base_imu_ready;
 }
 
 bool AutoInputMux::isBaseImuChange(const sensor_msgs::Imu& current, 

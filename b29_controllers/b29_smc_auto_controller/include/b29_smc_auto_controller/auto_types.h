@@ -29,6 +29,13 @@ enum class CrossingStrategy : uint8_t
   Damper = 2,
 };
 
+enum class GravityCompensationMode : uint8_t
+{
+  Off = 0,
+  LeftFirstLeg = 1,
+  RightFirstLeg = 2,
+};
+
 struct DebugOverrideMask
 {
   static constexpr uint32_t AutoStartRequested = 1u << 0;
@@ -50,6 +57,8 @@ struct DebugOverrideMask
   static constexpr uint32_t PostCheckPassed = 1u << 16;
   static constexpr uint32_t PostCheckFailed = 1u << 17;
   static constexpr uint32_t AutoRunPause = 1u << 18;
+  static constexpr uint32_t RemoteControlIncrements = 1u << 19;
+  static constexpr uint32_t RemoteControlComplete = 1u << 20;
 };
 
 struct DebugOverrideData
@@ -76,6 +85,8 @@ struct DebugOverrideData
   bool post_check_passed{false};
   bool post_check_failed{false};
   bool auto_run_pause{false};
+  std::array<double, 4> remote_control_joint_increments{};
+  bool remote_control_complete{false};
 };
 
 struct AutoControlRequest
@@ -114,6 +125,11 @@ struct AutoInputSnapshot
   bool post_check_passed{false};
   bool post_check_failed{false};
   bool auto_run_pause{false};
+  std::array<double, 4> remote_control_joint_increments{};
+  bool remote_control_complete{false};
+  bool remote_control_input_valid{false};
+  std::uint64_t remote_control_sample_sequence{0};
+  std::uint64_t remote_control_completion_rising_edge_sequence{0};
 };
 
 struct AutoControlCommand
@@ -124,6 +140,7 @@ struct AutoControlCommand
   std::array<double, 6> joint_targets{};
   bool stop_all{true};
   bool freeze_joints{true};
+  GravityCompensationMode gravity_compensation_mode{GravityCompensationMode::Off};
   CrossingStrategy crossing_strategy{CrossingStrategy::None};
   std::string command_reason{"default_safe"};
 };

@@ -28,6 +28,8 @@ FIELD_MAP = {
     "post_check_passed": AutoDebugOverride.FIELD_POST_CHECK_PASSED,
     "post_check_failed": AutoDebugOverride.FIELD_POST_CHECK_FAILED,
     "auto_run_pause": AutoDebugOverride.FIELD_AUTO_RUN_PAUSE,
+    "remote_control_joint_increments": AutoDebugOverride.FIELD_REMOTE_CONTROL_INCREMENTS,
+    "remote_control_complete": AutoDebugOverride.FIELD_REMOTE_CONTROL_COMPLETE,
 }
 
 
@@ -72,6 +74,10 @@ def build_message(event: dict) -> AutoDebugOverride:
     msg.post_check_passed = event.get("post_check_passed", False)
     msg.post_check_failed = event.get("post_check_failed", False)
     msg.auto_run_pause = event.get("auto_run_pause", False)
+    msg.remote_control_joint_increments = event.get(
+        "remote_control_joint_increments", [0.0, 0.0, 0.0, 0.0]
+    )
+    msg.remote_control_complete = event.get("remote_control_complete", False)
     return msg
 
 

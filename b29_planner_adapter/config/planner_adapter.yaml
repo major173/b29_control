@@ -1,0 +1,117 @@
+# ===================== PlannerAdapter 完整配置参数（带单位+详细注释） =====================
+# 运行模式：production=整机正式运行；debug=调试手动放行模式
+interface_mode: production
+
+# 上层MoveIt运动规划下发轨迹标准Action服务名称
+action_name: /gp11_moveit/reach_arm_controller/follow_joint_trajectory
+
+# 下层B29SMC控制器状态上报话题
+# 订阅获取PlannerSession会话ID、序列号、拒绝码、看门狗、会话激活状态等
+planner_control_state_topic: /b29_controller/b29_smc_auto_controller/planner_control_state
+
+# 向下层下发单条关节目标点位Topic
+# 消息携带session_id、sequence、4轴关节位置，由PlannerSession做全安全校验
+planner_joint_command_topic: /b29_controller/b29_smc_auto_controller/planner_joint_command
+
+# 轨迹全部执行完毕，申请结束规划会话的Service服务
+complete_planner_control_service: /b29_controller/b29_smc_auto_controller/complete_planner_control
+
+# 整机全局关节实时位置/速度反馈话题
+joint_states_topic: /joint_states
+
+# 指令下发频率，单位Hz（赫兹）
+publish_rate: 50.0
+
+# 轨迹速度缩放系数，无单位；1.0=规划原始速度，<1减速，>1加速
+time_scale: 1.0
+
+# 适配器单侧单条指令允许单关节最大位置变化量，单位rad（弧度）
+# 上层提前限速，避免指令被下层判定REJECT_DELTA_EXCEEDED拒绝
+max_output_delta: 0.10
+
+# 下层SMC控制器配置的单关节最大运动增量阈值，单位rad（弧度）
+# 程序启动校验：max_output_delta 必须 ≤ 该数值，否则启动失败
+expected_smc_max_delta_per_command: 0.10
+
+# ===================== 4轴关节映射配置 =====================
+joint_mapping:
+  # 输出数组固定顺序，严格匹配PlannerJointCommand内positions数组下标
+  output_order:
+    - left_first_leg_joint   # 下标0
+    - left_second_leg_joint  # 下标1
+    - right_first_leg_joint  # 下标2
+    - right_second_leg_joint # 下标3
+
+  # 左第一主关节
+  left_first:
+    output_name: left_first_leg_joint
+    accepted_input_names: [left_first_leg_joint]
+    continuous: false # 无单位，布尔值；false=有限转角关节，不能无限旋转
+    min_position: -12.566370614359172 # 最小转角，单位rad（-4π）
+    max_position: 12.566370614359172  # 最大转角，单位rad（4π）
+
+  # 左第二旋转关节（连续旋转）
+  left_second:
+    output_name: left_second_leg_joint
+    accepted_input_names: [left_second_leg_z, left_second_leg_joint]
+    continuous: true # 无单位，布尔值；true=360°无限连续旋转
+    min_position: -12.566370614359172 # 最小转角，单位rad
+    max_position: 12.566370614359172  # 最大转角，单位rad
+
+  # 右第一主关节
+  right_first:
+    output_name: right_first_leg_joint
+    accepted_input_names: [right_first_leg_joint]
+    continuous: false
+    min_position: -12.566370614359172 # 最小转角，单位rad
+    max_position: 12.566370614359172  # 最大转角，单位rad
+
+  # 右第二旋转关节（连续旋转）
+  right_second:
+    output_name: right_second_leg_joint
+    accepted_input_names: [right_second_leg_joint]
+    continuous: true
+    min_position: -12.566370614359172 # 最小转角，单位rad
+    max_position: 12.566370614359172  # 最大转角，单位rad
+
+# ===================== 运动公差配置（顺序与output_order四轴一一对应） =====================
+tolerances:
+  # start：轨迹起点与当前实际关节允许最大偏差，单位rad
+  start: [0.08, 0.08, 0.08, 0.08]
+
+  # path：运动途中单轴允许最大跟踪误差，单位rad；超差立即终止轨迹
+  path: [0.50, 0.50, 0.50, 0.50]
+
+  # goal_position：到达终点后允许的位置残余误差，单位rad
+  goal_position: [0.02, 0.02, 0.02, 0.02]
+
+  # goal_velocity：到达终点后允许残余关节转速，单位rad/s（弧度每秒）
+  goal_velocity: [0.05, 0.05, 0.05, 0.05]
+
+# 是否校验终点残余速度；无单位布尔值，true=位置+速度同时达标才算到位
+require_goal_velocity: true
+
+# 终点稳定保持时长，单位s（秒）；持续满足公差0.5s才判定运动完成
+settle_time: 0.5
+
+# ===================== 全链路超时配置（单位统一为s 秒） =====================
+timeouts:
+  # joint_state：关节反馈话题最长无数据等待时间，超过判定硬件失联
+  joint_state: 0.5
+  # planner_state：下层控制器状态话题超时阈值，无状态判定会话断开
+  planner_state: 0.25
+  # command_ack：单条指令下发后等待下层确认序列号的最大等待时间
+  command_ack: 1.0
+  # action：整条轨迹允许最大总执行时长，超时强制中止运动
+  action: 100.0
+  # completion_service：单次调用完成服务的请求超时
+  completion_service: 1.0
+  # completion_transition：发完成请求后，等待控制器切换完成状态的最长时间
+  completion_transition: 2.0
+
+# ===================== 会话完成服务重试配置 =====================
+completion:
+  # retry_count：服务调用失败最大重试次数，无单位整型
+  retry_count: 3
+  # retry_interval：两次重试之间间隔时长，单位s（秒）
+  retry_interval: 0.2

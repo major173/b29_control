@@ -29,7 +29,7 @@
 ### Debug Validation Tabs
 
 - `Overview`：RobotFSM、基础命令来源、`output_mode`、调试门禁和仿真标识
-- `Crossing`：越障主 FSM、脱缆 Step、Step7 判定值、retry、人工干预和 PlannerControl
+- `Crossing`：越障主 FSM、脱缆 Step、Step7 判定值、retry、PlannerControl 和 RemoteControl 增量/完成上升沿
 - `Command & Safety`：effective command、六关节目标、dispatch 结果和软件急停锁存
 - `Inputs`：debug obstacle 和 RobotContext 输入快照
 - `Actions`：软件急停、人工复位、Planner release、障碍物覆盖、Auto Start、Pause、Comms Loss

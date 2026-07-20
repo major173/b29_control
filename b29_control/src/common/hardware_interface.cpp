@@ -130,7 +130,7 @@ void StRobotHW::write(const ros::Time &time, const ros::Duration &period) {
     return;
   }
   
-  static std::array<uint8_t, k_data_length_> last_send_data{};
+  static std::array<uint8_t, k_data_length_ + k_gravity_compensation_length_> last_send_data{};
   std::array<uint8_t, k_data_length_> data{};
 
   if (jnt_to_act_position_interface_) {
@@ -177,11 +177,11 @@ void StRobotHW::write(const ros::Time &time, const ros::Duration &period) {
   const double joint_angle_targets[4] = {
       sanitizeCommand("left first leg angle"  , cmd_[joint_angle_indices[0]],
                       positionFallback(joint_angle_indices[0])),
-      sanitizeCommand("left second leg angle" , cmd_[joint_angle_indices[1]],
+      sanitizeCommand("left second leg angle" , -cmd_[joint_angle_indices[1]],
                       positionFallback(joint_angle_indices[1])),
       sanitizeCommand("right first leg angle" , cmd_[joint_angle_indices[2]],
                       positionFallback(joint_angle_indices[2])),
-      sanitizeCommand("right second leg angle", cmd_[joint_angle_indices[3]],
+      sanitizeCommand("right second leg angle", -cmd_[joint_angle_indices[3]],
                       positionFallback(joint_angle_indices[3])),
   };
 
@@ -192,8 +192,10 @@ void StRobotHW::write(const ros::Time &time, const ros::Duration &period) {
     index += sizeof(float);
   };
 
-  packFloat(static_cast<float>(wheel_speed_left));
-  packFloat(static_cast<float>(wheel_speed_right));
+  // packFloat(static_cast<float>(wheel_speed_left));
+  // packFloat(static_cast<float>(wheel_speed_right));
+  packFloat(static_cast<float>(0.0));  // 调试
+  packFloat(static_cast<float>(0.0));
   packFloat(static_cast<float>(claw_speed_left));
   packFloat(static_cast<float>(claw_speed_right));
   packFloat(static_cast<float>(claw_angle_left));
@@ -203,8 +205,12 @@ void StRobotHW::write(const ros::Time &time, const ros::Duration &period) {
     packFloat(static_cast<float>(joint_angle_target));
   }
 
-  if (memcmp(data.data(), last_send_data.data(), data.size()) != 0) {
-    pack(tx_buffer_, control_code_, data.data());
+  std::array<uint8_t, k_data_length_ + k_gravity_compensation_length_> control_data{};
+  std::memcpy(control_data.data(), data.data(), data.size());
+  control_data[k_data_length_] = auto_state_data_.gravity_compensation_mode;
+
+  if (memcmp(control_data.data(), last_send_data.data(), control_data.size()) != 0) {
+    pack(tx_buffer_, control_code_, data.data(), control_data[k_data_length_]);
     tx_len_ = sizeof(tx_buffer_);
     try {
       serial_.write(tx_buffer_, tx_len_);
@@ -213,7 +219,7 @@ void StRobotHW::write(const ros::Time &time, const ros::Duration &period) {
       handleSerialIoError("Serial write() failed", e);
       return;
     }
-    memcpy(last_send_data.data(), data.data(), data.size());
+    memcpy(last_send_data.data(), control_data.data(), control_data.size());
   }
 
   clearTxBuffer();
@@ -406,6 +412,10 @@ void StRobotHW::setInterface() {
   AutoStateHandle auto_handle("auto_state", &auto_state_data_);
   auto_state_interface_.registerHandle(auto_handle);
   registerInterface(&auto_state_interface_);
+
+  RemoteControlHandle remote_control_handle("remote_control", &remote_control_data_);
+  remote_control_interface_.registerHandle(remote_control_handle);
+  registerInterface(&remote_control_interface_);
 }
 
 bool StRobotHW::loadProtocolConfig(ros::NodeHandle &root_nh) {
@@ -503,8 +513,8 @@ bool StRobotHW::loadProtocolConfig(ros::NodeHandle &root_nh) {
   }
 
   control_map_.wheel_speed = {wheel_speed[0], wheel_speed[1]};
-  control_map_.claw_speed = {claw_speed[0], claw_speed[1]};
-  control_map_.claw_angle = {claw_angle[0], claw_angle[1]};
+  control_map_.claw_speed  = {claw_speed[0] , claw_speed[1]};
+  control_map_.claw_angle  = {claw_angle[0] , claw_angle[1]};
   control_map_.joint_angle = {joint_angle[0], joint_angle[1], joint_angle[2],
                               joint_angle[3]};
 
@@ -580,7 +590,8 @@ void StRobotHW::addChildren(const KDL::SegmentMap::const_iterator segment) {
 }
 
 void StRobotHW::pack(unsigned char *tx_buffer, unsigned char ctrl,
-                     unsigned char *data) {
+                     unsigned char *data,
+                     uint8_t gravity_compensation_mode) {
   memset(tx_buffer, 0, k_frame_length_);
   auto *frame = reinterpret_cast<SerialFrame *>(tx_buffer);
 
@@ -594,9 +605,12 @@ void StRobotHW::pack(unsigned char *tx_buffer, unsigned char ctrl,
   frame->length_ = k_data_length_;
   // set data
   memcpy(frame->data_, data, k_data_length_);
+  // set gravity compensation mode
+  frame->gravity_compensation_mode_ = gravity_compensation_mode;
   // set crc
   frame->crc_ = getCrc8(tx_buffer, k_header_length_ + k_ctrl_length_ +
-                                       k_length_ + k_data_length_);
+                                       k_length_ + k_data_length_ +
+                                       k_gravity_compensation_length_);
   // set ender
   for (int i = 0; i < 2; i++) {
     frame->ender_[i] = ender[i];
@@ -661,11 +675,20 @@ void StRobotHW::unpack(std::vector<uint8_t> rx_buffer,const ros::Time &time) {
 
   constexpr size_t kImuFloatCount = 10;
   constexpr size_t kImuPayloadSize = kImuFloatCount * sizeof(float);
-  constexpr size_t kStatusPayloadSize = 2;
+  constexpr size_t kRemoteControlJointCount = 4;
+  constexpr size_t kRemoteControlPayloadSize =
+      kRemoteControlJointCount * sizeof(float) + sizeof(uint8_t);
+  constexpr size_t kStatusPayloadSize = 3;
   constexpr size_t kMotorIdLength = 1;
   const size_t entry_size = kMotorIdLength + 3 * sizeof(float);
 
-  const size_t motor_payload_size = static_cast<size_t>(length) - kImuPayloadSize - kStatusPayloadSize;
+  const size_t fixed_payload_size =
+      kImuPayloadSize + kRemoteControlPayloadSize + kStatusPayloadSize;
+  if (static_cast<size_t>(length) < fixed_payload_size) {
+    ROS_WARN_THROTTLE(10, "Received message data length %u is too short", length);
+    return;
+  }
+  const size_t motor_payload_size = static_cast<size_t>(length) - fixed_payload_size;
   if (motor_payload_size % entry_size != 0) {
     ROS_WARN_THROTTLE(10, "Received message data length %u is invalid", length);
     return;
@@ -712,6 +735,20 @@ void StRobotHW::unpack(std::vector<uint8_t> rx_buffer,const ros::Time &time) {
                  gyro_x, gyro_y, gyro_z,
                  qw, qx, qy, qz);
 
+  if (index + kRemoteControlPayloadSize > payload_start + static_cast<size_t>(length)) {
+    ROS_WARN_THROTTLE(10, "Received remote control payload is incomplete");
+    return;
+  }
+
+  std::array<double, kRemoteControlJointCount> remote_increments{};
+  bool remote_control_valid = true;
+  for (double& increment : remote_increments) {
+    increment = static_cast<double>(unpackFloat(index));
+    remote_control_valid = remote_control_valid && std::isfinite(increment);
+  }
+  const uint8_t remote_control_complete_raw = rx_buffer[index++];
+  const bool remote_control_complete = remote_control_complete_raw == 1;
+
   if(index + kStatusPayloadSize > payload_start + static_cast<size_t>(length)) {
     ROS_WARN_THROTTLE(10, "Received status payload is incomplete");
     return;
@@ -719,6 +756,25 @@ void StRobotHW::unpack(std::vector<uint8_t> rx_buffer,const ros::Time &time) {
 
   const uint8_t motor_fault     = rx_buffer[index++];
   const uint8_t grip_confirmed  = rx_buffer[index++];
+  const uint8_t imu_ready       = rx_buffer[index++];
+  if (index != payload_start + static_cast<size_t>(length)) {
+    ROS_WARN_THROTTLE(10, "Received message contains unexpected trailing payload data");
+    return;
+  }
+
+  remote_control_data_.header.stamp = time;
+  remote_control_data_.joint_increments =
+      remote_control_valid ? remote_increments : std::array<double, kRemoteControlJointCount>{};
+  remote_control_data_.stage_complete = remote_control_complete;
+  remote_control_data_.valid = remote_control_valid;
+  ++remote_control_data_.sample_sequence;
+  if (!previous_remote_control_complete_ && remote_control_complete) {
+    ++remote_control_data_.completion_rising_edge_sequence;
+  }
+  previous_remote_control_complete_ = remote_control_complete;
+  if (!remote_control_valid) {
+    ROS_WARN_THROTTLE(1.0, "Ignoring non-finite remote control joint increment");
+  }
 
   constexpr size_t joint_motor_fault_bit = 4;
   constexpr size_t wheel_motor_fault_bit = 2;
@@ -745,6 +801,7 @@ void StRobotHW::unpack(std::vector<uint8_t> rx_buffer,const ros::Time &time) {
     }
   }
   auto_state_data_.grip_confirmed = grip_confirmed;
+  auto_state_data_.imu_ready = imu_ready;
 
   last_rx_time_ = time;
 }
@@ -860,6 +917,8 @@ bool StRobotHW::initAutoStateData(AutoStateData &data) {
   data.grip_confirmed = false;
   data.joint_fault = false;
   data.grip_fault = false;
+  data.imu_ready = false;
+  data.gravity_compensation_mode = 0;
   return true;
 }
 

@@ -10,8 +10,6 @@ namespace b29_smc_auto_controller
 {
 namespace
 {
-constexpr std::size_t kPlannerPointSize  = 4;
-
 double clampUnit(double value)
 {
   return std::max(0.0, std::min(1.0, value));
@@ -25,12 +23,20 @@ const char* stageName(ObstacleCrossingStage stage)
       return "Idle";
     case ObstacleCrossingStage::CloseBothGrippers:
       return "CloseBothGrippers";
+    case ObstacleCrossingStage::OpenGripperBeforeGravityCompensation:
+      return "OpenGripperBeforeGravityCompensation";
+    case ObstacleCrossingStage::EnableGravityCompensation:
+      return "EnableGravityCompensation";
     case ObstacleCrossingStage::Disconnecting:
       return "Disconnecting";
     case ObstacleCrossingStage::PlannerControl:
       return "PlannerControl";
+    case ObstacleCrossingStage::RemoteControl:
+      return "RemoteControl";
     case ObstacleCrossingStage::Regrip:
       return "Regrip";
+    case ObstacleCrossingStage::ReopenBeforeRemoteControl:
+      return "ReopenBeforeRemoteControl";
     case ObstacleCrossingStage::CompleteWaitObstacleClear:
       return "CompleteWaitObstacleClear";
     case ObstacleCrossingStage::ManualIntervention:
@@ -66,8 +72,10 @@ const char* actionName(CrossingAction action)
       return "CloseBothGrippers";
     case CrossingAction::DisconnectCable:
       return "DisconnectCable";
-    case CrossingAction::PlannerRegrip:
-      return "PlannerRegrip";
+    case CrossingAction::PlannerControl:
+      return "PlannerControl";
+    case CrossingAction::Regrip:
+      return "Regrip";
     case CrossingAction::None:
       return "None";
   }
@@ -82,8 +90,10 @@ const char* actionReasonName(CrossingAction action)
       return "close_both_grippers";
     case CrossingAction::DisconnectCable:
       return "disconnect_cable";
-    case CrossingAction::PlannerRegrip:
-      return "planner_regrip";
+    case CrossingAction::PlannerControl:
+      return "planner_control";
+    case CrossingAction::Regrip:
+      return "regrip";
     case CrossingAction::None:
       return "none";
   }
@@ -100,8 +110,8 @@ const char* disconnectStepName(DisconnectCableStep step)
       return "Step1LoosenGripper";
     case DisconnectCableStep::Step2WaitGripperRespond:
       return "Step2WaitGripperRespond";
-    case DisconnectCableStep::Step3UpJoint:
-      return "Step3UpJoint";
+    case DisconnectCableStep::Step3UpFirstJoint:
+      return "Step3UpFirstJoint";
     case DisconnectCableStep::Step4MoveSecondJoint:
       return "Step4MoveSecondJoint";
     case DisconnectCableStep::Step5DownFirstJoint:
@@ -145,7 +155,7 @@ const char* disconnectStepExpectedCondition(DisconnectCableStep step)
       return "send_open_gripper_command";
     case DisconnectCableStep::Step2WaitGripperRespond:
       return "wait_for_gripper_response_timeout";
-    case DisconnectCableStep::Step3UpJoint:
+    case DisconnectCableStep::Step3UpFirstJoint:
     case DisconnectCableStep::Step4MoveSecondJoint:
     case DisconnectCableStep::Step5DownFirstJoint:
     case DisconnectCableStep::Step6MoveSecondJoint:
@@ -191,10 +201,14 @@ bool B29SmcAutoController::init(hardware_interface::RobotHW* robot_hw, ros::Node
       controller_nh.subscribe("sensor_input", 1, &B29SmcAutoController::sensorInputCallback, this);
   debug_override_sub_ =
       controller_nh.subscribe("debug_override", 1, &B29SmcAutoController::debugOverrideCallback, this);
-  if (planner_input_enabled_)
+  planner_control_state_pub_ =
+      controller_nh.advertise<PlannerControlState>(planner_control_state_topic_, 1);
+  if (planner_interface_mode_ == "production")
   {
-    planner_input_sub_ =
-        controller_nh.subscribe(planner_input_topic_, 1, &B29SmcAutoController::plannerInputCallback, this);
+    planner_joint_command_sub_ = controller_nh.subscribe(
+        planner_joint_command_topic_, 1, &B29SmcAutoController::plannerJointCommandCallback, this);
+    complete_planner_control_service_ = controller_nh.advertiseService(
+        complete_planner_control_service_name_, &B29SmcAutoController::completePlannerControlCallback, this);
   }
   state_trace_pub_ = controller_nh.advertise<AutoStateTrace>("state_trace", 10);
   planner_release_service_ =
@@ -215,6 +229,7 @@ void B29SmcAutoController::starting(const ros::Time& time)
   }
 
   robot_context_.start();
+  writeAutoStateCommand(AutoControlCommand{});
   AutoSensorInput sensor_input;
   AutoDebugOverride debug_override;
   {
@@ -235,6 +250,7 @@ void B29SmcAutoController::starting(const ros::Time& time)
   else if (use_auto_state_)
   {
     input_mux_.setAutoState(auto_state_handle_.getData());
+    input_mux_.setRemoteControl(remote_control_handle_.getData());
   }
   else
   {
@@ -246,6 +262,7 @@ void B29SmcAutoController::starting(const ros::Time& time)
   command_dispatch_attempted_ = true;
   command_dispatch_succeeded_ = command_dispatcher_.dispatch(robot_context_.currentCommand());
   state_trace_pub_.publish(buildControllerTrace(time, robot_context_.currentCommand()));
+  publishPlannerControlState(time);
 }
 
 void B29SmcAutoController::update(const ros::Time& time, const ros::Duration& /*period*/)
@@ -257,10 +274,12 @@ void B29SmcAutoController::update(const ros::Time& time, const ros::Duration& /*
 
   AutoSensorInput sensor_input;
   AutoDebugOverride debug_override;
+  std::uint64_t debug_override_sequence = 0;
   {
     std::lock_guard<std::mutex> lock(input_mutex_);
     sensor_input = sensor_input_;
     debug_override = debug_override_;
+    debug_override_sequence = debug_override_sequence_;
   }
 
   bool use_data_fault_ = ((use_auto_state_ && use_sensor_input_) == true) || 
@@ -275,6 +294,7 @@ void B29SmcAutoController::update(const ros::Time& time, const ros::Duration& /*
   else if (use_auto_state_)
   {
     input_mux_.setAutoState(auto_state_handle_.getData());
+    input_mux_.setRemoteControl(remote_control_handle_.getData());
   }
   else
   {
@@ -282,7 +302,38 @@ void B29SmcAutoController::update(const ros::Time& time, const ros::Duration& /*
   }
 
   applied_debug_override_ = debug_validation_enabled_ ? debug_override : AutoDebugOverride{};
+  applied_debug_override_sequence_ = debug_validation_enabled_ ? debug_override_sequence : 0;
   input_mux_.setDebugOverride(applied_debug_override_);
+  if (debug_validation_enabled_ && applied_debug_override_.enabled)
+  {
+    steering_engine_hw::RemoteControlData remote_control;
+    remote_control.header = applied_debug_override_.header;
+    remote_control.sample_sequence = applied_debug_override_sequence_;
+    remote_control.valid =
+        (applied_debug_override_.field_mask & AutoDebugOverride::FIELD_REMOTE_CONTROL_INCREMENTS) != 0;
+    if (remote_control.valid)
+    {
+      std::copy(applied_debug_override_.remote_control_joint_increments.begin(),
+                applied_debug_override_.remote_control_joint_increments.end(),
+                remote_control.joint_increments.begin());
+    }
+    const bool complete =
+        (applied_debug_override_.field_mask & AutoDebugOverride::FIELD_REMOTE_CONTROL_COMPLETE) != 0 &&
+        applied_debug_override_.remote_control_complete;
+    if (applied_debug_override_sequence_ != 0 &&
+        applied_debug_override_sequence_ != last_input_snapshot_.remote_control_sample_sequence)
+    {
+      if (!previous_debug_remote_control_complete_ && complete)
+      {
+        ++debug_remote_control_completion_rising_edge_sequence_;
+      }
+      previous_debug_remote_control_complete_ = complete;
+    }
+    remote_control.stage_complete = complete;
+    remote_control.completion_rising_edge_sequence =
+        debug_remote_control_completion_rising_edge_sequence_;
+    input_mux_.setRemoteControl(remote_control);
+  }
   input_mux_.setJointState(buildJointStateMessage(time));
   input_mux_.setBaseImu(buildBaseImuMessage(time));
   AutoInputSnapshot snapshot = input_mux_.buildSnapshot();
@@ -294,9 +345,11 @@ void B29SmcAutoController::update(const ros::Time& time, const ros::Duration& /*
   robot_context_.tick50Hz();
 
   const AutoControlCommand effective = buildEffectiveCommand(time);
+  writeAutoStateCommand(effective);
   command_dispatch_attempted_ = true;
   command_dispatch_succeeded_ = command_dispatcher_.dispatch(effective);
   state_trace_pub_.publish(buildControllerTrace(time, effective));
+  publishPlannerControlState(time);
 }
 
 void B29SmcAutoController::stopping(const ros::Time& time)
@@ -306,12 +359,14 @@ void B29SmcAutoController::stopping(const ros::Time& time)
     return;
   }
 
+  planner_session_.stop(PlannerControlState::EXIT_CONTROLLER_STOPPED, false);
   AutoControlCommand safe_stop;
   resetObstacleCrossingState(time);
-  clearPlannerPointState();
+  writeAutoStateCommand(safe_stop);
   command_dispatch_attempted_ = true;
   command_dispatch_succeeded_ = command_dispatcher_.dispatch(safe_stop);
   state_trace_pub_.publish(buildControllerTrace(time, safe_stop));
+  publishPlannerControlState(time);
 }
 
 bool B29SmcAutoController::initInterfaces(hardware_interface::RobotHW* robot_hw)
@@ -321,6 +376,7 @@ bool B29SmcAutoController::initInterfaces(hardware_interface::RobotHW* robot_hw)
   velocity_joint_interface_ = robot_hw->get<hardware_interface::VelocityJointInterface>();
   imu_sensor_interface_ = robot_hw->get<hardware_interface::ImuSensorInterface>();
   auto_state_interface_ = robot_hw->get<steering_engine_hw::AutoStateInterface>();
+  remote_control_interface_ = robot_hw->get<steering_engine_hw::RemoteControlInterface>();
 
   if (!joint_state_interface_ || !position_joint_interface_ || !velocity_joint_interface_ || !imu_sensor_interface_)
   {
@@ -329,9 +385,10 @@ bool B29SmcAutoController::initInterfaces(hardware_interface::RobotHW* robot_hw)
     return false;
   }
 
-  if (use_auto_state_ && !auto_state_interface_)
+  if (use_auto_state_ && (!auto_state_interface_ || !remote_control_interface_))
   {
-    ROS_WARN_THROTTLE(5.0, "b29_smc_auto_controller requires AutoStateInterface when use_auto_state=true.");
+    ROS_WARN_THROTTLE(5.0, "b29_smc_auto_controller requires AutoStateInterface and RemoteControlInterface "
+                             "when use_auto_state=true.");
     return false;
   }
 
@@ -350,28 +407,41 @@ bool B29SmcAutoController::loadParameters(ros::NodeHandle& controller_nh)
   controller_nh.param<std::string>("joint_names/right_friction_wheel_joint", wheel_joint_names_[1], wheel_joint_names_[1]);
   controller_nh.param<std::string>("imu_names", base_imu_name_, base_imu_name_);
   controller_nh.param<std::string>("auto_state_name", auto_state_name_, auto_state_name_);
+  controller_nh.param<std::string>("remote_control_name", remote_control_name_, remote_control_name_);
   controller_nh.param<bool>("use_sensor_input", use_sensor_input_, use_sensor_input_);
   controller_nh.param<bool>("use_auto_state", use_auto_state_, use_auto_state_);
   controller_nh.param<bool>("debug_validation/enabled", debug_validation_enabled_, debug_validation_enabled_);
   controller_nh.param<bool>("debug_validation/simulation_only", simulation_only_, simulation_only_);
   controller_nh.param<bool>("planner_control/manual_release_enabled", planner_manual_release_enabled_,
                             planner_manual_release_enabled_);
+  controller_nh.param<std::string>("planner_interface/mode", planner_interface_mode_, planner_interface_mode_);
+  controller_nh.param<std::string>("planner_interface/state_topic", planner_control_state_topic_,
+                                   planner_control_state_topic_);
+  controller_nh.param<std::string>("planner_interface/command_topic", planner_joint_command_topic_,
+                                   planner_joint_command_topic_);
+  controller_nh.param<std::string>("planner_interface/complete_service", complete_planner_control_service_name_,
+                                   complete_planner_control_service_name_);
+  controller_nh.param<double>("planner_interface/max_delta_per_command",
+                              planner_session_config_.max_delta_per_command,
+                              planner_session_config_.max_delta_per_command);
+  controller_nh.param<double>("planner_interface/command_timeout", planner_session_config_.command_timeout,
+                              planner_session_config_.command_timeout);
+  controller_nh.param<double>("planner_interface/total_watchdog_timeout",
+                              planner_session_config_.total_watchdog_timeout,
+                              planner_session_config_.total_watchdog_timeout);
   controller_nh.param<double>("posture_roll_limit", input_mux_config_.max_abs_roll_rad,
                               input_mux_config_.max_abs_roll_rad);
   controller_nh.param<double>("posture_pitch_limit", input_mux_config_.max_abs_pitch_rad,
                               input_mux_config_.max_abs_pitch_rad);
-  controller_nh.param<bool>("planner_input/enabled", planner_input_enabled_, planner_input_enabled_);
-  controller_nh.param<std::string>("planner_input/topic", planner_input_topic_, planner_input_topic_);
-  controller_nh.param<double>("planner_input/point_timeout", planner_point_timeout_,
-                              planner_point_timeout_);
-  controller_nh.param<double>("planner_input/max_delta_per_cycle", planner_point_max_delta_per_cycle_,
-                              planner_point_max_delta_per_cycle_);
-  controller_nh.param<double>("robot_motion/wait_for_planner_point_control_time",
-                              robot_motion_config_.wait_for_planner_point_control_time,
-                              robot_motion_config_.wait_for_planner_point_control_time);
+  controller_nh.param<double>("robot_motion/debug_planner_control_wait_time",
+                              robot_motion_config_.debug_planner_control_wait_time,
+                              robot_motion_config_.debug_planner_control_wait_time);
   controller_nh.param<double>("robot_motion/wait_for_grip_respond_time",
                               robot_motion_config_.wait_for_grip_respond_time,
                               robot_motion_config_.wait_for_grip_respond_time);
+  controller_nh.param<double>("robot_motion/gravity_compensation_enable_wait_time",
+                              robot_motion_config_.gravity_compensation_enable_wait_time,
+                              robot_motion_config_.gravity_compensation_enable_wait_time);
   controller_nh.param<double>("robot_motion/disconnect_cable_step_motion_duration",
                               robot_motion_config_.disconnect_cable_step_motion_duration,
                               robot_motion_config_.disconnect_cable_step_motion_duration);
@@ -390,9 +460,9 @@ bool B29SmcAutoController::loadParameters(ros::NodeHandle& controller_nh)
   controller_nh.param<int>("robot_motion/disconnect_cable_retry_limit",
                            robot_motion_config_.disconnect_cable_retry_limit,
                            robot_motion_config_.disconnect_cable_retry_limit);
-  controller_nh.param<int>("robot_motion/planner_regrip_retry_limit",
-                           robot_motion_config_.planner_regrip_retry_limit,
-                           robot_motion_config_.planner_regrip_retry_limit);
+  controller_nh.param<int>("robot_motion/regrip_retry_limit",
+                           robot_motion_config_.regrip_retry_limit,
+                           robot_motion_config_.regrip_retry_limit);
   controller_nh.param<double>("robot_motion/disconnect_cable_up_joint_position",
                               robot_motion_config_.disconnect_cable_up_joint_position,
                               robot_motion_config_.disconnect_cable_up_joint_position);
@@ -402,24 +472,43 @@ bool B29SmcAutoController::loadParameters(ros::NodeHandle& controller_nh)
   controller_nh.param<double>("robot_motion/disconnect_cable_move_joint_position",
                               robot_motion_config_.disconnect_cable_move_joint_position,
                               robot_motion_config_.disconnect_cable_move_joint_position);
+  controller_nh.param<double>("remote_control/max_increment_per_sample",
+                              remote_control_config_.max_increment_per_sample,
+                              remote_control_config_.max_increment_per_sample);
   std::string output_mode_name = toString(output_mode_);
   controller_nh.param<std::string>("output_mode", output_mode_name, output_mode_name);
 
-  if (planner_input_enabled_ && planner_input_topic_.empty())
+  if (planner_interface_mode_ != "production" && planner_interface_mode_ != "debug")
   {
-    ROS_ERROR("planner_input/topic must not be empty when Planner input is enabled.");
+    ROS_ERROR("planner_interface/mode must be either 'production' or 'debug'.");
     return false;
   }
-
-  if (planner_point_timeout_ < 0.0)
+  if (planner_control_state_topic_.empty() || planner_joint_command_topic_.empty() ||
+      complete_planner_control_service_name_.empty())
   {
-    ROS_ERROR("planner_input/point_timeout must be non-negative.");
+    ROS_ERROR("planner_interface topic and service names must not be empty.");
     return false;
   }
-
-  if (planner_point_max_delta_per_cycle_ <= 0.0)
+  if (planner_interface_mode_ == "production" && planner_manual_release_enabled_)
   {
-    ROS_ERROR("planner_input/max_delta_per_cycle must be positive.");
+    ROS_ERROR("Production Planner interface cannot be enabled together with manual planner release.");
+    return false;
+  }
+  if (!std::isfinite(planner_session_config_.max_delta_per_command) ||
+      planner_session_config_.max_delta_per_command <= 0.0)
+  {
+    ROS_ERROR("planner_interface/max_delta_per_command must be finite and positive.");
+    return false;
+  }
+  if (!std::isfinite(planner_session_config_.command_timeout) || planner_session_config_.command_timeout <= 0.0)
+  {
+    ROS_ERROR("planner_interface/command_timeout must be finite and positive.");
+    return false;
+  }
+  if (!std::isfinite(planner_session_config_.total_watchdog_timeout) ||
+      planner_session_config_.total_watchdog_timeout <= 0.0)
+  {
+    ROS_ERROR("planner_interface/total_watchdog_timeout must be finite and positive.");
     return false;
   }
 
@@ -445,14 +534,19 @@ bool B29SmcAutoController::loadParameters(ros::NodeHandle& controller_nh)
     return std::isfinite(value);
   };
 
-  if (!is_non_negative(robot_motion_config_.wait_for_planner_point_control_time))
+  if (!is_non_negative(robot_motion_config_.debug_planner_control_wait_time))
   {
-    ROS_ERROR("robot_motion/wait_for_planner_point_control_time must be non-negative.");
+    ROS_ERROR("robot_motion/debug_planner_control_wait_time must be non-negative.");
     return false;
   }
   if (!is_non_negative(robot_motion_config_.wait_for_grip_respond_time))
   {
     ROS_ERROR("robot_motion/wait_for_grip_respond_time must be non-negative.");
+    return false;
+  }
+  if (!is_non_negative(robot_motion_config_.gravity_compensation_enable_wait_time))
+  {
+    ROS_ERROR("robot_motion/gravity_compensation_enable_wait_time must be non-negative.");
     return false;
   }
   if (!is_positive(robot_motion_config_.disconnect_cable_step_motion_duration))
@@ -484,9 +578,14 @@ bool B29SmcAutoController::loadParameters(ros::NodeHandle& controller_nh)
   }
   if (robot_motion_config_.close_gripper_retry_limit < 1 ||
       robot_motion_config_.disconnect_cable_retry_limit < 1 ||
-      robot_motion_config_.planner_regrip_retry_limit < 1)
+      robot_motion_config_.regrip_retry_limit < 1)
   {
     ROS_ERROR("robot_motion retry limits must be at least 1.");
+    return false;
+  }
+  if (!is_positive(remote_control_config_.max_increment_per_sample))
+  {
+    ROS_ERROR("remote_control/max_increment_per_sample must be finite and positive.");
     return false;
   }
 
@@ -501,6 +600,8 @@ bool B29SmcAutoController::loadParameters(ros::NodeHandle& controller_nh)
   }
 
   input_mux_ = AutoInputMux(input_mux_config_);
+  planner_session_.configure(planner_session_config_);
+  remote_control_session_.configure(remote_control_config_.max_increment_per_sample);
   return true;
 }
 
@@ -521,6 +622,7 @@ void B29SmcAutoController::buildHandles()
   if (use_auto_state_)
   {
     auto_state_handle_ = auto_state_interface_->getHandle(auto_state_name_);
+    remote_control_handle_ = remote_control_interface_->getHandle(remote_control_name_);
   }
 }
 
@@ -548,6 +650,7 @@ void B29SmcAutoController::debugOverrideCallback(const AutoDebugOverride::ConstP
 
   std::lock_guard<std::mutex> lock(input_mutex_);
   debug_override_ = *msg;
+  ++debug_override_sequence_;
 }
 
 bool B29SmcAutoController::plannerReleaseCallback(std_srvs::Trigger::Request& /*request*/,
@@ -573,6 +676,23 @@ bool B29SmcAutoController::plannerReleaseCallback(std_srvs::Trigger::Request& /*
   return true;
 }
 
+bool B29SmcAutoController::completePlannerControlCallback(CompletePlannerControl::Request& request,
+                                                          CompletePlannerControl::Response& response)
+{
+  if (planner_interface_mode_ != "production")
+  {
+    response.accepted = false;
+    response.message = "formal Planner completion is disabled in debug interface mode";
+    return true;
+  }
+
+  const PlannerSession::CompletionResult result =
+      planner_session_.requestCompletion(request.session_id, request.final_sequence);
+  response.accepted = result.accepted;
+  response.message = result.message;
+  return true;
+}
+
 bool B29SmcAutoController::softwareEmergencyStopCallback(std_srvs::Trigger::Request& /*request*/,
                                                          std_srvs::Trigger::Response& response)
 {
@@ -592,39 +712,18 @@ bool B29SmcAutoController::manualResetCallback(std_srvs::Trigger::Request& /*req
   return true;
 }
 
-void B29SmcAutoController::plannerInputCallback(const std_msgs::Float64MultiArray::ConstPtr& msg)
+void B29SmcAutoController::plannerJointCommandCallback(const PlannerJointCommand::ConstPtr& msg)
 {
-  if (!msg)
+  if (!msg || planner_interface_mode_ != "production")
   {
     return;
   }
 
-  if (!planner_input_enabled_)
+  const PlannerSession::CommandResult result = planner_session_.acceptCommand(*msg, ros::Time::now());
+  if (!result.accepted)
   {
-    ROS_WARN_THROTTLE(5.0, "Received Planner point while planner_input/enabled=false; ignoring.");
-    return;
-  }
-
-  PlannerJointPoint point;
-  std::string reason;
-  bool accepted = false;
-  {
-    std::lock_guard<std::mutex> lock(planner_point_mutex_);
-    if (validatePlannerPoint(msg->data, point, reason))
-    {
-      point.stamp = ros::Time::now();
-      latest_planner_point_ = point;
-      last_accepted_planner_point_ = point;
-      has_latest_planner_point_ = true;
-      has_last_accepted_planner_point_ = true;
-      accepted = true;
-    }
-  }
-
-  if (!accepted)
-  {
-    ROS_WARN_STREAM_THROTTLE(1.0, "Rejecting invalid Planner point: " << reason);
-    return;
+    ROS_WARN_STREAM_THROTTLE(1.0, "Rejecting Planner command session=" << msg->session_id
+                             << " sequence=" << msg->sequence << ": " << result.message);
   }
 }
 
@@ -632,12 +731,14 @@ AutoControlCommand B29SmcAutoController::buildEffectiveCommand(const ros::Time& 
 {
   AutoControlCommand effective = robot_context_.currentCommand();
   planner_override_applied_ = false;
+  remote_control_completion_rising_edge_ = false;
   getCurrentJointStateToCommand(effective);
 
   if (isSafetyBlocked(effective))
   {
+    planner_session_.stop(PlannerControlState::EXIT_SAFETY_REVOKED, false);
     resetObstacleCrossingState(time);
-    clearPlannerPointState();
+    applyGravityCompensationCommand(effective);
     return effective;
   }
 
@@ -645,6 +746,7 @@ AutoControlCommand B29SmcAutoController::buildEffectiveCommand(const ros::Time& 
   updateObstacleCrossingFsm(time);
   applyObstacleCrossingCommand(time, effective);
   applyPlannerCommandIfAllowed(time, effective);
+  applyGravityCompensationCommand(effective);
   rememberTargets(effective);
 
   return effective;
@@ -657,6 +759,7 @@ bool B29SmcAutoController::isSafetyBlocked(const AutoControlCommand& effective) 
 
 void B29SmcAutoController::resetObstacleCrossingState(const ros::Time& time)
 {
+  planner_session_.stop(PlannerControlState::EXIT_SAFETY_REVOKED, false);
   setObstacleCrossingStage(ObstacleCrossingStage::Idle, time, "crossing_reset");
   crossing_side_ = CrossingSide::None;
   first_crossing_side_ = CrossingSide::Left;
@@ -664,11 +767,14 @@ void B29SmcAutoController::resetObstacleCrossingState(const ros::Time& time)
   setDisconnectCableStep(DisconnectCableStep::Idle, time, "crossing_reset");
   planner_take_control_time_ = ros::Time{};
   gripper_wait_start_time_ = ros::Time{};
+  grip_confirmation_armed_ = false;
   to_check_joint_pos_ = 0.0;
   disconnect_check_displacement_ = 0.0;
   planner_release_requested_.store(false);
   planner_release_received_for_stage_ = false;
   has_last_effective_joint_targets_ = false;
+  remote_control_session_.reset();
+  remote_control_completion_rising_edge_ = false;
   resetMotionSegment();
   resetRetryCounts();
 }
@@ -702,6 +808,7 @@ void B29SmcAutoController::updateObstacleCrossingFsm(const ros::Time& time)
       setDisconnectCableStep(DisconnectCableStep::Idle, time, "new_obstacle_detected");
       setObstacleCrossingStage(ObstacleCrossingStage::CloseBothGrippers, time, "obstacle_within_crossing_distance");
       gripper_wait_start_time_ = time;
+      grip_confirmation_armed_ = !robot_context_.isGripConfirmed();
     }
     return;
   }
@@ -709,10 +816,15 @@ void B29SmcAutoController::updateObstacleCrossingFsm(const ros::Time& time)
   switch (obstacle_crossing_stage_)
   {
     case ObstacleCrossingStage::CloseBothGrippers:
-      if (robot_context_.isGripConfirmed())
+      if (!robot_context_.isGripConfirmed())
+      {
+        grip_confirmation_armed_ = true;
+      }
+      if (grip_confirmation_armed_ && robot_context_.isGripConfirmed())
       {
         close_grippers_retry_count_ = 0;
-        enterDisconnecting(first_crossing_side_, time);
+        grip_confirmation_armed_ = false;
+        enterOpenGripperBeforeGravityCompensation(first_crossing_side_, time);
       }
       else if ((time - gripper_wait_start_time_) >=
                ros::Duration(robot_motion_config_.wait_for_grip_respond_time))
@@ -729,11 +841,31 @@ void B29SmcAutoController::updateObstacleCrossingFsm(const ros::Time& time)
         }
       }
       break;
+    case ObstacleCrossingStage::OpenGripperBeforeGravityCompensation:
+      if ((time - gripper_wait_start_time_) >=
+          ros::Duration(robot_motion_config_.wait_for_grip_respond_time))
+      {
+        enterEnableGravityCompensation(crossing_side_, time);
+      }
+      break;
+    case ObstacleCrossingStage::EnableGravityCompensation:
+      if ((time - obstacle_crossing_stage_enter_time_) >=
+          ros::Duration(robot_motion_config_.gravity_compensation_enable_wait_time))
+      {
+        enterDisconnecting(crossing_side_, time);
+      }
+      break;
     case ObstacleCrossingStage::PlannerControl:
       updatePlannerTakeover(time);
       break;
+    case ObstacleCrossingStage::RemoteControl:
+      updateRemoteControl(time);
+      break;
     case ObstacleCrossingStage::Regrip:
       updateRegrip(time);
+      break;
+    case ObstacleCrossingStage::ReopenBeforeRemoteControl:
+      updateReopenBeforeRemoteControl(time);
       break;
     case ObstacleCrossingStage::CompleteWaitObstacleClear:
       if (!robot_context_.isObstacleDetected())
@@ -767,6 +899,26 @@ void B29SmcAutoController::applyObstacleCrossingCommand(const ros::Time& time, A
       effective.joint_targets[jointIndex(JointIndex::LeftGripper)]  = GripperState::CLOSED;
       effective.joint_targets[jointIndex(JointIndex::RightGripper)] = GripperState::CLOSED;
       break;
+    case ObstacleCrossingStage::OpenGripperBeforeGravityCompensation:
+    {
+      const CrossingSideJoints joints = jointsForCrossingSide(crossing_side_);
+      stopWheels(effective, std::string("crossing_") + sideReasonName(crossing_side_) +
+                                "_open_gripper_before_gravity_compensation");
+      effective.joint_targets[jointIndex(JointIndex::LeftGripper)] = GripperState::CLOSED;
+      effective.joint_targets[jointIndex(JointIndex::RightGripper)] = GripperState::CLOSED;
+      effective.joint_targets[jointIndex(joints.gripper)] = GripperState::OPEN;
+      break;
+    }
+    case ObstacleCrossingStage::EnableGravityCompensation:
+    {
+      const CrossingSideJoints joints = jointsForCrossingSide(crossing_side_);
+      stopWheels(effective, std::string("crossing_") + sideReasonName(crossing_side_) +
+                                "_enable_gravity_compensation");
+      effective.joint_targets[jointIndex(JointIndex::LeftGripper)] = GripperState::CLOSED;
+      effective.joint_targets[jointIndex(JointIndex::RightGripper)] = GripperState::CLOSED;
+      effective.joint_targets[jointIndex(joints.gripper)] = GripperState::OPEN;
+      break;
+    }
     case ObstacleCrossingStage::Disconnecting:
       stopWheels(effective, std::string("disconnect_") + sideReasonName(crossing_side_) + "_active");
       updateDisconnectCableStep(time, effective);
@@ -774,11 +926,30 @@ void B29SmcAutoController::applyObstacleCrossingCommand(const ros::Time& time, A
     case ObstacleCrossingStage::PlannerControl:
       stopWheels(effective, std::string("planner_") + sideReasonName(crossing_side_) + "_wait");
       break;
+    case ObstacleCrossingStage::RemoteControl:
+    {
+      const CrossingSideJoints joints = jointsForCrossingSide(crossing_side_);
+      stopWheels(effective, std::string("remote_control_") + sideReasonName(crossing_side_) + "_active");
+      const RemoteControlSession::Positions& targets = remote_control_session_.targets();
+      effective.joint_targets[jointIndex(JointIndex::LeftFirstLeg)] = targets[0];
+      effective.joint_targets[jointIndex(JointIndex::LeftSecondLeg)] = targets[1];
+      effective.joint_targets[jointIndex(JointIndex::RightFirstLeg)] = targets[2];
+      effective.joint_targets[jointIndex(JointIndex::RightSecondLeg)] = targets[3];
+      effective.joint_targets[jointIndex(joints.gripper)] = GripperState::OPEN;
+      break;
+    }
     case ObstacleCrossingStage::Regrip:
     {
       const CrossingSideJoints joints = jointsForCrossingSide(crossing_side_);
       stopWheels(effective, std::string("regrip_") + sideReasonName(crossing_side_) + "_wait");
       effective.joint_targets[jointIndex(joints.gripper)] = GripperState::CLOSED;
+      break;
+    }
+    case ObstacleCrossingStage::ReopenBeforeRemoteControl:
+    {
+      const CrossingSideJoints joints = jointsForCrossingSide(crossing_side_);
+      stopWheels(effective, std::string("regrip_") + sideReasonName(crossing_side_) + "_reopen_before_remote_control");
+      effective.joint_targets[jointIndex(joints.gripper)] = GripperState::OPEN;
       break;
     }
     case ObstacleCrossingStage::CompleteWaitObstacleClear:
@@ -804,23 +975,59 @@ void B29SmcAutoController::applyObstacleCrossingCommand(const ros::Time& time, A
 
 void B29SmcAutoController::applyPlannerCommandIfAllowed(const ros::Time& time, AutoControlCommand& effective)
 {
-  if (obstacle_crossing_stage_ != ObstacleCrossingStage::PlannerControl)
+  if (obstacle_crossing_stage_ != ObstacleCrossingStage::PlannerControl ||
+      planner_interface_mode_  != "production")
   {
     return;
   }
 
-  PlannerJointPoint point;
-  if (!latestPlannerPointIsFresh(time, point))
+  PlannerSession::Positions positions;
+  if (!planner_session_.latestCommandIsFresh(time, positions))
   {
     return;
   }
-
-  effective.joint_targets[jointIndex(JointIndex::LeftFirstLeg)]   = point.left_first;
-  effective.joint_targets[jointIndex(JointIndex::LeftSecondLeg)]  = point.left_second;
-  effective.joint_targets[jointIndex(JointIndex::RightFirstLeg)]  = point.right_first;
-  effective.joint_targets[jointIndex(JointIndex::RightSecondLeg)] = point.right_second;
+  effective.joint_targets[jointIndex(JointIndex::LeftFirstLeg)]   = positions[0];
+  effective.joint_targets[jointIndex(JointIndex::LeftSecondLeg)]  = positions[1];
+  effective.joint_targets[jointIndex(JointIndex::RightFirstLeg)]  = positions[2];
+  effective.joint_targets[jointIndex(JointIndex::RightSecondLeg)] = positions[3];
   effective.command_reason = std::string("planner_") + sideReasonName(crossing_side_) + "_control";
   planner_override_applied_ = true;
+}
+
+void B29SmcAutoController::applyGravityCompensationCommand(AutoControlCommand& effective) const
+{
+  const bool manual_side_crossing =
+      obstacle_crossing_stage_ == ObstacleCrossingStage::ManualIntervention &&
+      failed_action_ != CrossingAction::None &&
+      failed_action_ != CrossingAction::CloseBothGrippers;
+  const bool side_crossing_active =
+      crossing_side_ != CrossingSide::None &&
+      (obstacle_crossing_stage_ == ObstacleCrossingStage::EnableGravityCompensation ||
+       obstacle_crossing_stage_ == ObstacleCrossingStage::Disconnecting ||
+       obstacle_crossing_stage_ == ObstacleCrossingStage::PlannerControl ||
+       obstacle_crossing_stage_ == ObstacleCrossingStage::RemoteControl ||
+       obstacle_crossing_stage_ == ObstacleCrossingStage::Regrip ||
+       obstacle_crossing_stage_ == ObstacleCrossingStage::ReopenBeforeRemoteControl ||
+       manual_side_crossing);
+  if (!side_crossing_active)
+  {
+    effective.gravity_compensation_mode = GravityCompensationMode::Off;
+    return;
+  }
+
+  const CrossingSideJoints joints = jointsForCrossingSide(crossing_side_);
+  if (joints.actuator_first_leg == JointIndex::LeftFirstLeg)
+  {
+    effective.gravity_compensation_mode = GravityCompensationMode::LeftFirstLeg;
+  }
+  else if (joints.actuator_first_leg == JointIndex::RightFirstLeg)
+  {
+    effective.gravity_compensation_mode = GravityCompensationMode::RightFirstLeg;
+  }
+  else
+  {
+    effective.gravity_compensation_mode = GravityCompensationMode::Off;
+  }
 }
 
 void B29SmcAutoController::updateDisconnectCableStep(const ros::Time& time, AutoControlCommand& effective)
@@ -852,11 +1059,11 @@ void B29SmcAutoController::updateDisconnectCableStep(const ros::Time& time, Auto
       if ((time - gripper_wait_start_time_) >= ros::Duration(robot_motion_config_.wait_for_grip_respond_time))
       {
         resetMotionSegment();
-        setDisconnectCableStep(DisconnectCableStep::Step3UpJoint, time, "gripper_response_wait_elapsed");
+        setDisconnectCableStep(DisconnectCableStep::Step3UpFirstJoint, time, "gripper_response_wait_elapsed");
       }
       break;
-    case DisconnectCableStep::Step3UpJoint:
-      effective.command_reason = prefix + "step3_up_joint";
+    case DisconnectCableStep::Step3UpFirstJoint:
+      effective.command_reason = prefix + "step3_up_first_joint";
       if (applyMotionSegment(time, effective))
       {
         resetMotionSegment();
@@ -946,6 +1153,27 @@ void B29SmcAutoController::updateDisconnectCableStep(const ros::Time& time, Auto
 
 void B29SmcAutoController::updatePlannerTakeover(const ros::Time& time)
 {
+  if (planner_interface_mode_ == "production")
+  {
+    uint32_t completed_session = 0;
+    uint32_t final_sequence = 0;
+    if (planner_session_.consumeCompletionRequest(completed_session, final_sequence))
+    {
+      planner_session_.stop(PlannerControlState::EXIT_COMPLETED, true);
+      enterRemoteControl(time, crossing_side_);
+      return;
+    }
+
+    if (planner_session_.totalWatchdogExpired(time))
+    {
+      planner_session_.stop(PlannerControlState::EXIT_TOTAL_WATCHDOG_TIMEOUT, false);
+      last_failure_reason_ = std::string("planner_") + sideReasonName(crossing_side_) +
+                             "_total_watchdog_timeout";
+      enterManualIntervention(CrossingAction::PlannerControl, crossing_side_, time);
+    }
+    return;
+  }
+
   if (planner_manual_release_enabled_)
   {
     if (!planner_release_requested_.exchange(false))
@@ -953,25 +1181,53 @@ void B29SmcAutoController::updatePlannerTakeover(const ros::Time& time)
       return;
     }
     planner_release_received_for_stage_ = true;
-    setObstacleCrossingStage(ObstacleCrossingStage::Regrip, time, "planner_manual_release_received");
-    gripper_wait_start_time_ = time;
+    enterRemoteControl(time, crossing_side_, "planner_manual_release_received");
     return;
   }
 
   if ((time - planner_take_control_time_) <
-      ros::Duration(robot_motion_config_.wait_for_planner_point_control_time))
+      ros::Duration(robot_motion_config_.debug_planner_control_wait_time))
   {
     return;
   }
 
-  setObstacleCrossingStage(ObstacleCrossingStage::Regrip, time, "planner_control_timeout_elapsed");
-  gripper_wait_start_time_ = time;
+  enterRemoteControl(time, crossing_side_, "planner_control_timeout_elapsed");
+}
+
+void B29SmcAutoController::updateRemoteControl(const ros::Time& time)
+{
+  RemoteControlSession::Input input;
+  input.increments = last_input_snapshot_.remote_control_joint_increments;
+  input.valid = last_input_snapshot_.remote_control_input_valid;
+  input.sample_sequence = last_input_snapshot_.remote_control_sample_sequence;
+  input.completion_rising_edge_sequence =
+      last_input_snapshot_.remote_control_completion_rising_edge_sequence;
+  const RemoteControlSession::UpdateResult result = remote_control_session_.update(input);
+  if (result.completion_rising_edge)
+  {
+    remote_control_completion_rising_edge_ = true;
+    setObstacleCrossingStage(ObstacleCrossingStage::Regrip, time,
+                             "remote_control_completion_rising_edge");
+    gripper_wait_start_time_ = time;
+    grip_confirmation_armed_ = !robot_context_.isGripConfirmed();
+    return;
+  }
+  if (result.sample_consumed && !result.increments_applied &&
+      last_input_snapshot_.remote_control_input_valid)
+  {
+    ROS_WARN_THROTTLE(1.0, "Ignoring non-finite remote control joint increment sample");
+  }
 }
 
 void B29SmcAutoController::updateRegrip(const ros::Time& time)
 {
-  if (robot_context_.isGripConfirmed())
+  if (!robot_context_.isGripConfirmed())
   {
+    grip_confirmation_armed_ = true;
+  }
+  if (grip_confirmation_armed_ && robot_context_.isGripConfirmed())
+  {
+    grip_confirmation_armed_ = false;
     if (crossing_side_ == CrossingSide::Left)
     {
       left_regrip_retry_count_ = 0;
@@ -983,7 +1239,7 @@ void B29SmcAutoController::updateRegrip(const ros::Time& time)
 
     if (crossing_side_ == first_crossing_side_)
     {
-      enterDisconnecting(oppositeCrossingSide(crossing_side_), time);
+      enterOpenGripperBeforeGravityCompensation(oppositeCrossingSide(crossing_side_), time);
     }
     else
     {
@@ -1002,14 +1258,26 @@ void B29SmcAutoController::updateRegrip(const ros::Time& time)
 
   int& retry_count = crossing_side_ == CrossingSide::Left ? left_regrip_retry_count_ : right_regrip_retry_count_;
   ++retry_count;
-  if (retry_count >= robot_motion_config_.planner_regrip_retry_limit)
+  if (retry_count >= robot_motion_config_.regrip_retry_limit)
   {
     last_failure_reason_ = std::string("regrip_") + sideReasonName(crossing_side_) + "_retry_limit_reached";
-    enterManualIntervention(CrossingAction::PlannerRegrip, crossing_side_, time);
+    enterManualIntervention(CrossingAction::Regrip, crossing_side_, time);
     return;
   }
 
+  setObstacleCrossingStage(ObstacleCrossingStage::ReopenBeforeRemoteControl, time,
+                           "regrip_retry_reopen_before_remote_control");
   gripper_wait_start_time_ = time;
+}
+
+void B29SmcAutoController::updateReopenBeforeRemoteControl(const ros::Time& time)
+{
+  if ((time - gripper_wait_start_time_) < ros::Duration(robot_motion_config_.wait_for_grip_respond_time))
+  {
+    return;
+  }
+
+  enterRemoteControl(time, crossing_side_, "regrip_retry_reopen_completed");
 }
 
 void B29SmcAutoController::updateManualIntervention(const ros::Time& time)
@@ -1028,17 +1296,21 @@ void B29SmcAutoController::updateManualIntervention(const ros::Time& time)
 
   if (action == CrossingAction::CloseBothGrippers)
   {
-    enterDisconnecting(side == CrossingSide::None ? first_crossing_side_ : side, time);
+    enterOpenGripperBeforeGravityCompensation(side == CrossingSide::None ? first_crossing_side_ : side, time);
   }
   else if (action == CrossingAction::DisconnectCable)
   {
     enterPlannerControl(time, side);
   }
-  else if (action == CrossingAction::PlannerRegrip && side == first_crossing_side_)
+  else if (action == CrossingAction::PlannerControl && side != CrossingSide::None)
   {
-    enterDisconnecting(oppositeCrossingSide(side), time);
+    enterRemoteControl(time, side, "manual_intervention_planner_confirmed");
   }
-  else if (action == CrossingAction::PlannerRegrip && side != CrossingSide::None)
+  else if (action == CrossingAction::Regrip && side == first_crossing_side_)
+  {
+    enterOpenGripperBeforeGravityCompensation(oppositeCrossingSide(side), time);
+  }
+  else if (action == CrossingAction::Regrip && side != CrossingSide::None)
   {
     setObstacleCrossingStage(ObstacleCrossingStage::CompleteWaitObstacleClear, time, "manual_intervention_regrip_confirmed");
     crossing_side_ = CrossingSide::None;
@@ -1088,7 +1360,7 @@ void B29SmcAutoController::applyControllerStateToTrace(const ros::Time& stamp, c
   trace.right_regrip_retry_count = right_regrip_retry_count_;
   trace.close_gripper_retry_limit = robot_motion_config_.close_gripper_retry_limit;
   trace.disconnect_cable_retry_limit = robot_motion_config_.disconnect_cable_retry_limit;
-  trace.planner_regrip_retry_limit = robot_motion_config_.planner_regrip_retry_limit;
+  trace.regrip_retry_limit = robot_motion_config_.regrip_retry_limit;
   trace.waiting_for_grip_confirmed =
       obstacle_crossing_stage_ == ObstacleCrossingStage::CloseBothGrippers ||
       obstacle_crossing_stage_ == ObstacleCrossingStage::Regrip;
@@ -1103,9 +1375,23 @@ void B29SmcAutoController::applyControllerStateToTrace(const ros::Time& stamp, c
   trace.planner_release_received = planner_release_received_for_stage_ || planner_release_requested_.load();
   trace.planner_control_wait_elapsed_sec =
       trace.planner_control_active ? elapsedSec(stamp, planner_take_control_time_) : 0.0;
-  trace.planner_point_available = plannerPointAvailable();
-  trace.planner_point_fresh = plannerPointIsFreshForTrace(stamp);
+  trace.planner_point_available = plannerCommandAvailable();
+  trace.planner_point_fresh = plannerCommandIsFreshForTrace(stamp);
   trace.planner_override_applied = planner_override_applied_;
+  trace.remote_control_active = obstacle_crossing_stage_ == ObstacleCrossingStage::RemoteControl;
+  const RemoteControlSession::Positions& raw_increments = remote_control_session_.rawIncrements();
+  const RemoteControlSession::Positions& applied_increments = remote_control_session_.appliedIncrements();
+  const RemoteControlSession::Positions& targets = remote_control_session_.targets();
+  for (std::size_t index = 0; index < targets.size(); ++index)
+  {
+    trace.remote_control_raw_increments[index] = raw_increments[index];
+    trace.remote_control_applied_increments[index] = applied_increments[index];
+    trace.remote_control_joint_targets[index] = targets[index];
+  }
+  trace.remote_control_input_valid = last_input_snapshot_.remote_control_input_valid;
+  trace.remote_control_sample_sequence = last_input_snapshot_.remote_control_sample_sequence;
+  trace.remote_control_complete = last_input_snapshot_.remote_control_complete;
+  trace.remote_control_completion_rising_edge = remote_control_completion_rising_edge_;
 
   trace.base_command_reason = robot_context_.currentCommand().command_reason;
   trace.drive_mode = driveModeName(command.drive_mode);
@@ -1146,22 +1432,63 @@ void B29SmcAutoController::applyControllerStateToTrace(const ros::Time& stamp, c
 
 void B29SmcAutoController::enterManualIntervention(CrossingAction action, CrossingSide side, const ros::Time& time)
 {
+  planner_session_.stop(PlannerControlState::EXIT_MANUAL_INTERVENTION, false);
   setObstacleCrossingStage(ObstacleCrossingStage::ManualIntervention, time, "retry_limit_reached");
   crossing_side_ = side;
   failed_action_ = action;
   setDisconnectCableStep(DisconnectCableStep::Idle, time, "manual_intervention_required");
   resetMotionSegment();
-  clearPlannerPointState();
 }
 
-void B29SmcAutoController::enterPlannerControl(const ros::Time& time, CrossingSide side)
+void B29SmcAutoController::enterPlannerControl(const ros::Time& time, CrossingSide side, const std::string& reason)
 {
-  setObstacleCrossingStage(ObstacleCrossingStage::PlannerControl, time, "disconnect_completed");
   crossing_side_ = side;
+  setObstacleCrossingStage(ObstacleCrossingStage::PlannerControl, time, reason);
   planner_take_control_time_ = time;
   planner_release_requested_.store(false);
   planner_release_received_for_stage_ = false;
+  if (planner_interface_mode_ == "production")
+  {
+    planner_session_.start(plannerCrossingSide(side), currentPlannerReferencePositions(), time);
+  }
   setDisconnectCableStep(DisconnectCableStep::Idle, time, "planner_control_started");
+  resetMotionSegment();
+}
+
+void B29SmcAutoController::enterRemoteControl(const ros::Time& time, CrossingSide side,
+                                              const std::string& reason)
+{
+  crossing_side_ = side;
+  setObstacleCrossingStage(ObstacleCrossingStage::RemoteControl, time, reason);
+  RemoteControlSession::Input input;
+  input.increments = last_input_snapshot_.remote_control_joint_increments;
+  input.valid = last_input_snapshot_.remote_control_input_valid;
+  input.sample_sequence = last_input_snapshot_.remote_control_sample_sequence;
+  input.completion_rising_edge_sequence =
+      last_input_snapshot_.remote_control_completion_rising_edge_sequence;
+  remote_control_session_.start(currentPlannerReferencePositions(), input);
+  remote_control_completion_rising_edge_ = false;
+  setDisconnectCableStep(DisconnectCableStep::Idle, time, "remote_control_started");
+  resetMotionSegment();
+}
+
+void B29SmcAutoController::enterOpenGripperBeforeGravityCompensation(CrossingSide side,
+                                                                     const ros::Time& time)
+{
+  crossing_side_ = side;
+  setObstacleCrossingStage(ObstacleCrossingStage::OpenGripperBeforeGravityCompensation, time,
+                           "grippers_closed_before_opening_crossing_side");
+  gripper_wait_start_time_ = time;
+  setDisconnectCableStep(DisconnectCableStep::Idle, time, "waiting_open_gripper_before_gravity_compensation");
+  resetMotionSegment();
+}
+
+void B29SmcAutoController::enterEnableGravityCompensation(CrossingSide side, const ros::Time& time)
+{
+  crossing_side_ = side;
+  setObstacleCrossingStage(ObstacleCrossingStage::EnableGravityCompensation, time,
+                           "crossing_side_gripper_open_wait_completed");
+  setDisconnectCableStep(DisconnectCableStep::Idle, time, "waiting_gravity_compensation_command");
   resetMotionSegment();
 }
 
@@ -1169,7 +1496,8 @@ void B29SmcAutoController::enterDisconnecting(CrossingSide side, const ros::Time
 {
   setObstacleCrossingStage(ObstacleCrossingStage::Disconnecting, time, "start_disconnect_side");
   crossing_side_ = side;
-  setDisconnectCableStep(DisconnectCableStep::Step1LoosenGripper, time, "disconnect_started");
+  setDisconnectCableStep(DisconnectCableStep::Step3UpFirstJoint, time,
+                         "gripper_opened_and_gravity_compensation_enabled");
   resetMotionSegment();
 }
 
@@ -1204,10 +1532,12 @@ bool B29SmcAutoController::applyMotionSegment(const ros::Time& time, AutoControl
     motion_segment_.initialized = true;
 
     const CrossingSideJoints joints = jointsForCrossingSide(crossing_side_);
-    if (disconnect_cable_step_ == DisconnectCableStep::Step3UpJoint)
+    const double first_leg_target_scale =
+        joints.actuator_first_leg == JointIndex::LeftFirstLeg ? -1.0 : 1.0;
+    if (disconnect_cable_step_ == DisconnectCableStep::Step3UpFirstJoint)
     {
       motion_segment_.target_targets[jointIndex(joints.actuator_first_leg)] =
-          robot_motion_config_.disconnect_cable_up_joint_position;
+          first_leg_target_scale * robot_motion_config_.disconnect_cable_up_joint_position;
     }
     else if (disconnect_cable_step_ == DisconnectCableStep::Step4MoveSecondJoint)
     {
@@ -1217,7 +1547,7 @@ bool B29SmcAutoController::applyMotionSegment(const ros::Time& time, AutoControl
     else if (disconnect_cable_step_ == DisconnectCableStep::Step5DownFirstJoint)
     {
       motion_segment_.target_targets[jointIndex(joints.actuator_first_leg)] =
-          robot_motion_config_.disconnect_cable_down_joint_position;
+          first_leg_target_scale * robot_motion_config_.disconnect_cable_down_joint_position;
     }
     else if (disconnect_cable_step_ == DisconnectCableStep::Step6MoveSecondJoint)
     {
@@ -1270,8 +1600,16 @@ void B29SmcAutoController::stopWheels(AutoControlCommand& effective, const std::
 
 void B29SmcAutoController::seedTargetsFromLastCommand(AutoControlCommand& effective) const
 {
+  const bool cruise_soft_hold =
+      robot_context_.isTraversing() &&
+      (obstacle_crossing_stage_ == ObstacleCrossingStage::Idle ||
+       obstacle_crossing_stage_ == ObstacleCrossingStage::CompleteWaitObstacleClear);
+  if (cruise_soft_hold)
+  {
+    return;
+  }
+
   if (has_last_effective_joint_targets_ &&
-      obstacle_crossing_stage_ != ObstacleCrossingStage::Idle &&
       obstacle_crossing_stage_ != ObstacleCrossingStage::ManualIntervention)
   {
     effective.joint_targets = last_effective_joint_targets_;
@@ -1282,6 +1620,20 @@ void B29SmcAutoController::rememberTargets(const AutoControlCommand& effective)
 {
   last_effective_joint_targets_ = effective.joint_targets;
   has_last_effective_joint_targets_ = true;
+}
+
+void B29SmcAutoController::writeAutoStateCommand(const AutoControlCommand& command)
+{
+  if (!auto_state_handle_.valid())
+  {
+    return;
+  }
+  auto_state_handle_.setGravityCompensationMode(static_cast<std::uint8_t>(command.gravity_compensation_mode));
+}
+
+void B29SmcAutoController::publishPlannerControlState(const ros::Time& time)
+{
+  planner_control_state_pub_.publish(planner_session_.buildState(time));
 }
 
 void B29SmcAutoController::clearRetryForAction(CrossingAction action, CrossingSide side)
@@ -1298,11 +1650,11 @@ void B29SmcAutoController::clearRetryForAction(CrossingAction action, CrossingSi
   {
     right_disconnect_retry_count_ = 0;
   }
-  else if (action == CrossingAction::PlannerRegrip && side == CrossingSide::Left)
+  else if (action == CrossingAction::Regrip && side == CrossingSide::Left)
   {
     left_regrip_retry_count_ = 0;
   }
-  else if (action == CrossingAction::PlannerRegrip && side == CrossingSide::Right)
+  else if (action == CrossingAction::Regrip && side == CrossingSide::Right)
   {
     right_regrip_retry_count_ = 0;
   }
@@ -1314,7 +1666,8 @@ std::uint32_t B29SmcAutoController::currentRetryCount() const
       obstacle_crossing_stage_ == ObstacleCrossingStage::ManualIntervention ? failed_action_ :
       obstacle_crossing_stage_ == ObstacleCrossingStage::CloseBothGrippers ? CrossingAction::CloseBothGrippers :
       obstacle_crossing_stage_ == ObstacleCrossingStage::Disconnecting ? CrossingAction::DisconnectCable :
-      obstacle_crossing_stage_ == ObstacleCrossingStage::Regrip ? CrossingAction::PlannerRegrip :
+      obstacle_crossing_stage_ == ObstacleCrossingStage::Regrip ? CrossingAction::Regrip :
+      obstacle_crossing_stage_ == ObstacleCrossingStage::ReopenBeforeRemoteControl ? CrossingAction::Regrip :
       CrossingAction::None;
   const CrossingSide side = crossing_side_;
 
@@ -1330,11 +1683,11 @@ std::uint32_t B29SmcAutoController::currentRetryCount() const
   {
     return static_cast<std::uint32_t>(right_disconnect_retry_count_);
   }
-  if (action == CrossingAction::PlannerRegrip && side == CrossingSide::Left)
+  if (action == CrossingAction::Regrip && side == CrossingSide::Left)
   {
     return static_cast<std::uint32_t>(left_regrip_retry_count_);
   }
-  if (action == CrossingAction::PlannerRegrip && side == CrossingSide::Right)
+  if (action == CrossingAction::Regrip && side == CrossingSide::Right)
   {
     return static_cast<std::uint32_t>(right_regrip_retry_count_);
   }
@@ -1385,96 +1738,45 @@ B29SmcAutoController::CrossingSideJoints B29SmcAutoController::jointsForCrossing
   return kCrossingSideJointTable[0].joints;
 }
 
+uint8_t B29SmcAutoController::plannerCrossingSide(CrossingSide side)
+{
+  switch (side)
+  {
+    case CrossingSide::Left:
+      return PlannerControlState::CROSSING_SIDE_LEFT;
+    case CrossingSide::Right:
+      return PlannerControlState::CROSSING_SIDE_RIGHT;
+    case CrossingSide::None:
+    default:
+      return PlannerControlState::CROSSING_SIDE_NONE;
+  }
+}
+
 std::size_t B29SmcAutoController::jointIndex(JointIndex joint)
 {
   return static_cast<std::size_t>(joint);
 }
 
-bool B29SmcAutoController::validatePlannerPoint(const std::vector<double>& data, PlannerJointPoint& point,
-                                                std::string& reason) const
+PlannerSession::Positions B29SmcAutoController::currentPlannerReferencePositions() const
 {
-  if (data.size() != kPlannerPointSize)
-  {
-    reason = "data size must be exactly 4";
-    return false;
-  }
-
-  point.left_first   = data[0];
-  point.left_second  = data[1];
-  point.right_first  = data[2];
-  point.right_second = data[3];
-
-  if (!std::isfinite(point.left_first) || !std::isfinite(point.left_second) ||
-      !std::isfinite(point.right_first) || !std::isfinite(point.right_second))
-  {
-    reason = "point contains NaN or Inf";
-    return false;
-  }
-
-  if (has_last_accepted_planner_point_)
-  {
-    const bool delta_within_limit =
-        std::abs(point.left_first   - last_accepted_planner_point_.left_first)   <= planner_point_max_delta_per_cycle_ &&
-        std::abs(point.left_second  - last_accepted_planner_point_.left_second)  <= planner_point_max_delta_per_cycle_ &&
-        std::abs(point.right_first  - last_accepted_planner_point_.right_first)  <= planner_point_max_delta_per_cycle_ &&
-        std::abs(point.right_second - last_accepted_planner_point_.right_second) <= planner_point_max_delta_per_cycle_;
-    if (!delta_within_limit)
-    {
-      reason = "point delta exceeds planner_input/max_delta_per_cycle";
-      return false;
-    }
-  }
-
-  return true;
+  return PlannerSession::Positions{{
+      joint_state_handles_[jointIndex(JointIndex::LeftFirstLeg)].getPosition(),
+      joint_state_handles_[jointIndex(JointIndex::LeftSecondLeg)].getPosition(),
+      joint_state_handles_[jointIndex(JointIndex::RightFirstLeg)].getPosition(),
+      joint_state_handles_[jointIndex(JointIndex::RightSecondLeg)].getPosition(),
+  }};
 }
 
-bool B29SmcAutoController::latestPlannerPointIsFresh(const ros::Time& time, PlannerJointPoint& point)
+bool B29SmcAutoController::plannerCommandAvailable() const
 {
-  std::lock_guard<std::mutex> lock(planner_point_mutex_);
-  if (!planner_input_enabled_ || !has_latest_planner_point_)
-  {
-    return false;
-  }
-
-  if (!latest_planner_point_.stamp.isZero() && (time - latest_planner_point_.stamp).toSec() > planner_point_timeout_)
-  {
-    has_latest_planner_point_ = false;
-    has_last_accepted_planner_point_ = false;
-    latest_planner_point_ = PlannerJointPoint{};
-    last_accepted_planner_point_ = PlannerJointPoint{};
-    ROS_WARN_THROTTLE(1.0, "Cleared Planner latest point because it timed out.");
-    return false;
-  }
-
-  point = latest_planner_point_;
-  return true;
+  const PlannerControlState state = planner_session_.buildState(ros::Time{});
+  return planner_interface_mode_ == "production" && state.active && state.has_accepted_command;
 }
 
-bool B29SmcAutoController::plannerPointAvailable() const
+bool B29SmcAutoController::plannerCommandIsFreshForTrace(const ros::Time& time) const
 {
-  std::lock_guard<std::mutex> lock(planner_point_mutex_);
-  return planner_input_enabled_ && has_latest_planner_point_;
-}
-
-bool B29SmcAutoController::plannerPointIsFreshForTrace(const ros::Time& time) const
-{
-  std::lock_guard<std::mutex> lock(planner_point_mutex_);
-  if (!planner_input_enabled_ || !has_latest_planner_point_)
-  {
-    return false;
-  }
-
-  return latest_planner_point_.stamp.isZero() ||
-         (time - latest_planner_point_.stamp).toSec() <= planner_point_timeout_;
-}
-
-void B29SmcAutoController::clearPlannerPointState()
-{
-  std::lock_guard<std::mutex> lock(planner_point_mutex_);
-  latest_planner_point_ = PlannerJointPoint{};
-  last_accepted_planner_point_ = PlannerJointPoint{};
-  has_latest_planner_point_ = false;
-  has_last_accepted_planner_point_ = false;
+  PlannerSession::Positions positions;
+  return planner_interface_mode_ == "production" && planner_session_.latestCommandIsFresh(time, positions);
 }
 
 void B29SmcAutoController::getCurrentJointStateToCommand(AutoControlCommand& effective)

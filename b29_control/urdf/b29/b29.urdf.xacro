@@ -2,6 +2,7 @@
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="gp11">
 
     <xacro:arg name="use_simulation" default="true"/>
+    <xacro:arg name="anchor_side" default="left"/>  <!-- left/right/base: 固定左端/右端/base_link -->
     <xacro:include filename="$(find b29_control)/urdf/common/imu.urdf.xacro"/>
 
     <!-- ==================== base ==================== -->
@@ -48,11 +49,12 @@
         </collision>
     </link>
 
-    <joint name="left_first_leg_joint" type="continuous">
-        <origin xyz="0.30008 0.0018349 0.038" rpy="0 0 0"/>
+    <joint name="left_first_leg_joint" type="revolute">
+        <origin xyz="-0.299916107911189 -0.00183492089258142 0.0379999999994639" rpy="0 0 0"/>
         <parent link="base_link"/>
         <child link="left_first_leg"/>
         <axis xyz="0 1 0"/>
+        <limit lower="-1.1" upper="1.1" effort="60.0" velocity="4.0"/>
         <dynamics damping="1.2" friction="0.08"/>
     </joint>
 
@@ -78,7 +80,7 @@
     </link>
 
     <joint name="left_second_leg_joint" type="continuous">
-        <origin xyz="0.07 -0.01359 0.22765" rpy="0 0 0"/>
+        <origin xyz="-0.07 -0.01359 0.22765" rpy="0 0 0"/>
         <parent link="left_first_leg"/>
         <child link="left_second_leg"/>
         <axis xyz="0 0 -1"/>
@@ -219,7 +221,6 @@
         <parent link="l_gripper_right_drive"/>
         <child link="l_gripper_right_up"/>
         <axis xyz="-1 0 0"/>
-        <mimic joint="l_gripper_left_drive_joint" multiplier="1" offset="0"/>
         <limit lower="-0.015" upper="0.015" effort="50" velocity="0.2"/>
         <dynamics damping="150.0" friction="5.0"/>
     </joint>
@@ -252,11 +253,12 @@
         </collision>
     </link>
 
-    <joint name="right_first_leg_joint" type="continuous">
-        <origin xyz="-0.299916107911189 -0.00183492089258142 0.0379999999994639" rpy="0 0 0"/>
+    <joint name="right_first_leg_joint" type="revolute">
+        <origin xyz="0.30008 0.0018349 0.038" rpy="0 0 0"/>
         <parent link="base_link"/>
         <child link="right_first_leg"/>
         <axis xyz="0 1 0"/>
+        <limit lower="-1.1" upper="1.1" effort="60.0" velocity="4.0"/>
         <dynamics damping="1.2" friction="0.08"/>
     </joint>
 
@@ -282,7 +284,7 @@
     </link>
 
     <joint name="right_second_leg_joint" type="continuous">
-        <origin xyz="-0.07 -0.0018099 0.22765" rpy="0 0 0"/>
+        <origin xyz="0.07 -0.0018099 0.22765" rpy="0 0 0"/>
         <parent link="right_first_leg"/>
         <child link="right_second_leg"/>
         <axis xyz="0 0 -1"/>
@@ -424,7 +426,6 @@
         <parent link="r_gripper_right_drive"/>
         <child link="r_gripper_right_uprod"/>
         <axis xyz="-1 0 0"/>
-        <mimic joint="r_gripper_left_drive_joint" multiplier="1" offset="0"/>
         <limit lower="-0.015" upper="0.015" effort="50" velocity="0.2"/>
         <dynamics damping="150.0" friction="5.0"/>
     </joint>
@@ -451,7 +452,7 @@
     <transmission name="trans_left_second_leg_joint">
         <type>transmission_interface/SimpleTransmission</type>
         <actuator name="left_second_leg_motor">
-            <mechanicalReduction>-1</mechanicalReduction>
+            <mechanicalReduction>1</mechanicalReduction>
         </actuator>
         <joint name="left_second_leg_joint">
             <offset>0</offset>
@@ -496,7 +497,7 @@
     <transmission name="trans_right_second_leg_joint">
         <type>transmission_interface/SimpleTransmission</type>
         <actuator name="right_second_leg_motor">
-            <mechanicalReduction>-1</mechanicalReduction>
+            <mechanicalReduction>1</mechanicalReduction>
         </actuator>
         <joint name="right_second_leg_joint">
             <offset>0</offset>
@@ -527,13 +528,54 @@
     </transmission>
 
     <!-- ==================== Gazebo ==================== -->
-    <gazebo>
-        <joint name="world_fixed_joint" type="fixed">
-            <parent>world</parent>
-            <child>left_second_leg</child>
-            <pose>0 0 -0.25 0 0 0</pose>
-        </joint>
+    <!-- second_leg 关节力矩限制（continuous 无 <limit>，用 gazebo 标签补充）-->
+    <gazebo reference="left_second_leg_joint">
+        <implicitSpringDamper>true</implicitSpringDamper>
+        <limit>
+            <effort>45.0</effort>
+            <velocity>4.0</velocity>
+        </limit>
+    </gazebo>
+    <gazebo reference="right_second_leg_joint">
+        <implicitSpringDamper>true</implicitSpringDamper>
+        <limit>
+            <effort>45.0</effort>
+            <velocity>4.0</velocity>
+        </limit>
+    </gazebo>
+
+    <xacro:property name="anchor_side_val" value="$(arg anchor_side)"/>
+
+    <!-- 固定到世界坐标系：根据 anchor_side 参数选择固定点 -->
+    <xacro:if value="${anchor_side_val == 'base'}">
+        <gazebo>
+            <joint name="world_fixed_joint" type="fixed">
+                <parent>world</parent>
+                <child>base_link</child>
+                <pose>0 0 0 0 0 0</pose>
+            </joint>
         </gazebo>
+    </xacro:if>
+
+    <xacro:if value="${anchor_side_val == 'left'}">
+        <gazebo>
+            <joint name="world_fixed_joint" type="fixed">
+                <parent>world</parent>
+                <child>left_second_leg</child>
+                <pose>0 0 -0.25 0 0 0</pose>
+            </joint>
+        </gazebo>
+    </xacro:if>
+
+    <xacro:if value="${anchor_side_val == 'right'}">
+        <gazebo>
+            <joint name="world_fixed_joint" type="fixed">
+                <parent>world</parent>
+                <child>right_second_leg</child>
+                <pose>0 0 -0.25 0 0 0</pose>
+            </joint>
+        </gazebo>
+    </xacro:if>
 
     <xacro:if value="$(arg use_simulation)">
         <gazebo>

@@ -15,6 +15,7 @@ _KEY_FIELDS = (
     'obstacle_crossing_side',
     'disconnect_step',
     'planner_control_active',
+    'remote_control_active',
     'software_emergency_stop_latched',
 )
 
@@ -40,6 +41,7 @@ class TraceModel:
             obstacle_crossing_side=getattr(message, 'obstacle_crossing_side', '') or '',
             disconnect_step=getattr(message, 'disconnect_step', '') or '',
             planner_control_active=bool(getattr(message, 'planner_control_active', False)),
+            remote_control_active=bool(getattr(message, 'remote_control_active', False)),
             software_emergency_stop_latched=bool(getattr(message, 'software_emergency_stop_latched', False)),
         )
         stamp_sec = self._message_time_sec(message)

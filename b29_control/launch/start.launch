@@ -38,6 +38,8 @@
         args="b29_controller/joint_state_controller
               b29_controller/robot_state_controller
               b29_controller/imu_sensor_controller"/>
+
+  <include file="$(find b29_planner_adapter)/launch/planner_adapter.launch"/>
               
   <!-- <node name="controller_spawner"
         pkg="controller_manager"

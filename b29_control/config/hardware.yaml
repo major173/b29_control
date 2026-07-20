@@ -1,5 +1,6 @@
 steering_engine_hw:
   serial:
+    # port: "/dev/ttyACM0"
     port: "/dev/ttyUSB0"
     baudrate: 115200
   imu:
@@ -8,12 +9,12 @@ steering_engine_hw:
     linear_acceleration_covariance_diagonal: [0.01, 0.01, 0.01]
   protocol:
     id_map:
-      left_first_leg_joint: 1
-      left_second_leg_joint: 6
+      left_first_leg_joint: 2
+      left_second_leg_joint: 5
       l_gripper_left_drive_joint: 4
       left_friction_wheel_joint: 3
-      right_first_leg_joint: 2
-      right_second_leg_joint: 5
+      right_first_leg_joint: 1
+      right_second_leg_joint: 6
       r_gripper_left_drive_joint: 8
       right_friction_wheel_joint: 7
     control_map:

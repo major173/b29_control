@@ -37,7 +37,14 @@ add_message_files(
         FILES
         AutoSensorInput.msg
         AutoDebugOverride.msg
-        AutoStateTrace.msg)
+        AutoStateTrace.msg
+        PlannerControlState.msg
+        PlannerJointCommand.msg)
+
+add_service_files(
+        DIRECTORY srv
+        FILES
+        CompletePlannerControl.srv)
 
 generate_messages(
         DEPENDENCIES
@@ -69,10 +76,25 @@ add_library(${PROJECT_NAME}
         src/b29_smc_auto_controller.cpp
         src/auto_input_mux.cpp
         src/command_dispatcher.cpp
+        src/planner_session.cpp
+        src/remote_control_session.cpp
         src/robot_context.cpp
         gen/src/RobotFSM_sm.cpp)
 add_dependencies(${PROJECT_NAME} ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 target_link_libraries(${PROJECT_NAME} ${catkin_LIBRARIES})
+
+if(CATKIN_ENABLE_TESTING)
+    catkin_add_gtest(test_planner_session test/test_planner_session.cpp)
+    if(TARGET test_planner_session)
+        add_dependencies(test_planner_session ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+        target_link_libraries(test_planner_session ${PROJECT_NAME} ${catkin_LIBRARIES})
+    endif()
+    catkin_add_gtest(test_remote_control_session test/test_remote_control_session.cpp)
+    if(TARGET test_remote_control_session)
+        add_dependencies(test_remote_control_session ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+        target_link_libraries(test_remote_control_session ${PROJECT_NAME} ${catkin_LIBRARIES})
+    endif()
+endif()
 
 install(
         TARGETS ${PROJECT_NAME}
@@ -85,10 +107,6 @@ install(
         include/${PROJECT_NAME}/
         DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
         FILES_MATCHING PATTERN "*.h")
-
-install(
-        DIRECTORY config/
-        DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/config)
 
 install(
         DIRECTORY scenarios/

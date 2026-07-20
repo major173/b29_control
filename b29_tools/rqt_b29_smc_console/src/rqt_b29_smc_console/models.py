@@ -45,6 +45,7 @@ class TraceEntry:
     obstacle_crossing_side: str = ''
     disconnect_step: str = ''
     planner_control_active: bool = False
+    remote_control_active: bool = False
     software_emergency_stop_latched: bool = False
 
 

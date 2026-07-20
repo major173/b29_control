@@ -17,6 +17,7 @@ b29_controller:
     publish_rate: 50
     posture_roll_limit: 0.035
     posture_pitch_limit: 0.035
+    
     joint_names:
       left_first_leg_joint: "left_first_leg_joint"
       left_second_leg_joint: "left_second_leg_joint"
@@ -26,8 +27,10 @@ b29_controller:
       r_gripper_left_drive_joint: "r_gripper_left_drive_joint"
       left_friction_wheel_joint: "left_friction_wheel_joint"
       right_friction_wheel_joint: "right_friction_wheel_joint"
+
     imu_names: "base_imu"
     auto_state_name: "auto_state"
+    remote_control_name: "remote_control"
     use_sensor_input: false
     use_auto_state: true
     debug_validation:
@@ -35,84 +38,30 @@ b29_controller:
       simulation_only: false
     planner_control:
       manual_release_enabled: true
+
+    planner_interface:
+      mode: "debug"
+      state_topic: "planner_control_state"
+      command_topic: "planner_joint_command"
+      complete_service: "complete_planner_control"
+      max_delta_per_command: 0.10
+      command_timeout: 1.0
+      total_watchdog_timeout: 120.0
     output_mode: "normal" # "normal", "safe_hold"
-    planner_input:
-      enabled: true
-      topic: "planner_joint_point"
-      point_timeout: 1.0
-      max_delta_per_cycle: 0.10
+
     robot_motion:
-      wait_for_planner_point_control_time: 10.0
-      wait_for_grip_respond_time: 5.0
-      disconnect_cable_step_motion_duration: 3.0
-      disconnect_cable_step_interval: 0.5
-      succeed_disconnect_cable_threshold: 0.17
-      disconnect_cable_second_joint_check_delta: 0.20
+      debug_planner_control_wait_time: 10.0
+      wait_for_grip_respond_time: 10.0
+      gravity_compensation_enable_wait_time: 0.5
+      disconnect_cable_step_motion_duration: 5.0
+      disconnect_cable_step_interval: 1.0
+      succeed_disconnect_cable_threshold: 0.1
+      disconnect_cable_second_joint_check_delta: 0.12
       close_gripper_retry_limit: 2
       disconnect_cable_retry_limit: 2
-      planner_regrip_retry_limit: 2
-      disconnect_cable_up_joint_position: 0.5
-      disconnect_cable_down_joint_position: 0.5
-      disconnect_cable_move_joint_position: 0.5
-
-
-  # # Position Controllers --------------------------------------
-  # b29_joint_controller:
-  #   type: b29_controllers/B29JointController
-  #   max_odom_vel: 10.0
-  #   friction_radius: 0.0405
-  #   release_rod_pos: 0.01
-  #   move_rod_pos: 0.04
-  #   fixed_rod_pos: 0.05
-  #   fixed_check_vel: 0.3
-  #   fixed_check_period: 0.1
-
-  #   release_refer_angle: -0.23
-
-  #   clamp_try_vel_: 3.0;    # 尝试夹紧时给摩擦轮的速度 (rad/s)
-  #   clamp_stall_vel_th_: 0.3    # 认为堵转的速度阈值
-  #   clamp_stall_duration_: 0.4    # 堵转需要持续的时间（防抖）
-  #   clamp_step_size_: 0.001  # 每次推杆推进的步长（m），建议 0.5~1mm
-  #   clamp_backoff_: 0.001  # 夹紧成功后回退一点点距离，释放应力
-
-  #   joint_names:
-  #     left_first_leg_joint: "left_first_leg_joint"
-  #     left_second_leg_joint: "left_second_leg_joint"
-  #     l_gripper_left_drive_joint: "l_gripper_left_drive_joint"
-  #     right_first_leg_joint: "right_first_leg_joint"
-  #     right_second_leg_joint: "right_second_leg_joint"
-  #     r_gripper_left_drive_joint: "r_gripper_left_drive_joint"
-  #     left_friction_wheel_joint: "left_friction_wheel_joint"
-  #     right_friction_wheel_joint: "right_friction_wheel_joint"
-
-  # left_first_leg_joint_position_controller:
-  #   type: position_controllers/JointPositionController
-  #   joint: left_first_leg_joint
-
-  # left_second_leg_joint_position_controller:
-  #   type: position_controllers/JointPositionController
-  #   joint: left_second_leg_joint
-
-  # l_gripper_left_drive_joint_position_controller:
-  #   type: position_controllers/JointPositionController
-  #   joint: l_gripper_left_drive_joint
-
-  # right_first_leg_joint_position_controller:
-  #   type: position_controllers/JointPositionController
-  #   joint: right_first_leg_joint
-
-  # right_second_leg_joint_position_controller:
-  #   type: position_controllers/JointPositionController
-  #   joint: right_second_leg_joint
-
-  # r_gripper_left_drive_joint_position_controller:
-  #   type: position_controllers/JointPositionController
-  #   joint: r_gripper_left_drive_joint
-
-  # left_friction_wheel_joint_velocity_controller:
-  #   type: velocity_controllers/JointVelocityController
-  #   joint: left_friction_wheel_joint
-
-  # right_friction_wheel_joint_velocity_controller:
-  #   type: velocity_controllers/JointVelocityController
-  #   joint: right_friction_wheel_joint
+      regrip_retry_limit: 2
+      disconnect_cable_up_joint_position: -0.45
+      disconnect_cable_down_joint_position: 0.08
+      disconnect_cable_move_joint_position: -0.12
+    remote_control:
+      max_increment_per_sample: 0.10
