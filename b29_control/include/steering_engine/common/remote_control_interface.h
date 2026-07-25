@@ -15,7 +15,7 @@ struct RemoteControlData
   std_msgs::Header header;
   std::array<double, 4> joint_increments{{0.0, 0.0, 0.0, 0.0}};
   bool stage_complete{false};
-  bool valid{false};
+  bool increments_valid{false};
   std::uint64_t sample_sequence{0};
   std::uint64_t completion_rising_edge_sequence{0};
 };

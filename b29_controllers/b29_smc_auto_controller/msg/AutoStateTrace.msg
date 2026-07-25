@@ -1,45 +1,48 @@
-# 越障策略枚举：不越障、线夹、阻尼器。
+# Obstacle crossing strategy enumeration: No crossing, Line clamp, Damper
 uint8 CROSSING_NONE=0
 uint8 CROSSING_LINE_CLAMP=1
 uint8 CROSSING_DAMPER=2
 
-# 消息时间戳和 frame 信息。
+# Message timestamp and coordinate frame information
 std_msgs/Header header
 
-# RobotFSM 外层状态机状态和最近一次状态转换信息。
+# Outer RobotFSM state and information of the latest state transition
 string current_state
 string previous_state
 string last_event
 string transition_reason
 
-# 当前最终命令原因、基础命令原因和输出模式。
+# Root cause of the final effective command, root cause of base command, and output mode
 string command_reason
 string base_command_reason
 string output_mode
 
-# 最终 effective command 的安全控制标志。
+# Safety control flags for the final effective command
 bool stop_all
 bool freeze_joints
 
-# 最终 effective command 的驱动轮命令。
+# Gravity compensation mode of the issued final command: 0=Disabled, 1=Left first leg, 2=Right first leg
+uint8 gravity_compensation_mode
+
+# Drive wheel commands contained in the final effective command
 string drive_mode
 float64 left_wheel_speed
 float64 right_wheel_speed
 
-# 最终 effective command 的六个位置关节目标。
-# 顺序：left_first_leg, left_second_leg, left_gripper,
-#      right_first_leg, right_second_leg, right_gripper。
+# Six position joint targets in the final effective command
+# Order: left_first_leg, left_second_leg, left_gripper,
+#        right_first_leg, right_second_leg, right_gripper
 float64[6] joint_targets
 float64 left_gripper_target
 float64 right_gripper_target
 uint8 crossing_strategy
 
-# CommandDispatcher 是否尝试写入，以及写入句柄是否成功。
-# 该字段不代表下位机已经物理响应。
+# Flags indicating whether CommandDispatcher attempted writing and whether the write handle succeeded
+# This field does NOT indicate that the lower controller has physically responded
 bool command_dispatch_attempted
 bool command_dispatch_succeeded
 
-# 越障主 FSM 当前状态、侧别、首个越障侧和阶段计时。
+# Current state, side, initial crossing side and stage timing of the main obstacle-crossing FSM
 bool obstacle_crossing_active
 string obstacle_crossing_stage
 string obstacle_crossing_side
@@ -48,43 +51,41 @@ time obstacle_crossing_stage_enter_time
 float64 obstacle_crossing_stage_elapsed_sec
 string obstacle_crossing_transition_reason
 
-# 脱缆子流程当前步骤、步骤计时和转移说明。
+# Current step, step timing and transition description of the cable-disconnect sub-flow
 string disconnect_step
 time disconnect_step_enter_time
 float64 disconnect_step_elapsed_sec
 string disconnect_step_transition_reason
 string disconnect_step_expected_condition
 
-# Step7 脱缆判定相关数据。
+# Data related to cable disconnection judgment in Step7
 float64 disconnect_check_displacement
 float64 to_check_joint_pos
-float64 succeed_disconnect_cable_threshold
+float64 disconnect_cable_second_joint_success_threshold
 string current_side_gripper
 float64 current_side_gripper_target
 
-# 人工干预状态和导致人工干预的失败动作。
+# Manual intervention active flag and the failed action that triggered manual intervention
 bool manual_intervention_active
 string manual_intervention_reason
 string failed_action
 
-# 当前失败动作的 retry 计数，以及各动作 retry 计数和上限。
+# Retry counter for the current failed action, individual retry counters for each action, and unified retry upper limit
 uint32 retry_count
 uint32 close_grippers_retry_count
 uint32 left_disconnect_retry_count
 uint32 right_disconnect_retry_count
 uint32 left_regrip_retry_count
 uint32 right_regrip_retry_count
-uint32 close_gripper_retry_limit
-uint32 disconnect_cable_retry_limit
-uint32 regrip_retry_limit
+uint32 retry_limit
 
-# 等待 grip_confirmed 的状态、耗时和超时标志。
+# State, elapsed time and timeout flag while waiting for grip confirmation signal
 bool waiting_for_grip_confirmed
 float64 grip_wait_elapsed_sec
 bool grip_wait_timed_out
 string last_failure_reason
 
-# PlannerControl 阶段状态、手动放行和 planner 点是否可用。
+# PlannerControl stage state, manual release switch, and flag indicating whether planner target point is available
 bool planner_control_active
 bool planner_manual_release_enabled
 bool planner_release_received
@@ -93,28 +94,29 @@ bool planner_point_available
 bool planner_point_fresh
 bool planner_override_applied
 
-# PlannerControl 之后的人工遥控阶段输入、实际应用增量和累计目标。
+# Manual remote control stage input after PlannerControl, actually applied increments and accumulated joint targets
 bool remote_control_active
 float64[4] remote_control_raw_increments
 float64[4] remote_control_applied_increments
 float64[4] remote_control_joint_targets
-bool remote_control_input_valid
+# Flag indicating whether the current four-joint increment sample from remote control can be applied
+bool remote_control_increments_valid
 uint64 remote_control_sample_sequence
 bool remote_control_complete
 bool remote_control_completion_rising_edge
 
-# 调试验证模式和 debug override 当前输入。
+# Debug validation mode switch and current input of debug override function
 bool debug_validation_enabled
 bool simulation_only
 bool debug_override_active
 bool debug_obstacle_detected
 float64 debug_obstacle_distance
 
-# 软件急停锁存和 manual reset 请求状态。
+# Software emergency stop latch status and manual reset request flag
 bool software_emergency_stop_latched
 bool manual_reset_requested
 
-# RobotContext 最终使用的输入快照。
+# Snapshot of raw sensor & controller inputs finally consumed by RobotContext
 bool lower_alive
 bool imu_ready
 bool posture_ready

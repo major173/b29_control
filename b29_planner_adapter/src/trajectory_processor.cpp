@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
-#include <set>
 #include <utility>
 
 namespace b29_planner_adapter
@@ -36,10 +35,19 @@ bool TrajectoryProcessor::normalize(const trajectory_msgs::JointTrajectory& inpu
     return false;
   }
 
-  std::array<std::size_t, kPlannerJointCount> input_indices{};
-  if (!inputIndexMap(input.joint_names, input_indices, error))
+  if (input.joint_names.size() != kPlannerJointCount)
   {
+    error = "trajectory must contain exactly four joints in the fixed PlannerJointCommand order";
     return false;
+  }
+  for (std::size_t index = 0; index < kPlannerJointCount; ++index)
+  {
+    if (input.joint_names[index] != joint_specs_[index].output_name)
+    {
+      error = "trajectory joint order must be [left_first_leg_joint, left_second_leg_joint, "
+              "right_first_leg_joint, right_second_leg_joint]";
+      return false;
+    }
   }
 
   const bool has_velocities = !input.points.front().velocities.empty();
@@ -92,8 +100,7 @@ bool TrajectoryProcessor::normalize(const trajectory_msgs::JointTrajectory& inpu
     point.time_from_start = point_time;
     for (std::size_t output_index = 0; output_index < kPlannerJointCount; ++output_index)
     {
-      const std::size_t input_index = input_indices[output_index];
-      double position = input_point.positions[input_index];
+      double position = input_point.positions[output_index];
       const JointSpec& spec = joint_specs_[output_index];
       if (spec.continuous && !output.points.empty())
       {
@@ -108,11 +115,11 @@ bool TrajectoryProcessor::normalize(const trajectory_msgs::JointTrajectory& inpu
       point.positions[output_index] = position;
       if (has_velocities)
       {
-        point.velocities[output_index] = input_point.velocities[input_index];
+        point.velocities[output_index] = input_point.velocities[output_index];
       }
       if (has_accelerations)
       {
-        point.accelerations[output_index] = input_point.accelerations[input_index];
+        point.accelerations[output_index] = input_point.accelerations[output_index];
       }
     }
     output.points.push_back(point);
@@ -321,47 +328,6 @@ double TrajectoryProcessor::jointError(std::size_t joint_index, double desired, 
 const std::array<JointSpec, kPlannerJointCount>& TrajectoryProcessor::jointSpecs() const
 {
   return joint_specs_;
-}
-
-bool TrajectoryProcessor::inputIndexMap(const std::vector<std::string>& input_names,
-                                        std::array<std::size_t, kPlannerJointCount>& input_indices,
-                                        std::string& error) const
-{
-  if (input_names.size() != kPlannerJointCount ||
-      std::set<std::string>(input_names.begin(), input_names.end()).size() != kPlannerJointCount)
-  {
-    error = "trajectory must contain exactly four unique joint names";
-    return false;
-  }
-
-  std::set<std::size_t> matched_inputs;
-  for (std::size_t output_index = 0; output_index < kPlannerJointCount; ++output_index)
-  {
-    const JointSpec& spec = joint_specs_[output_index];
-    bool found = false;
-    for (std::size_t input_index = 0; input_index < input_names.size(); ++input_index)
-    {
-      if (std::find(spec.accepted_input_names.begin(), spec.accepted_input_names.end(), input_names[input_index]) ==
-          spec.accepted_input_names.end())
-      {
-        continue;
-      }
-      if (found || matched_inputs.count(input_index) != 0)
-      {
-        error = "joint aliases are ambiguous";
-        return false;
-      }
-      input_indices[output_index] = input_index;
-      matched_inputs.insert(input_index);
-      found = true;
-    }
-    if (!found)
-    {
-      error = "trajectory is missing required joint " + spec.output_name;
-      return false;
-    }
-  }
-  return true;
 }
 
 JointVector TrajectoryProcessor::sampleSegment(const NormalizedPoint& start, const NormalizedPoint& end,

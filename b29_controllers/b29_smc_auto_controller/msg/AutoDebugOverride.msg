@@ -21,8 +21,6 @@ uint32 FIELD_CROSSING_COMPLETE=32768
 uint32 FIELD_POST_CHECK_PASSED=65536
 uint32 FIELD_POST_CHECK_FAILED=131072
 uint32 FIELD_AUTO_RUN_PAUSE=262144
-uint32 FIELD_REMOTE_CONTROL_INCREMENTS=524288
-uint32 FIELD_REMOTE_CONTROL_COMPLETE=1048576
 
 std_msgs/Header header
 bool enabled
@@ -46,5 +44,3 @@ bool crossing_complete
 bool post_check_passed
 bool post_check_failed
 bool auto_run_pause
-float64[4] remote_control_joint_increments
-bool remote_control_complete

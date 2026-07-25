@@ -51,9 +51,11 @@ public:
   CompletionResult requestCompletion(uint32_t session_id, uint32_t final_sequence);
   bool consumeCompletionRequest(uint32_t& session_id, uint32_t& final_sequence);
 
-  bool latestCommandIsFresh(const ros::Time& time, Positions& positions) const;
-  // True only after this session has accepted a command and its command stream
-  // has then been absent longer than command_timeout.
+  bool latestCommandIsFresh(const ros::Time& time, Positions& positions,
+                            uint32_t* sequence = nullptr, bool* pending = nullptr) const;
+  bool markCommandDispatched(uint32_t sequence, const Positions& positions);
+  // True after a queued or dispatched command stream has been absent longer
+  // than command_timeout.
   bool acceptedCommandTimedOut(const ros::Time& time) const;
   bool totalWatchdogExpired(const ros::Time& time) const;
   bool active() const;
@@ -75,6 +77,10 @@ private:
   Positions last_positions_{};
   bool has_accepted_command_{false};
   uint32_t last_accepted_sequence_{0};
+  Positions pending_positions_{};
+  bool has_pending_command_{false};
+  uint32_t pending_sequence_{0};
+  ros::Time pending_receive_time_{};
   uint32_t last_rejected_sequence_{0};
   uint8_t reject_reason_{PlannerControlState::REJECT_NONE};
   uint32_t rejection_count_{0};

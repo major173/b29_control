@@ -112,7 +112,7 @@ AutoInputSnapshot AutoInputMux::buildSnapshot() const
   {
     snapshot.remote_control_joint_increments = remote_control_.joint_increments;
     snapshot.remote_control_complete = remote_control_.stage_complete;
-    snapshot.remote_control_input_valid = remote_control_.valid;
+    snapshot.remote_control_increments_valid = remote_control_.increments_valid;
     snapshot.remote_control_sample_sequence = remote_control_.sample_sequence;
     snapshot.remote_control_completion_rising_edge_sequence =
         remote_control_.completion_rising_edge_sequence;
@@ -194,7 +194,11 @@ ros::Time AutoInputMux::latestStamp(const ros::Time& lhs, const ros::Time& rhs)
   {
     return lhs;
   }
-  return lhs < rhs ? rhs : lhs;
+  if (lhs < rhs)
+  {
+    return rhs;
+  }
+  return lhs;
 }
 
 void AutoInputMux::applyDebugOverride(AutoInputSnapshot& snapshot) const

@@ -741,13 +741,27 @@ void StRobotHW::unpack(std::vector<uint8_t> rx_buffer,const ros::Time &time) {
   }
 
   std::array<double, kRemoteControlJointCount> remote_increments{};
-  bool remote_control_valid = true;
+  bool remote_control_increments_valid = true;
   for (double& increment : remote_increments) {
     increment = static_cast<double>(unpackFloat(index));
-    remote_control_valid = remote_control_valid && std::isfinite(increment);
+    remote_control_increments_valid = remote_control_increments_valid && std::isfinite(increment);
   }
   const uint8_t remote_control_complete_raw = rx_buffer[index++];
   const bool remote_control_complete = remote_control_complete_raw == 1;
+
+  remote_control_data_.header.stamp = time;
+  remote_control_data_.joint_increments =
+      remote_control_increments_valid ? remote_increments : std::array<double, kRemoteControlJointCount>{};
+  remote_control_data_.stage_complete = remote_control_complete;
+  remote_control_data_.increments_valid = remote_control_increments_valid;
+  ++remote_control_data_.sample_sequence;
+  if (!previous_remote_control_complete_ && remote_control_complete) {
+    ++remote_control_data_.completion_rising_edge_sequence;
+  }
+  previous_remote_control_complete_ = remote_control_complete;
+  if (!remote_control_increments_valid) {
+    ROS_WARN_THROTTLE(1.0, "Ignoring non-finite remote control joint increment");
+  }
 
   if(index + kStatusPayloadSize > payload_start + static_cast<size_t>(length)) {
     ROS_WARN_THROTTLE(10, "Received status payload is incomplete");
@@ -760,20 +774,6 @@ void StRobotHW::unpack(std::vector<uint8_t> rx_buffer,const ros::Time &time) {
   if (index != payload_start + static_cast<size_t>(length)) {
     ROS_WARN_THROTTLE(10, "Received message contains unexpected trailing payload data");
     return;
-  }
-
-  remote_control_data_.header.stamp = time;
-  remote_control_data_.joint_increments =
-      remote_control_valid ? remote_increments : std::array<double, kRemoteControlJointCount>{};
-  remote_control_data_.stage_complete = remote_control_complete;
-  remote_control_data_.valid = remote_control_valid;
-  ++remote_control_data_.sample_sequence;
-  if (!previous_remote_control_complete_ && remote_control_complete) {
-    ++remote_control_data_.completion_rising_edge_sequence;
-  }
-  previous_remote_control_complete_ = remote_control_complete;
-  if (!remote_control_valid) {
-    ROS_WARN_THROTTLE(1.0, "Ignoring non-finite remote control joint increment");
   }
 
   constexpr size_t joint_motor_fault_bit = 4;

@@ -16,7 +16,6 @@ using JointVector = std::array<double, kPlannerJointCount>;
 struct JointSpec
 {
   std::string output_name;
-  std::vector<std::string> accepted_input_names;
   bool continuous{false};
   double min_position{0.0};
   double max_position{0.0};
@@ -69,9 +68,6 @@ public:
   const std::array<JointSpec, kPlannerJointCount>& jointSpecs() const;
 
 private:
-  bool inputIndexMap(const std::vector<std::string>& input_names,
-                     std::array<std::size_t, kPlannerJointCount>& input_indices,
-                     std::string& error) const;
   JointVector sampleSegment(const NormalizedPoint& start, const NormalizedPoint& end,
                             InterpolationMode mode, double trajectory_time) const;
   static double shortestAngularDistance(double source, double target);

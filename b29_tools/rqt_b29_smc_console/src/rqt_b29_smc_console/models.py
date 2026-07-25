@@ -41,6 +41,7 @@ class TraceEntry:
     transition_reason: str = ''
     command_reason: str = ''
     output_mode: str = ''
+    gravity_compensation_mode: int = 0
     obstacle_crossing_stage: str = ''
     obstacle_crossing_side: str = ''
     disconnect_step: str = ''

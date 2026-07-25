@@ -3,9 +3,9 @@
 #include <b29_planner_adapter/planner_adapter.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <limits>
-#include <set>
 #include <sstream>
 #include <utility>
 
@@ -24,6 +24,28 @@ const std::array<std::string, kPlannerJointCount> kFixedOutputOrder{{
 bool finitePositive(double value)
 {
   return std::isfinite(value) && value > 0.0;
+}
+
+bool normalizeNamespace(std::string& value)
+{
+  if (value.empty())
+  {
+    return false;
+  }
+  if (value.front() != '/')
+  {
+    value.insert(value.begin(), '/');
+  }
+  while (value.size() > 1 && value.back() == '/')
+  {
+    value.pop_back();
+  }
+  return value != "/";
+}
+
+std::string endpoint(const std::string& controller_namespace, const char* relative_name)
+{
+  return controller_namespace + "/" + relative_name;
 }
 }  // namespace
 
@@ -64,21 +86,22 @@ bool PlannerAdapter::loadParameters()
 {
   private_node_handle_.param<std::string>("interface_mode", config_.interface_mode, config_.interface_mode);
   private_node_handle_.param<std::string>("action_name", config_.action_name, config_.action_name);
-  private_node_handle_.param<std::string>("planner_control_state_topic", config_.planner_state_topic,
-                                         config_.planner_state_topic);
-  private_node_handle_.param<std::string>("planner_joint_command_topic", config_.planner_command_topic,
-                                         config_.planner_command_topic);
-  private_node_handle_.param<std::string>("complete_planner_control_service", config_.completion_service,
-                                         config_.completion_service);
-  private_node_handle_.param<std::string>("software_emergency_stop_service", config_.emergency_stop_service,
-                                         config_.emergency_stop_service);
+  private_node_handle_.param<std::string>("smc_controller_namespace", config_.smc_controller_namespace,
+                                         config_.smc_controller_namespace);
+  if (!normalizeNamespace(config_.smc_controller_namespace))
+  {
+    ROS_ERROR("smc_controller_namespace must name a non-root ROS namespace.");
+    return false;
+  }
+  config_.planner_state_topic = endpoint(config_.smc_controller_namespace, "planner_control_state");
+  config_.planner_command_topic = endpoint(config_.smc_controller_namespace, "planner_joint_command");
+  config_.completion_service = endpoint(config_.smc_controller_namespace, "complete_planner_control");
+  config_.emergency_stop_service = endpoint(config_.smc_controller_namespace, "software_emergency_stop");
   private_node_handle_.param<std::string>("joint_states_topic", config_.joint_states_topic,
                                          config_.joint_states_topic);
   private_node_handle_.param<double>("publish_rate", config_.publish_rate, config_.publish_rate);
   private_node_handle_.param<double>("time_scale", config_.time_scale, config_.time_scale);
   private_node_handle_.param<double>("max_output_delta", config_.max_output_delta, config_.max_output_delta);
-  private_node_handle_.param<double>("expected_smc_max_delta_per_command", config_.expected_smc_max_delta,
-                                    config_.expected_smc_max_delta);
   private_node_handle_.param<bool>("require_goal_velocity", config_.require_goal_velocity,
                                   config_.require_goal_velocity);
   private_node_handle_.param<double>("settle_time", config_.settle_time, config_.settle_time);
@@ -103,9 +126,9 @@ bool PlannerAdapter::loadParameters()
                                     config_.emergency_stop_service_timeout,
                                     config_.emergency_stop_service_timeout);
 
-  if (config_.interface_mode != "production" && config_.interface_mode != "debug")
+  if (config_.interface_mode != "normal" && config_.interface_mode != "debug")
   {
-    ROS_ERROR("interface_mode must be either 'production' or 'debug'.");
+    ROS_ERROR("interface_mode must be either 'normal' or 'debug'.");
     return false;
   }
   if (config_.action_name.empty() || config_.planner_state_topic.empty() ||
@@ -116,7 +139,7 @@ bool PlannerAdapter::loadParameters()
     return false;
   }
   if (!finitePositive(config_.publish_rate) || !finitePositive(config_.time_scale) ||
-      !finitePositive(config_.max_output_delta) || !finitePositive(config_.expected_smc_max_delta) ||
+      !finitePositive(config_.max_output_delta) ||
       !finitePositive(config_.settle_time) || !finitePositive(config_.joint_state_timeout) ||
       !finitePositive(config_.planner_state_timeout) || !finitePositive(config_.command_ack_timeout) ||
       !finitePositive(config_.action_timeout) || !finitePositive(config_.completion_service_timeout) ||
@@ -124,11 +147,6 @@ bool PlannerAdapter::loadParameters()
       !finitePositive(config_.completion_transition_timeout) || config_.completion_retry_count < 1)
   {
     ROS_ERROR("Planner adapter timing, rate, delta and retry parameters must be finite and positive.");
-    return false;
-  }
-  if (config_.max_output_delta > config_.expected_smc_max_delta + kTimeEpsilon)
-  {
-    ROS_ERROR("max_output_delta must not exceed expected_smc_max_delta_per_command.");
     return false;
   }
   if (!finitePositive(config_.emergency_stop_service_timeout) ||
@@ -152,47 +170,24 @@ bool PlannerAdapter::loadParameters()
 
 bool PlannerAdapter::loadJointSpecs(std::array<JointSpec, kPlannerJointCount>& specs)
 {
-  std::vector<std::string> output_order;
-  if (!private_node_handle_.getParam("joint_mapping/output_order", output_order) ||
-      output_order.size() != kPlannerJointCount ||
-      !std::equal(output_order.begin(), output_order.end(), kFixedOutputOrder.begin()))
-  {
-    ROS_ERROR("joint_mapping/output_order must match the fixed PlannerJointCommand order.");
-    return false;
-  }
-
-  std::set<std::string> all_aliases;
   for (std::size_t index = 0; index < kPlannerJointCount; ++index)
   {
     JointSpec spec;
     const std::string prefix = "joint_mapping/" + kJointKeys[index];
-    private_node_handle_.param<std::string>(prefix + "/output_name", spec.output_name,
-                                           kFixedOutputOrder[index]);
-    if (spec.output_name != kFixedOutputOrder[index])
+    spec.output_name = kFixedOutputOrder[index];
+    if (!private_node_handle_.getParam(prefix + "/continuous", spec.continuous))
     {
-      ROS_ERROR_STREAM(prefix << "/output_name must be " << kFixedOutputOrder[index]);
+      ROS_ERROR_STREAM(prefix << "/continuous must be configured explicitly");
       return false;
     }
-    if (!private_node_handle_.getParam(prefix + "/accepted_input_names", spec.accepted_input_names) ||
-        spec.accepted_input_names.empty())
+    if (!spec.continuous)
     {
-      ROS_ERROR_STREAM(prefix << "/accepted_input_names must contain at least one name");
-      return false;
-    }
-    private_node_handle_.param<bool>(prefix + "/continuous", spec.continuous, false);
-    private_node_handle_.param<double>(prefix + "/min_position", spec.min_position, -12.566370614359172);
-    private_node_handle_.param<double>(prefix + "/max_position", spec.max_position, 12.566370614359172);
-    if (!spec.continuous && (!std::isfinite(spec.min_position) || !std::isfinite(spec.max_position) ||
-                             spec.min_position >= spec.max_position))
-    {
-      ROS_ERROR_STREAM(prefix << " position range is invalid");
-      return false;
-    }
-    for (const std::string& alias : spec.accepted_input_names)
-    {
-      if (alias.empty() || !all_aliases.insert(alias).second)
+      if (!private_node_handle_.getParam(prefix + "/min_position", spec.min_position) ||
+          !private_node_handle_.getParam(prefix + "/max_position", spec.max_position) ||
+          !std::isfinite(spec.min_position) || !std::isfinite(spec.max_position) ||
+          spec.min_position >= spec.max_position)
       {
-        ROS_ERROR_STREAM("Joint aliases must be non-empty and unique: " << alias);
+        ROS_ERROR_STREAM(prefix << " finite min_position/max_position must be configured for a bounded joint");
         return false;
       }
     }
@@ -231,10 +226,14 @@ void PlannerAdapter::plannerStateCallback(
   {
     return;
   }
-  std::lock_guard<std::mutex> lock(planner_state_mutex_);
-  planner_state_snapshot_.state = *msg;
-  planner_state_snapshot_.received_time = ros::WallTime::now();
-  planner_state_snapshot_.available = true;
+  {
+    std::lock_guard<std::mutex> lock(planner_state_mutex_);
+    planner_state_snapshot_.state = *msg;
+    planner_state_snapshot_.received_time = ros::WallTime::now();
+    planner_state_snapshot_.available = true;
+    ++planner_state_generation_;
+  }
+  planner_state_condition_.notify_all();
 }
 
 void PlannerAdapter::jointStateCallback(const sensor_msgs::JointState::ConstPtr& msg)
@@ -282,6 +281,12 @@ void PlannerAdapter::executeTrajectory(const control_msgs::FollowJointTrajectory
     abortAction(control_msgs::FollowJointTrajectoryResult::INVALID_GOAL, "received a null trajectory goal");
     return;
   }
+  if (config_.interface_mode == "debug")
+  {
+    abortAction(control_msgs::FollowJointTrajectoryResult::INVALID_GOAL,
+                "Planner adapter does not execute trajectories in debug mode; use planner_release instead");
+    return;
+  }
 
   b29_smc_auto_controller::PlannerControlState planner_state;
   std::string error;
@@ -315,13 +320,6 @@ void PlannerAdapter::executeTrajectory(const control_msgs::FollowJointTrajectory
   if (!waitForFirstCommandReference(session_id, initial_joint_state, planner_state, error))
   {
     abortAction(control_msgs::FollowJointTrajectoryResult::INVALID_GOAL, error);
-    return;
-  }
-
-  std::array<std::size_t, kPlannerJointCount> goal_index_for_output{};
-  if (!buildGoalIndexMap(goal->trajectory.joint_names, goal_index_for_output, error))
-  {
-    abortAction(control_msgs::FollowJointTrajectoryResult::INVALID_JOINTS, error);
     return;
   }
 
@@ -433,12 +431,12 @@ void PlannerAdapter::executeTrajectory(const control_msgs::FollowJointTrajectory
       emergencyAbort(control_msgs::FollowJointTrajectoryResult::PATH_TOLERANCE_VIOLATED, error);
       return;
     }
-    publishFeedback(goal->trajectory.joint_names, goal_index_for_output, positions, actual);
+    publishFeedback(positions, actual);
   }
 
   const JointVector& final_positions = samples.back();
-  if (!waitForFinalSettle(session_id, sequence, final_positions, goal->trajectory.joint_names,
-                          goal_index_for_output, action_deadline, direction_state, error))
+  if (!waitForFinalSettle(session_id, sequence, final_positions,
+                          action_deadline, direction_state, error))
   {
     if (action_server_->isActive())
     {
@@ -563,51 +561,17 @@ bool PlannerAdapter::firstCommandWasExplicitlyRejected(uint32_t session_id,
          state.reject_reason != b29_smc_auto_controller::PlannerControlState::REJECT_NONE;
 }
 
-bool PlannerAdapter::buildGoalIndexMap(
-    const std::vector<std::string>& goal_names,
-    std::array<std::size_t, kPlannerJointCount>& goal_index_for_output, std::string& error) const
-{
-  if (goal_names.size() != kPlannerJointCount ||
-      std::set<std::string>(goal_names.begin(), goal_names.end()).size() != kPlannerJointCount)
-  {
-    error = "trajectory must contain exactly four unique joint names";
-    return false;
-  }
-  std::set<std::size_t> matched_indices;
-  for (std::size_t output_index = 0; output_index < kPlannerJointCount; ++output_index)
-  {
-    bool found = false;
-    for (std::size_t goal_index = 0; goal_index < goal_names.size(); ++goal_index)
-    {
-      const std::vector<std::string>& aliases = joint_specs_[output_index].accepted_input_names;
-      if (std::find(aliases.begin(), aliases.end(), goal_names[goal_index]) == aliases.end())
-      {
-        continue;
-      }
-      if (found || !matched_indices.insert(goal_index).second)
-      {
-        error = "trajectory joint names are ambiguous";
-        return false;
-      }
-      goal_index_for_output[output_index] = goal_index;
-      found = true;
-    }
-    if (!found)
-    {
-      error = "trajectory is missing required joint " + joint_specs_[output_index].output_name;
-      return false;
-    }
-  }
-  return true;
-}
-
 bool PlannerAdapter::sendCommandAndAwait(uint32_t session_id, uint32_t sequence,
                                          const JointVector& positions,
                                          uint32_t& rejection_count,
                                          const ros::WallTime& action_deadline, std::string& error)
 {
   const ros::WallTime ack_deadline = ros::WallTime::now() + ros::WallDuration(config_.command_ack_timeout);
-  ros::WallRate rate(config_.publish_rate);
+  std::uint64_t observed_state_generation = 0;
+  {
+    std::lock_guard<std::mutex> lock(planner_state_mutex_);
+    observed_state_generation = planner_state_generation_;
+  }
   while (ros::ok())
   {
     if (preemptRequested(error))
@@ -655,7 +619,22 @@ bool PlannerAdapter::sendCommandAndAwait(uint32_t session_id, uint32_t sequence,
     command.sequence = sequence;
     std::copy(positions.begin(), positions.end(), command.positions.begin());
     planner_command_publisher_.publish(command);
-    rate.sleep();
+
+    const ros::WallTime now = ros::WallTime::now();
+    const double remaining_seconds = std::min(
+        (ack_deadline - now).toSec(), (action_deadline - now).toSec());
+    if (remaining_seconds <= 0.0)
+    {
+      continue;
+    }
+    const double fallback_poll_seconds = 1.0 / config_.publish_rate;
+    std::unique_lock<std::mutex> lock(planner_state_mutex_);
+    planner_state_condition_.wait_for(
+        lock, std::chrono::duration<double>(std::min(remaining_seconds, fallback_poll_seconds)),
+        [this, &observed_state_generation]() {
+          return planner_state_generation_ != observed_state_generation;
+        });
+    observed_state_generation = planner_state_generation_;
   }
   error = "ROS shutdown while waiting for command acknowledgement";
   return false;
@@ -773,23 +752,20 @@ bool PlannerAdapter::goalWithinTolerance(const JointVector& desired,
   return true;
 }
 
-void PlannerAdapter::publishFeedback(
-    const std::vector<std::string>& goal_joint_names,
-    const std::array<std::size_t, kPlannerJointCount>& goal_index_for_output,
-    const JointVector& desired, const JointStateSnapshot& actual)
+void PlannerAdapter::publishFeedback(const JointVector& desired,
+                                     const JointStateSnapshot& actual)
 {
   control_msgs::FollowJointTrajectoryFeedback feedback;
   feedback.header.stamp = ros::Time::now();
-  feedback.joint_names = goal_joint_names;
+  feedback.joint_names.assign(kFixedOutputOrder.begin(), kFixedOutputOrder.end());
   feedback.desired.positions.resize(kPlannerJointCount);
   feedback.actual.positions.resize(kPlannerJointCount);
   feedback.error.positions.resize(kPlannerJointCount);
   for (std::size_t output_index = 0; output_index < kPlannerJointCount; ++output_index)
   {
-    const std::size_t goal_index = goal_index_for_output[output_index];
-    feedback.desired.positions[goal_index] = desired[output_index];
-    feedback.actual.positions[goal_index] = actual.positions[output_index];
-    feedback.error.positions[goal_index] = trajectory_processor_->jointError(
+    feedback.desired.positions[output_index] = desired[output_index];
+    feedback.actual.positions[output_index] = actual.positions[output_index];
+    feedback.error.positions[output_index] = trajectory_processor_->jointError(
         output_index, desired[output_index], actual.positions[output_index]);
   }
   action_server_->publishFeedback(feedback);
@@ -797,8 +773,6 @@ void PlannerAdapter::publishFeedback(
 
 bool PlannerAdapter::waitForFinalSettle(
     uint32_t session_id, uint32_t final_sequence, const JointVector& final_positions,
-    const std::vector<std::string>& goal_joint_names,
-    const std::array<std::size_t, kPlannerJointCount>& goal_index_for_output,
     const ros::WallTime& action_deadline, DirectionSafetyState& direction_state,
     std::string& error)
 {
@@ -845,7 +819,7 @@ bool PlannerAdapter::waitForFinalSettle(
       recoverableAbort(control_msgs::FollowJointTrajectoryResult::GOAL_TOLERANCE_VIOLATED, error);
       return false;
     }
-    publishFeedback(goal_joint_names, goal_index_for_output, final_positions, actual);
+    publishFeedback(final_positions, actual);
     if (goalWithinTolerance(final_positions, actual))
     {
       if (settle_start.isZero())
@@ -989,6 +963,11 @@ bool PlannerAdapter::publishCurrentPositionHold(std::string& detail)
     detail = "PlannerControl cannot accept a current-position hold";
     return false;
   }
+  if (!finitePositive(state.max_delta_per_command))
+  {
+    detail = "PlannerControl published an invalid command delta limit";
+    return false;
+  }
 
   if (!last_accepted_positions_available_ ||
       last_accepted_session_id_ != state.session_id ||
@@ -1001,6 +980,7 @@ bool PlannerAdapter::publishCurrentPositionHold(std::string& detail)
   const ros::WallTime deadline =
       ros::WallTime::now() + ros::WallDuration(config_.command_ack_timeout);
   JointVector bounded = last_accepted_positions_;
+  const double effective_max_delta = std::min(config_.max_output_delta, state.max_delta_per_command);
   uint32_t hold_sequence = state.last_accepted_sequence;
   std::size_t step_count = 0;
   while (ros::ok())
@@ -1011,9 +991,9 @@ bool PlannerAdapter::publishCurrentPositionHold(std::string& detail)
     {
       const double error = trajectory_processor_->jointError(
           joint_index, actual.positions[joint_index], bounded[joint_index]);
-      if (std::abs(error) > config_.max_output_delta)
+      if (std::abs(error) > effective_max_delta)
       {
-        next[joint_index] += std::copysign(config_.max_output_delta, error);
+        next[joint_index] += std::copysign(effective_max_delta, error);
         reached = false;
       }
       else
@@ -1053,7 +1033,11 @@ bool PlannerAdapter::publishHoldStepAndAwait(uint32_t session_id, uint32_t seque
                                              const ros::WallTime& deadline,
                                              std::string& detail)
 {
-  ros::WallRate rate(config_.publish_rate);
+  std::uint64_t observed_state_generation = 0;
+  {
+    std::lock_guard<std::mutex> lock(planner_state_mutex_);
+    observed_state_generation = planner_state_generation_;
+  }
   while (ros::ok() && ros::WallTime::now() < deadline)
   {
     b29_smc_auto_controller::PlannerJointCommand command;
@@ -1062,7 +1046,19 @@ bool PlannerAdapter::publishHoldStepAndAwait(uint32_t session_id, uint32_t seque
     command.sequence = sequence;
     std::copy(positions.begin(), positions.end(), command.positions.begin());
     planner_command_publisher_.publish(command);
-    rate.sleep();
+
+    const double remaining_seconds = (deadline - ros::WallTime::now()).toSec();
+    if (remaining_seconds > 0.0)
+    {
+      std::unique_lock<std::mutex> lock(planner_state_mutex_);
+      planner_state_condition_.wait_for(
+          lock,
+          std::chrono::duration<double>(std::min(remaining_seconds, 1.0 / config_.publish_rate)),
+          [this, &observed_state_generation]() {
+            return planner_state_generation_ != observed_state_generation;
+          });
+      observed_state_generation = planner_state_generation_;
+    }
 
     b29_smc_auto_controller::PlannerControlState latest;
     if (!getFreshPlannerState(latest, detail))

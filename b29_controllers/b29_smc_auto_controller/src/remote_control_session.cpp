@@ -5,9 +5,9 @@
 
 namespace b29_smc_auto_controller
 {
-void RemoteControlSession::configure(double max_increment_per_sample)
+void RemoteControlSession::configure(const Config& config)
 {
-  max_increment_per_sample_ = max_increment_per_sample;
+  config_ = config;
 }
 
 void RemoteControlSession::start(const Positions& reference_positions, const Input& input)
@@ -51,7 +51,7 @@ RemoteControlSession::UpdateResult RemoteControlSession::update(const Input& inp
   raw_increments_ = input.increments;
   applied_increments_.fill(0.0);
   result.sample_consumed = true;
-  if (!input.valid)
+  if (!input.increments_valid)
   {
     return result;
   }
@@ -64,9 +64,15 @@ RemoteControlSession::UpdateResult RemoteControlSession::update(const Input& inp
   }
   for (std::size_t index = 0; index < raw_increments_.size(); ++index)
   {
+    if (std::abs(raw_increments_[index]) <= config_.increment_deadband)
+    {
+      continue;
+    }
+    const double scaled_increment =
+        raw_increments_[index] * config_.increment_scale * config_.joint_direction_signs[index];
     applied_increments_[index] =
-        std::max(-max_increment_per_sample_,
-                 std::min(max_increment_per_sample_, raw_increments_[index]));
+        std::max(-config_.max_increment_per_sample,
+                 std::min(config_.max_increment_per_sample, scaled_increment));
     targets_[index] += applied_increments_[index];
   }
   result.increments_applied = true;

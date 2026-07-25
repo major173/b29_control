@@ -76,6 +76,10 @@ add_library(${PROJECT_NAME}
         src/b29_smc_auto_controller.cpp
         src/auto_input_mux.cpp
         src/command_dispatcher.cpp
+        src/controller_trace_builder.cpp
+        src/disconnect_cable_process.cpp
+        src/obstacle_crossing_runtime.cpp
+        src/planner_control_coordinator.cpp
         src/planner_session.cpp
         src/remote_control_session.cpp
         src/robot_context.cpp

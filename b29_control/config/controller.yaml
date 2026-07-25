@@ -14,7 +14,6 @@ b29_controller:
 
   b29_smc_auto_controller:
     type: b29_smc_auto_controller/B29SmcAutoController
-    publish_rate: 50
     posture_roll_limit: 0.035
     posture_pitch_limit: 0.035
     
@@ -33,35 +32,30 @@ b29_controller:
     remote_control_name: "remote_control"
     use_sensor_input: false
     use_auto_state: true
-    debug_validation:
-      enabled: true
-      simulation_only: false
-    planner_control:
-      manual_release_enabled: true
 
     planner_interface:
-      mode: "debug"
-      state_topic: "planner_control_state"
-      command_topic: "planner_joint_command"
-      complete_service: "complete_planner_control"
-      max_delta_per_command: 0.10
+      max_delta_per_command: 0.05
       command_timeout: 1.0
       total_watchdog_timeout: 120.0
     output_mode: "normal" # "normal", "safe_hold"
 
-    robot_motion:
-      debug_planner_control_wait_time: 10.0
-      wait_for_grip_respond_time: 10.0
-      gravity_compensation_enable_wait_time: 0.5
-      disconnect_cable_step_motion_duration: 5.0
+    obstacle_crossing:
+      wait_for_grip_respond_time: 15.0    # /s
+      disconnect_cable_step_duration: 5.0
       disconnect_cable_step_interval: 1.0
-      succeed_disconnect_cable_threshold: 0.1
-      disconnect_cable_second_joint_check_delta: 0.12
-      close_gripper_retry_limit: 2
-      disconnect_cable_retry_limit: 2
-      regrip_retry_limit: 2
-      disconnect_cable_up_joint_position: -0.45
-      disconnect_cable_down_joint_position: 0.08
-      disconnect_cable_move_joint_position: -0.12
+      disconnect_cable_first_joint_up_position: -0.45    # /rad
+      disconnect_cable_first_joint_down_position: -0.05
+      disconnect_cable_second_joint_move_position: -0.12
+      disconnect_cable_second_joint_check_delta: 0.2
+      disconnect_cable_second_joint_success_threshold: 0.15
+      retry_limit: 2
+
     remote_control:
-      max_increment_per_sample: 0.10
+      increment_deadband: 0.005
+      increment_scale: 0.02
+      max_increment_per_sample: 0.05
+      joint_direction_signs:
+        left_first:  -1.0
+        left_second:  1.0
+        right_first:  1.0
+        right_second: 1.0

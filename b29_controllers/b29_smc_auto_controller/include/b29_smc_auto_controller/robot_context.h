@@ -4,7 +4,6 @@
 #include <cstdint>
 #include <string>
 
-#include <b29_smc_auto_controller/AutoStateTrace.h>
 #include <b29_smc_auto_controller/auto_types.h>
 #include <b29_smc_auto_controller/command_dispatcher.h>
 #include <b29_smc_auto_controller/robot_actions.h>
@@ -13,8 +12,16 @@
 
 namespace b29_smc_auto_controller
 {
-void applyCommandToTrace(const AutoControlCommand& command, AutoStateTrace& trace);
-}
+struct RobotContextTraceState
+{
+  std::string current_state;
+  std::string output_mode;
+  std::string last_transition;
+  std::string last_error;
+  std::string last_alert;
+  AutoControlCommand base_command;
+};
+}  // namespace b29_smc_auto_controller
 
 class RobotContext : public robot_fsm::RobotActions
 {
@@ -26,14 +33,14 @@ public:
   RobotContext& operator=(const RobotContext&) = delete;
 
   void start();
-  void tick50Hz();
+  void tick(const ros::Duration& period);
   void setInputSnapshot(const b29_smc_auto_controller::AutoInputSnapshot& input);
   void requestAutoStart();
   void setTraceOutputMode(b29_smc_auto_controller::CommandDispatcher::OutputMode mode);
   const b29_smc_auto_controller::AutoControlCommand& currentCommand() const;
   double getCruiseSpeed() const;
   std::string currentStateName() const;
-  b29_smc_auto_controller::AutoStateTrace buildTraceMessage(const ros::Time& stamp) const;
+  b29_smc_auto_controller::RobotContextTraceState traceState() const;
   bool isSafeStop() const;
   bool isCommsLoss() const;
   bool isTraversing() const;
@@ -108,9 +115,9 @@ private:
   bool auto_start_requested_{false};
   bool last_input_auto_start_requested_{false};
   bool reconnect_timer_active_{false};
-  std::uint32_t reconnect_timer_ticks_{0};
+  ros::Duration reconnect_timer_elapsed_{};
   bool auto_init_timer_active_{false};
-  std::uint32_t auto_init_timer_ticks_{0};
+  ros::Duration auto_init_timer_elapsed_{};
   b29_smc_auto_controller::CommandDispatcher::OutputMode trace_output_mode_{
       b29_smc_auto_controller::CommandDispatcher::OutputMode::kNormal};
   std::string last_error_;

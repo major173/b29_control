@@ -13,6 +13,25 @@
 - 基础测试覆盖默认安全值与 mask 常量
 - 状态流转最小验证：`Idle -> AutoInit -> Traversing`、`AutoInit -> SafeStop (evInitFailed)`、`Traversing -> Idle (evAutoRunPause)`、`* -> SafeStop`
 
+## 越障运行时职责
+
+正式越障流程不复制 `RobotFSM`，始终经过 `buildEffectiveCommand()` 和
+`CommandDispatcher::dispatch()`。控制器内的职责划分如下：
+
+- `ObstacleCrossingRuntime` 持有越障主阶段、左右侧选择、retry、人工介入恢复、
+  `grip_confirmed` 的新上升沿门控及重力补偿锁存。
+- `DisconnectCableProcess` 持有脱缆步骤、Step3--Step8 的插值、Step7 位移判定和失败回零结果。
+- `CrossingSideProfile` 统一声明当前侧夹爪、实际执行的对侧两个腿部关节、重力补偿模式以及
+  `motion_sign`。Step3、Step4、Step5 和 Step6 都按该符号输出目标。
+- `PlannerControlCoordinator` 持有固定的 `normal` / `debug` 模式，协调 PlannerControl
+  的会话进入与退出、完成/超时、调试放行和 dispatcher 后 ACK；其内部的 `PlannerSession`
+  只负责正式 Planner 协议的 session、sequence 和点校验。
+- `B29SmcAutoController` 只收集硬件/Planner/遥控事件，调用运行时对象，生成 effective command，
+  然后通过既有 dispatcher 下发。
+
+详细状态转换、命令原因和人工恢复映射见
+[`OBSTACLE_CROSSING_WORKFLOW.md`](OBSTACLE_CROSSING_WORKFLOW.md)。
+
 **开发约束**
 
 - 输入优先复用 `b29_control` 已注册接口
@@ -59,7 +78,7 @@
 并写入 `AutoStateData::gravity_compensation_mode`；硬件层再把该字段打包为控制帧中的
 1 字节 `gravityCompensationMode`。取值约定为 `0=关闭`、`1=左第一腿部关节`、`2=右第一腿部关节`。
 单侧翻越时只开启当前松开夹爪的对侧第一腿部关节补偿。该字段不提供独立 ROS topic，避免绕过控制器状态机。
-每次开始新一侧脱缆前，控制器只接受当前闭合阶段内新的 `grip_confirmed: false -> true`。随后先进入 `OpenGripperBeforeGravityCompensation`，保持补偿关闭并张开当前越障侧夹爪，等待 `wait_for_grip_respond_time`；再进入 `EnableGravityCompensation`，保持该夹爪 `OPEN` 并等待 `gravity_compensation_enable_wait_time`（默认 `0.5s`），最后从脱缆 `Step3UpFirstJoint` 开始关节动作。
+每次开始新一侧脱缆前，控制器只接受当前闭合阶段内新的 `grip_confirmed: false -> true`。随后先进入 `OpenGripperBeforeGravityCompensation`，保持补偿关闭并张开当前越障侧夹爪，等待 `wait_for_grip_respond_time`；再进入 `EnableGravityCompensation`，在一个控制周期内下发重力补偿命令，下一周期从脱缆 `Step3UpFirstJoint` 开始关节动作。补偿一旦在脱缆阶段生效，会锁存至当前侧明确回夹成功、两侧越障完成，或安全复位时下位机重新确认双夹爪均闭合；`safe_hold`、SafeStop 和 CommsLoss 不会单独关闭该位。
 当前边界是：
 
 - `B29SmcAutoController` 从 `JointStateInterface / PositionJointInterface / VelocityJointInterface / ImuSensorInterface(base_imu)` 读取已注册 handle
@@ -107,6 +126,7 @@
 - `output_mode=safe_hold` 时忽略运动请求，强制输出安全保持命令：
   - 左右轮速度为 `0.0`
   - 6 个位置关节锁当前位置
+  - 不改写控制器已锁存的重力补偿模式
 
 当前 `B29SmcAutoController` 已切到 `MultiInterfaceController`，最小闭环为：
 
@@ -122,7 +142,7 @@
 
 ### 状态说明
 
-以下说明以当前 `sm/RobotFSM.sm` 与 `RobotContext::tick50Hz()` 的已实现语义为准。
+以下说明以当前 `sm/RobotFSM.sm` 与 `RobotContext::tick(period)` 的已实现语义为准。
 
 #### `Idle`
 
@@ -139,7 +159,7 @@
 - 进入状态时执行 `startInitSequence()`
 - 离开状态时执行 `clearInitFlags()`
 - 当前最小实现里，当 `isReadyToTraverse()` 成立时，通过 `evTick` 转入 `Traversing`
-- 当前最小实现里，如果 `AutoInit` 持续 100 个 `tick50Hz()` 周期仍未满足 `isReadyToTraverse()`，会触发 `evInitFailed` 转入 `SafeStop`
+- 当前最小实现里，如果 `AutoInit` 持续 2 秒仍未满足 `isReadyToTraverse()`，会触发 `evInitFailed` 转入 `SafeStop`
 - 收到 `evCommsLost` 时，转入 `CommsLoss`
 - 收到 `evEmergencyStop` 时，转入 `SafeStop`
 
@@ -180,7 +200,7 @@
 
 ### 事件说明
 
-所有事件都由 `RobotContext::tick50Hz()` 或 `SMC` 状态表消费，当前已实现事件如下。
+所有事件都由 `RobotContext::tick(period)` 或 `SMC` 状态表消费，当前已实现事件如下。
 
 #### `evAutoStart`
 
@@ -191,8 +211,8 @@
 
 #### `evTick`
 
-- 含义：50Hz 周期推进事件，是状态机的基础驱动事件
-- 来源：控制器每周期调用 `tick50Hz()` 时，在没有更高优先级事件要处理时发出
+- 含义：周期推进事件，是状态机的基础驱动事件
+- 来源：控制器每周期调用 `tick(period)` 时，在没有更高优先级事件要处理时发出
 - 作用：
   - 驱动 `AutoInit -> Traversing`
   - 驱动 `AutoInit -> SafeStop` 的初始化失败闭环
@@ -217,7 +237,7 @@
 #### `evReconnectTimeout`
 
 - 含义：通信恢复等待超时
-- 来源：当前处于 `CommsLoss`，且 50Hz 计时达到 5 秒仍未检测到 `lower_alive == true`
+- 来源：当前处于 `CommsLoss`，且累计实际控制周期达到 5 秒仍未检测到 `lower_alive == true`
 - 作用：从 `CommsLoss` 转入 `SafeStop`
 - `transition_reason` 记录为 `CommsLoss->SafeStop`
 - `command_reason` 和 `last_event` 记录为 `reconnect_timeout`
@@ -226,7 +246,7 @@
 #### `evInitFailed`
 
 - 含义：`AutoInit` 初始化等待超时，无法继续进入 `Traversing`
-- 来源：当前处于 `AutoInit`，且连续 `100 tick50Hz()` 周期未满足 `isReadyToTraverse()`
+- 来源：当前处于 `AutoInit`，且累计实际控制周期达到 2 秒仍未满足 `isReadyToTraverse()`
 - 作用：从 `AutoInit` 转入 `SafeStop`
 - `transition_reason` 记录为 `AutoInit->SafeStop`
 - `command_reason` 和 `last_event` 记录为 `auto_init_failed`
@@ -265,7 +285,6 @@
   - `lower_alive`
   - `imu_ready`
   - `posture_ready`
-  - `grip_confirmed`
 
 #### `isReadyToTraverse()`
 
@@ -287,7 +306,7 @@
 
 ## 正式 PlannerControl 接口
 
-生产模式通过 `planner_interface/mode: production` 启用三项强类型接口：
+`normal` 模式通过 `planner_interface/mode: normal` 启用三项强类型接口：
 
 - `planner_control_state`：50 Hz 发布会话 ID、当前侧、接收许可、接受/拒绝序号、delta 上限、命令超时和退出原因。
 - `planner_joint_command`：接收带 `session_id` 和严格递增 `sequence` 的四关节目标。
@@ -295,28 +314,40 @@
 
 四关节顺序固定为 `[left_first, left_second, right_first, right_second]`。每次进入 `PlannerControl` 时 `session_id` 递增，首点相对实时关节位置、后续点相对上一接受点都必须满足 `planner_interface/max_delta_per_command`。同序号同内容重发是幂等操作；同序号不同内容、旧会话、跳号、陈旧时间戳、NaN/Inf 和 delta 超限会被拒绝。
 
-生产模式不使用固定时间退出 PlannerControl。完成服务请求在控制周期中确认后，Planner 会话以 `EXIT_COMPLETED` 结束，越障 FSM 进入 `RemoteControl`，而不是直接进入 `Regrip`。`planner_interface/total_watchdog_timeout` 到期会进入 `ManualIntervention`。
+合法点在 callback 中先进入单槽 pending。只有该点成为 effective command，并在 `output_mode=normal`、关节未冻结时由 `CommandDispatcher` 写入关节句柄后，`last_accepted_sequence` 才推进并在同一 update 周期发布；因此下一点不能覆盖尚未实际下发的一点。
+
+`normal` 模式不使用固定时间退出 PlannerControl。完成服务请求在控制周期中确认后，Planner 会话以 `EXIT_COMPLETED` 结束，越障 FSM 进入 `RemoteControl`，而不是直接进入 `Regrip`。`planner_interface/total_watchdog_timeout` 到期会进入 `ManualIntervention`。
 
 这里有两种不同的超时：
 
 - `planner_interface/command_timeout`：最近接受点超过该时长后不再作为新鲜 Planner 覆盖，但控制器仍保持最后下发目标，并允许接收同会话的下一新鲜序号。
 - `planner_interface/total_watchdog_timeout`：限制整个 PlannerControl 会话时长；到期后撤销 Planner 权限并进入人工干预。
 
-旧 `planner_joint_point` 输入已删除。`state_trace` 继续用于观测，`planner_release` 只用于调试阶段放行；生产模式若启用手动 release，控制器初始化会失败。正式 adapter 的实现和配置见 `b29_planner_adapter` 包。
+`state_trace` 继续用于观测，`planner_release` 只用于 `debug` 模式放行；`normal` 模式调用该服务会被明确拒绝。正式 adapter 的实现和配置见 `b29_planner_adapter` 包。
 
 ## Planner 后人工遥控
 
-`RemoteControlInterface` 从下位机反馈帧读取 `[left_first, left_second, right_first, right_second]`
-四个位置增量和阶段完成信号。增量单位为 `rad`，与 `joint_targets` 同方向，每个新反馈样本只累加一次，并按 `remote_control/max_increment_per_sample` 逐关节截断。
+`RemoteControlInterface` 在 `normal` 和 `debug` 模式下都只从下位机反馈帧读取
+`[left_first, left_second, right_first, right_second]` 四个位置增量和阶段完成信号；
+`AutoDebugOverride` 不包含遥控增量或完成信号字段，也不会覆盖该接口。原始增量单位为 `rad`，
+每个新反馈样本只处理一次。原始增量先经过
+`remote_control/increment_deadband` 死区过滤，再乘以 `remote_control/increment_scale`，最后按
+`remote_control/joint_direction_signs` 进行方向映射，之后按
+`remote_control/max_increment_per_sample` 逐关节截断并累加到目标位置；处理后的增量才与
+`joint_targets` 同方向。默认缩放系数为 `0.02`，用于降低反馈帧持续累加造成的遥控灵敏度。
 
-`RemoteControl` 中停止驱动轮、保持当前侧夹爪张开、保持当前侧重力补偿策略。只有进入当前阶段后新的完成信号 `0 -> 1` 上升沿才进入 `Regrip`。回夹失败但未达 `regrip_retry_limit` 时，先进入 `ReopenBeforeRemoteControl` 张开夹爪，再回到 `RemoteControl`，不会重新执行 Planner。
+四关节方向通过 `remote_control/joint_direction_signs` 统一映射，顺序为
+`[left_first, left_second, right_first, right_second]`。当前实机映射为 `[-1, +1, +1, +1]`：
+只反转左一关节的遥控增量，其他三个关节保持下位机输入方向。
+
+`RemoteControl` 中停止驱动轮、保持当前侧夹爪张开、保持当前侧重力补偿策略。只有进入当前阶段后新的完成信号 `0 -> 1` 上升沿才进入 `Regrip`。回夹失败但未达 `retry_limit` 时，先进入 `ReopenBeforeRemoteControl` 张开夹爪，再回到 `RemoteControl`，不会重新执行 Planner。
 
 ## 运行与调试
 
 启动控制器：
 
 ```bash
-roslaunch b29_control start.launch
+roslaunch b29_control start.launch planner_mode:=normal
 ```
 
 调试注入 topic：
@@ -324,7 +355,7 @@ roslaunch b29_control start.launch
 - `/b29_controller/b29_smc_auto_controller/debug_override`
 - `/b29_controller/b29_smc_auto_controller/sensor_input`
 
-`debug_override` 仅在 `debug_validation/enabled=true` 时生效。正式 `start.launch` 默认关闭该门禁。Gazebo 完整越障调试、Planner 手动放行和软件急停命令见
+`start.launch` 的 `planner_mode` 是 SMC 与 Adapter 的唯一模式入口：`normal` 启用正式 Planner 会话并关闭调试门禁；`debug` 启用调试门禁和 `planner_release`。`debug_override` 仅在调试门禁开启时生效。越障调试、Planner 手动放行和软件急停命令见
 `b29_control/docs/b29_smc_obstacle_crossing_debug_validation.md`。
 
 状态追踪 topic：
@@ -343,6 +374,7 @@ roslaunch b29_control start.launch
   - 执行层不放行动作请求，而是显式输出安全保持命令
   - 左右轮速度强制为 `0.0`
   - 6 个位置关节目标强制为当前位置
+  - 重力补偿仍由 controller 的越障补偿锁存控制，不因 `safe_hold` 自动关闭
 
 `safe_hold` 的设计目的不是“什么都不做”，而是提供一个对 Gazebo 和实机早期联调都更可控的安全模式。这样即使状态机已经进入 `AutoInit` 或 `Traversing`，执行层也不会真正推动机构动作。
 
@@ -357,27 +389,15 @@ roslaunch b29_control start.launch
 
 建议在命令摘要或调试日志中同时带出当前 `output_mode`，避免现场误判“状态机没出命令”和“命令被安全保持覆盖”为同一种问题。
 
-## Gazebo 状态机验证
+## Gazebo 边界
 
-如果目标是先验证状态机而不是验证执行层，建议使用 Gazebo 专用启动链路，并传入 `debug_output_mode:=safe_hold`。Gazebo 调试 launch 默认是 `normal`，用于观察机构实际运动。
+当前工作区没有会启动 `b29_smc_auto_controller` 的 Gazebo 专用 launch。
+`start_in_gazebo.launch` 和 `start_in_empty_gazebo.launch` 只加载传统关节控制器，不能用于验证
+RobotFSM、越障 FSM、PlannerControl、RemoteControl 或本控制器的 `state_trace`。已删除的
+`start_smc_in_gazebo.launch` 及其 debug overlay 也不能作为启动入口。
 
-验证重点：
-
-- `Idle -> AutoInit -> Traversing`
-- `Idle -> CommsLoss -> Idle`
-- `* -> SafeStop -> Idle`
-
-这条链路当前验证的是：
-
-- 关节和 `base_imu` 接口是否能正常初始化
-- `debug_override` / `sensor_input` 是否能驱动状态转移
-- `state_trace` 是否能稳定反映当前状态和命令摘要
-
-这条链路当前不验证：
-
-- 真实轮速执行
-- 真实关节轨迹执行
-- 完整的停障 / 接近 / 越障细分状态链
+越障状态机的调试入口、模式选择和安全边界以
+`b29_control/docs/b29_smc_obstacle_crossing_debug_validation.md` 为准。
 
 ## 实机早期调试建议
 
@@ -395,7 +415,7 @@ roslaunch b29_control start.launch
 - generated code 位于 `gen/include/RobotFSM_sm.h` 与 `gen/src/RobotFSM_sm.cpp`
 - `RobotContext` 作为 SMC owner，对外暴露最小接口：
   - `start()`
-  - `tick50Hz()`
+  - `tick(period)`
   - `setInputSnapshot(...)`
   - `requestAutoStart()`
   - `currentCommand()`

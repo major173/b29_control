@@ -49,7 +49,14 @@ bool CommandDispatcher::dispatch(const AutoControlCommand& command)
     double target_speed = 0.0;
     if (output_mode_ == OutputMode::kNormal && !command.stop_all)
     {
-      target_speed = (i == 0 ? command.left_wheel_speed : command.right_wheel_speed);
+      if (i == 0)
+      {
+        target_speed = command.left_wheel_speed;
+      }
+      else
+      {
+        target_speed = command.right_wheel_speed;
+      }
     }
     wheel_joint_handles_[i].setCommand(target_speed);
   }

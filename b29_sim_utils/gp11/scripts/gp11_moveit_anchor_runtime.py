@@ -193,10 +193,6 @@ class MoveItAnchorRuntime(object):
         except Exception:
             pass
         self._anchored_urdf = self._load_anchored_urdf_module()
-        self._source_urdf_path = rospy.get_param(
-            "~source_urdf_path",
-            os.path.join(self._package_dir, "urdf", "gp11_double_slider.urdf"),
-        )
         self._kinematics_path = rospy.get_param(
             "~kinematics_path",
             os.path.join(self._package_dir, "config", "gp11_moveit_kinematics.yaml"),
@@ -434,13 +430,13 @@ class MoveItAnchorRuntime(object):
     def _load_source_robot(self):
         """Return the authoritative source URDF as an XML root element."""
         source_urdf_param = rospy.get_param("~source_urdf_param", "")
-        if source_urdf_param:
-            if not rospy.has_param(source_urdf_param):
-                raise RuntimeError(
-                    "Missing source URDF parameter {}.".format(source_urdf_param)
-                )
-            return ET.fromstring(rospy.get_param(source_urdf_param))
-        return ET.parse(self._source_urdf_path).getroot()
+        if not source_urdf_param:
+            raise RuntimeError("source_urdf_param is required.")
+        if not rospy.has_param(source_urdf_param):
+            raise RuntimeError(
+                "Missing source URDF parameter {}.".format(source_urdf_param)
+            )
+        return ET.fromstring(rospy.get_param(source_urdf_param))
 
     def _validate_planning_fixed_joints(self, source_robot):
         """Reject a typo before it becomes an incomplete MoveIt state.

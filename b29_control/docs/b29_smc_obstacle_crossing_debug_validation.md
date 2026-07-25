@@ -25,27 +25,21 @@ input -> AutoInputMux -> RobotContext::tick50Hz()
 
 ## 2. 参数与启动
 
-当前工作区的调试配置位于 `b29_control/config/controller.yaml`：
-
-```yaml
-debug_validation:
-  enabled: true
-  simulation_only: false
-planner_control:
-  manual_release_enabled: true
-planner_interface:
-  mode: debug
-```
-
-该配置用于当前调试，不是正式部署默认值。正式部署前必须将
-`debug_validation/enabled` 和 `planner_control/manual_release_enabled` 设为
-`false`，并将 `planner_interface/mode` 设为 `production`。
-
-当前正式启动入口为：
+`start.launch` 的 `planner_mode` 是 SMC 与 Adapter 的唯一模式入口。调试时使用：
 
 ```bash
-roslaunch b29_control start.launch
+roslaunch b29_control start.launch planner_mode:=debug
 ```
+
+该模式会同时启用 `debug_validation` 和 `planner_release`，不需要修改 SMC 或 Adapter 的 YAML。
+
+正式 Planner 运行使用：
+
+```bash
+roslaunch b29_control start.launch planner_mode:=normal
+```
+
+`normal` 会关闭调试门禁和手动放行，并启用正式 Planner 会话接口。
 
 `start.launch` 会启动硬件节点，不能作为无执行风险的检查命令。当前工作区
 没有会启动 SMC 的 Gazebo 专用 launch：`start_in_gazebo.launch` 和
@@ -106,40 +100,32 @@ rostopic pub -1 "$OVERRIDE_TOPIC" b29_smc_auto_controller/AutoDebugOverride \
 
 ## 4. PlannerControl 手动放行
 
-当前调试配置启用：
+调试配置由启动参数 `planner_mode:=debug` 选择。该模式会让 `PlannerControlCoordinator` 使用手动放行路径
 
-```yaml
-planner_control:
-  manual_release_enabled: true
-```
-
-进入 `PlannerControl` 后不会因固定时间自动离开。每次进入阶段会清除旧 release，必须在当前阶段重新调用：
+每次进入`PlannerControl` 后会清除旧 release，必须在当前阶段重新调用：
 
 ```bash
 rosservice call /b29_controller/b29_smc_auto_controller/planner_release
 ```
 
 非 `PlannerControl` 阶段调用会返回 `success=false`。服务只在下一控制周期将
-`PlannerControl` 切换到 `RemoteControl`，不会跳过 `PlannerControl`，也不会直接进入
-`Regrip`。正式模式中 `manual_release_enabled=false`，由正式 adapter 调用
-`complete_planner_control` 完成会话；正式和调试放行后都进入 `RemoteControl`。
+`PlannerControl` 切换到 `RemoteControl`，不会跳过 `PlannerControl`。
 
-### 4.1 RemoteControl 调试增量与完成上升沿
+`normal` 模式中，`planner_release` 服务会被明确拒绝，由正式 adapter 调用
+`complete_planner_control` 完成会话；`normal` 和调试放行后都进入 `RemoteControl`。
 
-`FIELD_REMOTE_CONTROL_INCREMENTS=524288`，`FIELD_REMOTE_CONTROL_COMPLETE=1048576`。每条新 override 消息只应用一次增量：
+### 4.1 RemoteControl 下位机输入
 
-```bash
-rostopic pub -1 "$OVERRIDE_TOPIC" b29_smc_auto_controller/AutoDebugOverride \
-'{enabled: true, field_mask: 524288, remote_control_joint_increments: [0.01, -0.01, 0.0, 0.0]}'
+`RemoteControl` 的四关节增量、样本序号、完成信号和完成上升沿只来自下位机反馈帧，经 `RemoteControlInterface` 进入控制器。`AutoDebugOverride` 不提供对应字段，GUI 和 `rostopic pub` 都不能伪造遥控增量或结束信号。
 
-# 先确保完成位为0，再发布1，只有0->1上升沿有效
-rostopic pub -1 "$OVERRIDE_TOPIC" b29_smc_auto_controller/AutoDebugOverride \
-'{enabled: true, field_mask: 1048576, remote_control_complete: false}'
-rostopic pub -1 "$OVERRIDE_TOPIC" b29_smc_auto_controller/AutoDebugOverride \
-'{enabled: true, field_mask: 1048576, remote_control_complete: true}'
-```
+每个新遥控样本依次经过 `remote_control/increment_deadband` 死区过滤、
+`remote_control/increment_scale` 灵敏度缩放和 `remote_control/max_increment_per_sample` 单帧限幅，
+之后才累加到四个腿部关节目标。GUI 中的 `remote_control_raw_increments` 显示下位机原始值，
+`remote_control_applied_increments` 显示实际参与累计的处理后增量。
+方向映射由 `remote_control/joint_direction_signs` 配置，当前左一关节为 `-1`，其余三个关节为
+`+1`。
 
-新 override 会替换旧覆盖配置；需要同时保留障碍、夹爪或基础状态覆盖时，必须合并 mask 和字段。
+调试模式只能验证 `PlannerControl` 的人工放行；后续 `RemoteControl -> Regrip` 需要下位机先将完成信号置为 `0`，再在当前 RemoteControl 阶段产生新的 `0 -> 1` 上升沿。
 
 重点观察：
 
@@ -212,14 +198,14 @@ disconnect_step_transition_reason
 disconnect_step_expected_condition
 disconnect_check_displacement
 to_check_joint_pos
-succeed_disconnect_cable_threshold
+disconnect_cable_second_joint_success_threshold
 ```
 
 Step7 使用：
 
 ```text
 abs(current_second_joint_feedback - to_check_joint_pos)
-  >= succeed_disconnect_cable_threshold
+  >= disconnect_cable_second_joint_success_threshold
 ```
 
 失败时先进入 `Step8ReturnToZero`，回零完成后才增加 retry。达到上限后进入 `ManualIntervention`。
@@ -229,16 +215,12 @@ abs(current_second_joint_feedback - to_check_joint_pos)
 ```text
 grip_confirmed == true
 ```
-
 恢复映射：
-
 | 失败动作 | 人工确认后的下一阶段 |
 | --- | --- |
-| `CloseBothGrippers` | `FirstSide Disconnecting` |
-| `Left DisconnectCable` | `Left PlannerControl` |
-| `Left Regrip` | `Right Disconnecting` |
-| `Right DisconnectCable` | `Right PlannerControl` |
-| `Right Regrip` | `CompleteWaitObstacleClear` |
+| `CloseBothGrippers` | 从首侧正常开始：`OpenGripperBeforeGravityCompensation` -> `EnableGravityCompensation` -> `Disconnecting` |
+| `DisconnectCable` / `PlannerControl` / `Regrip`，当前为首侧 | 当前侧视为已人工完成并回夹，开始另一侧：`OpenGripperBeforeGravityCompensation` -> `EnableGravityCompensation` -> `Disconnecting` |
+| `DisconnectCable` / `PlannerControl` / `Regrip`，当前为第二侧 | 当前侧视为已人工完成并回夹，进入 `CompleteWaitObstacleClear` |
 
 首侧由巡航速度符号决定：正速度先左侧，负速度先右侧。
 
@@ -249,7 +231,7 @@ grip_confirmed == true
 3. 阈值内障碍进入 `CloseBothGrippers` 后，使用 `grip_confirmed` override 推进闭合确认。
 4. 等待 Step7 成功进入 `PlannerControl`，确认等待时间持续增长且不自动离开。
 5. 调用 `planner_release`，确认进入 `RemoteControl`。
-6. 发布遥控增量，确认每条消息只累加一次；再发布完成位 `0 -> 1`，确认进入 `Regrip`。
+6. 通过下位机发送遥控增量，确认每个新反馈样本只累加一次；再由下位机产生完成位 `0 -> 1`，确认进入 `Regrip`。
 7. 完成双侧流程后清除障碍，确认回到 `Idle` 且不重复触发。
 8. 在任意阶段调用软件急停，确认进入 `SafeStop` 且越障内部状态清空。
 
@@ -263,7 +245,7 @@ rosrun b29_smc_auto_controller replay_scenario.py \
 ## 9. 常见失败原因
 
 - `debug_override` 无效：检查 `debug_validation_enabled` 是否为 `true`。
-- Planner release 被拒绝：当前不在 `PlannerControl`，或 `planner_manual_release_enabled=false`。
+- Planner release 被拒绝：当前不在 `PlannerControl`，或当前为 `normal` 模式。
 - Planner 点不覆盖：检查 `planner_point_available`、`planner_point_fresh` 和 `planner_override_applied`。
 - `safe_hold` 下 Step7 不成功：该模式不会推动机构；必须在受控环境中切换为 `normal` 才能验证物理反馈路径。
 - reset 后仍在 `SafeStop`：检查 `lower_alive`、`imu_ready`、`joint_fault` 和 `grip_fault`。

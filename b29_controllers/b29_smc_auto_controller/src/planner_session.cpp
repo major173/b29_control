@@ -37,6 +37,10 @@ uint32_t PlannerSession::start(uint8_t crossing_side, const Positions& reference
   last_positions_ = Positions{};
   has_accepted_command_ = false;
   last_accepted_sequence_ = 0;
+  pending_positions_ = Positions{};
+  has_pending_command_ = false;
+  pending_sequence_ = 0;
+  pending_receive_time_ = ros::Time{};
   last_rejected_sequence_ = 0;
   reject_reason_ = PlannerControlState::REJECT_NONE;
   rejection_count_ = 0;
@@ -52,7 +56,7 @@ bool PlannerSession::refreshReferenceIfUncommanded(
     const Positions& reference_positions, const ros::Time& time)
 {
   std::lock_guard<std::mutex> lock(mutex_);
-  if (!active_ || !accepting_commands_ || has_accepted_command_ ||
+  if (!active_ || !accepting_commands_ || has_accepted_command_ || has_pending_command_ ||
       !std::all_of(reference_positions.begin(), reference_positions.end(),
                    [](double position) { return std::isfinite(position); }))
   {
@@ -74,6 +78,9 @@ void PlannerSession::stop(uint8_t exit_reason, bool completed)
 
   active_ = false;
   accepting_commands_ = false;
+  has_pending_command_ = false;
+  pending_sequence_ = 0;
+  pending_receive_time_ = ros::Time{};
   crossing_side_ = PlannerControlState::CROSSING_SIDE_NONE;
   exit_reason_ = exit_reason;
   completion_request_pending_ = false;
@@ -123,6 +130,18 @@ PlannerSession::CommandResult PlannerSession::acceptCommand(const PlannerJointCo
     }
   }
 
+  if (has_pending_command_ && command.sequence == pending_sequence_)
+  {
+    if (!samePositions(pending_positions_, command.positions))
+    {
+      return rejectCommand(command.sequence, PlannerControlState::REJECT_DUPLICATE_SEQUENCE_MISMATCH,
+                           "duplicate pending sequence contains different positions");
+    }
+    pending_receive_time_ = receive_time;
+    return CommandResult{true, true, PlannerControlState::REJECT_NONE,
+                         "duplicate pending command accepted idempotently"};
+  }
+
   if (has_accepted_command_ && command.sequence == last_accepted_sequence_)
   {
     if (!samePositions(last_positions_, command.positions))
@@ -135,7 +154,11 @@ PlannerSession::CommandResult PlannerSession::acceptCommand(const PlannerJointCo
                          "duplicate command accepted idempotently"};
   }
 
-  const uint32_t expected_sequence = has_accepted_command_ ? last_accepted_sequence_ + 1u : 1u;
+  uint32_t expected_sequence = 1u;
+  if (has_accepted_command_)
+  {
+    expected_sequence = last_accepted_sequence_ + 1u;
+  }
   if (command.sequence < expected_sequence)
   {
     return rejectCommand(command.sequence, PlannerControlState::REJECT_INVALID_SEQUENCE,
@@ -147,22 +170,31 @@ PlannerSession::CommandResult PlannerSession::acceptCommand(const PlannerJointCo
                          "command sequence skipped an unaccepted point");
   }
 
-  const Positions& reference = has_accepted_command_ ? last_positions_ : reference_positions_;
-  for (std::size_t index = 0; index < reference.size(); ++index)
+  const Positions* reference = &reference_positions_;
+  if (has_accepted_command_)
   {
-    if (std::abs(command.positions[index] - reference[index]) > config_.max_delta_per_command)
+    reference = &last_positions_;
+  }
+  for (std::size_t index = 0; index < reference->size(); ++index)
+  {
+    if (std::abs(command.positions[index] - (*reference)[index]) > config_.max_delta_per_command)
     {
+      const char* reason = "first command delta from current posture exceeds max_delta_per_command";
+      if (has_accepted_command_)
+      {
+        reason = "command delta exceeds max_delta_per_command";
+      }
       return rejectCommand(command.sequence, PlannerControlState::REJECT_DELTA_EXCEEDED,
-                           has_accepted_command_ ? "command delta exceeds max_delta_per_command"
-                                                 : "first command delta from current posture exceeds max_delta_per_command");
+                           reason);
     }
   }
 
-  std::copy(command.positions.begin(), command.positions.end(), last_positions_.begin());
-  has_accepted_command_ = true;
-  last_accepted_sequence_ = command.sequence;
-  last_command_receive_time_ = receive_time;
-  return CommandResult{true, false, PlannerControlState::REJECT_NONE, "command accepted"};
+  std::copy(command.positions.begin(), command.positions.end(), pending_positions_.begin());
+  has_pending_command_ = true;
+  pending_sequence_ = command.sequence;
+  pending_receive_time_ = receive_time;
+  return CommandResult{true, false, PlannerControlState::REJECT_NONE,
+                       "command queued for the next control cycle"};
 }
 
 PlannerSession::CompletionResult PlannerSession::requestCompletion(uint32_t session_id, uint32_t final_sequence)
@@ -219,22 +251,79 @@ bool PlannerSession::consumeCompletionRequest(uint32_t& session_id, uint32_t& fi
   return true;
 }
 
-bool PlannerSession::latestCommandIsFresh(const ros::Time& time, Positions& positions) const
+bool PlannerSession::latestCommandIsFresh(const ros::Time& time, Positions& positions,
+                                          uint32_t* sequence, bool* pending) const
 {
   std::lock_guard<std::mutex> lock(mutex_);
-  if (!active_ || !has_accepted_command_ || last_command_receive_time_.isZero() ||
+  if (!active_)
+  {
+    return false;
+  }
+
+  if (has_pending_command_ && !pending_receive_time_.isZero() &&
+      (time - pending_receive_time_).toSec() <= config_.command_timeout)
+  {
+    positions = pending_positions_;
+    if (sequence != nullptr)
+    {
+      *sequence = pending_sequence_;
+    }
+    if (pending != nullptr)
+    {
+      *pending = true;
+    }
+    return true;
+  }
+
+  if (!has_accepted_command_ || last_command_receive_time_.isZero() ||
       (time - last_command_receive_time_).toSec() > config_.command_timeout)
   {
     return false;
   }
   positions = last_positions_;
+  if (sequence != nullptr)
+  {
+    *sequence = last_accepted_sequence_;
+  }
+  if (pending != nullptr)
+  {
+    *pending = false;
+  }
+  return true;
+}
+
+bool PlannerSession::markCommandDispatched(uint32_t sequence, const Positions& positions)
+{
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!active_ || !accepting_commands_ || !has_pending_command_ ||
+      sequence != pending_sequence_ || positions != pending_positions_)
+  {
+    return false;
+  }
+
+  last_positions_ = pending_positions_;
+  has_accepted_command_ = true;
+  last_accepted_sequence_ = pending_sequence_;
+  last_command_receive_time_ = pending_receive_time_;
+  has_pending_command_ = false;
+  pending_sequence_ = 0;
+  pending_receive_time_ = ros::Time{};
+  reject_reason_ = PlannerControlState::REJECT_NONE;
   return true;
 }
 
 bool PlannerSession::acceptedCommandTimedOut(const ros::Time& time) const
 {
   std::lock_guard<std::mutex> lock(mutex_);
-  return active_ && has_accepted_command_ && !last_command_receive_time_.isZero() &&
+  if (!active_)
+  {
+    return false;
+  }
+  if (has_pending_command_ && !pending_receive_time_.isZero())
+  {
+    return (time - pending_receive_time_).toSec() > config_.command_timeout;
+  }
+  return has_accepted_command_ && !last_command_receive_time_.isZero() &&
          (time - last_command_receive_time_).toSec() > config_.command_timeout;
 }
 

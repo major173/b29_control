@@ -6,7 +6,7 @@ controller_list:
     type: FollowJointTrajectory
     default: true
     joints:
-      - right_first_leg_joint
-      - right_second_leg_joint
       - left_first_leg_joint
       - left_second_leg_joint
+      - right_first_leg_joint
+      - right_second_leg_joint

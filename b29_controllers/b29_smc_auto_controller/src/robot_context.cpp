@@ -10,35 +10,9 @@ namespace
 constexpr double kCruiseSpeedMps = -0.10;
 constexpr double kApproachSpeedMps = -0.03;
 constexpr double kCrossObstaclesDistanceM = 0.30;
-constexpr std::uint32_t kReconnectTimeoutTicks = 250;
-constexpr std::uint32_t kAutoInitTimeoutTicks = 100;
+constexpr double kReconnectTimeoutSec = 5.0;
+constexpr double kAutoInitTimeoutSec = 2.0;
 }
-
-namespace b29_smc_auto_controller
-{
-void applyCommandToTrace(const AutoControlCommand& command, AutoStateTrace& trace)
-{
-  trace.command_reason = command.command_reason;
-  trace.stop_all = command.stop_all;
-  trace.freeze_joints = command.freeze_joints;
-  trace.left_wheel_speed = command.left_wheel_speed;
-  trace.right_wheel_speed = command.right_wheel_speed;
-
-  switch (command.crossing_strategy)
-  {
-    case CrossingStrategy::LineClamp:
-      trace.crossing_strategy = AutoStateTrace::CROSSING_LINE_CLAMP;
-      break;
-    case CrossingStrategy::Damper:
-      trace.crossing_strategy = AutoStateTrace::CROSSING_DAMPER;
-      break;
-    case CrossingStrategy::None:
-    default:
-      trace.crossing_strategy = AutoStateTrace::CROSSING_NONE;
-      break;
-  }
-}
-}  // namespace b29_smc_auto_controller
 
 RobotContext::RobotContext() : fsm_(*this)
 {
@@ -55,13 +29,18 @@ void RobotContext::start()
   fsm_.enterStartState();
 }
 
-void RobotContext::tick50Hz()
+void RobotContext::tick(const ros::Duration& period)
 {
   if (!started_)
   {
     start();
   }
 
+  ros::Duration elapsed;
+  if (period.toSec() > 0.0)
+  {
+    elapsed = period;
+  }
   const int current_state_id = currentStateId();
 
   if (input_.emergency_stop || hasSafetyFault())
@@ -83,8 +62,8 @@ void RobotContext::tick50Hz()
 
     if (reconnect_timer_active_)
     {
-      ++reconnect_timer_ticks_;
-      if (reconnect_timer_ticks_ >= kReconnectTimeoutTicks)
+      reconnect_timer_elapsed_ += elapsed;
+      if (reconnect_timer_elapsed_.toSec() >= kReconnectTimeoutSec)
       {
         fsm_.evReconnectTimeout();
         return;
@@ -105,8 +84,8 @@ void RobotContext::tick50Hz()
 
     if (auto_init_timer_active_)
     {
-      ++auto_init_timer_ticks_;
-      if (auto_init_timer_ticks_ >= kAutoInitTimeoutTicks)
+      auto_init_timer_elapsed_ += elapsed;
+      if (auto_init_timer_elapsed_.toSec() >= kAutoInitTimeoutSec)
       {
         fsm_.evInitFailed();
         return;
@@ -201,34 +180,16 @@ std::string RobotContext::currentStateName() const
   return state_name.substr(pos + 2);
 }
 
-b29_smc_auto_controller::AutoStateTrace RobotContext::buildTraceMessage(const ros::Time& stamp) const
+b29_smc_auto_controller::RobotContextTraceState RobotContext::traceState() const
 {
-  b29_smc_auto_controller::AutoStateTrace trace;
-  trace.header.stamp = stamp;
-  trace.current_state = currentStateName();
-  trace.output_mode = b29_smc_auto_controller::toString(trace_output_mode_);
-  b29_smc_auto_controller::applyCommandToTrace(command_, trace);
-
-  if (!last_transition_.empty())
-  {
-    trace.transition_reason = last_transition_;
-    const std::size_t arrow_pos = last_transition_.find("->");
-    if (arrow_pos != std::string::npos)
-    {
-      trace.previous_state = last_transition_.substr(0, arrow_pos);
-    }
-  }
-
-  if (!last_error_.empty())
-  {
-    trace.last_event = last_error_;
-  }
-  else if (!last_alert_.empty())
-  {
-    trace.last_event = last_alert_;
-  }
-
-  return trace;
+  b29_smc_auto_controller::RobotContextTraceState state;
+  state.current_state = currentStateName();
+  state.output_mode = b29_smc_auto_controller::toString(trace_output_mode_);
+  state.last_transition = last_transition_;
+  state.last_error = last_error_;
+  state.last_alert = last_alert_;
+  state.base_command = command_;
+  return state;
 }
 
 bool RobotContext::isSafeStop() const
@@ -323,28 +284,28 @@ void RobotContext::startInitSequence()
   command_.stop_all = false;
   command_.freeze_joints = false;
   auto_init_timer_active_ = true;
-  auto_init_timer_ticks_ = 0;
+  auto_init_timer_elapsed_ = ros::Duration{};
   setCommandReason("auto_init_started");
 }
 
 void RobotContext::clearInitFlags()
 {
   auto_init_timer_active_ = false;
-  auto_init_timer_ticks_ = 0;
+  auto_init_timer_elapsed_ = ros::Duration{};
   setCommandReason("auto_init_flags_cleared");
 }
 
 void RobotContext::startReconnectTimer()
 {
   reconnect_timer_active_ = true;
-  reconnect_timer_ticks_ = 0;
+  reconnect_timer_elapsed_ = ros::Duration{};
   setCommandReason("reconnect_timer_started");
 }
 
 void RobotContext::stopReconnectTimer()
 {
   reconnect_timer_active_ = false;
-  reconnect_timer_ticks_ = 0;
+  reconnect_timer_elapsed_ = ros::Duration{};
   setCommandReason("reconnect_timer_stopped");
 }
 
@@ -395,7 +356,7 @@ void RobotContext::resetFaultFlags()
 
 bool RobotContext::canStartAuto() const
 {
-  return isLowerAlive() && isImuReady() && isPostureReady() && isGripConfirmed();
+  return isLowerAlive() && isImuReady() && isPostureReady();
 }
 
 bool RobotContext::isReadyToTraverse() const

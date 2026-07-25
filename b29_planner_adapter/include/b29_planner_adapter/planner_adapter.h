@@ -2,6 +2,8 @@
 #pragma once
 
 #include <array>
+#include <condition_variable>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -29,8 +31,9 @@ public:
 private:
   struct Config
   {
-    std::string interface_mode{"production"};
+    std::string interface_mode{"normal"};
     std::string action_name{"/gp11_moveit/reach_arm_controller/follow_joint_trajectory"};
+    std::string smc_controller_namespace{"/b29_controller/b29_smc_auto_controller"};
     std::string planner_state_topic{"/b29_controller/b29_smc_auto_controller/planner_control_state"};
     std::string planner_command_topic{"/b29_controller/b29_smc_auto_controller/planner_joint_command"};
     std::string completion_service{"/b29_controller/b29_smc_auto_controller/complete_planner_control"};
@@ -40,7 +43,6 @@ private:
     double publish_rate{50.0};
     double time_scale{1.0};
     double max_output_delta{0.10};
-    double expected_smc_max_delta{0.10};
     JointVector start_tolerance{{0.08, 0.08, 0.08, 0.08}};
     JointVector path_tolerance{{0.50, 0.50, 0.50, 0.50}};
     JointVector max_total_displacement{{12.5663706144, 12.5663706144, 12.5663706144,
@@ -101,9 +103,6 @@ private:
       uint32_t session_id, const JointStateSnapshot& initial_joint_state,
       b29_smc_auto_controller::PlannerControlState& state, std::string& error) const;
   bool firstCommandWasExplicitlyRejected(uint32_t session_id, uint32_t sequence) const;
-  bool buildGoalIndexMap(const std::vector<std::string>& goal_names,
-                         std::array<std::size_t, kPlannerJointCount>& goal_index_for_output,
-                         std::string& error) const;
   bool sendCommandAndAwait(uint32_t session_id, uint32_t sequence, const JointVector& positions,
                            uint32_t& rejection_count,
                            const ros::WallTime& action_deadline, std::string& error);
@@ -114,12 +113,8 @@ private:
   bool validateMotionDirection(const JointVector& desired, const JointStateSnapshot& actual,
                                DirectionSafetyState& state, std::string& error) const;
   bool goalWithinTolerance(const JointVector& desired, const JointStateSnapshot& actual) const;
-  void publishFeedback(const std::vector<std::string>& goal_joint_names,
-                       const std::array<std::size_t, kPlannerJointCount>& goal_index_for_output,
-                       const JointVector& desired, const JointStateSnapshot& actual);
+  void publishFeedback(const JointVector& desired, const JointStateSnapshot& actual);
   bool waitForFinalSettle(uint32_t session_id, uint32_t final_sequence, const JointVector& final_positions,
-                          const std::vector<std::string>& goal_joint_names,
-                          const std::array<std::size_t, kPlannerJointCount>& goal_index_for_output,
                           const ros::WallTime& action_deadline, DirectionSafetyState& direction_state,
                           std::string& error);
   bool requestCompletion(uint32_t session_id, uint32_t final_sequence, std::string& error);
@@ -149,6 +144,8 @@ private:
   ros::ServiceClient completion_client_;
   ros::ServiceClient emergency_stop_client_;
   mutable std::mutex planner_state_mutex_;
+  std::condition_variable planner_state_condition_;
+  std::uint64_t planner_state_generation_{0};
   mutable std::mutex joint_state_mutex_;
   PlannerStateSnapshot planner_state_snapshot_{};
   JointStateSnapshot joint_state_snapshot_{};
