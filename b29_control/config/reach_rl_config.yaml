@@ -62,10 +62,12 @@ deploy:
     target_step_clip: 0.10      # 单步 |Δq_target| 上限 (rad)；实机起步建议 0.02
     deadman_required: false     # true=必须收到 /gp11/rl/deadman 心跳才发布
 
-  # 观测预处理（Gazebo 速度有限差分噪声，需低通滤波）
+  # 观测预处理
   obs_filter:
-    dq_alpha: 0.2               # 速度低通系数 [0,1]：越小越平滑但响应越慢
-                                # Gazebo 仿真建议 0.1~0.2；实机建议 0.3~0.5（噪声较小）
+    dq_alpha: 1.0               # 速度低通系数 [0,1]，1.0=不滤波（直通）
+    # 2026-07-26 定标（RL 仓库 docs/delay/01 测试 F）：实机 dq 无测量噪声，
+    # α=0.2 使策略仅看到 29% 的震荡 dq 幅值且 @6.63Hz 额外滞后 52°，故移除。
+    # 若 Gazebo 有限差分噪声确需滤波，单独评估后再改，且勿低于 0.8。
 
   # MuJoCo 仿真（仅 mujoco_sim_node 使用）
   mujoco:
