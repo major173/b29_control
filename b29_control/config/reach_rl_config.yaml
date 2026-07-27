@@ -59,10 +59,10 @@ deploy:
   safety:
     enable: true
     max_joint_vel: 4.0          # rad/s，与训练 velocity_limits 对齐；实机起步建议 0.05
-    target_step_clip: 0.10      # 单步 |Δq_target| 上限 (rad)；实机起步建议 0.02
+    target_step_clip: 1.00      # 单步 |Δq_target| 上限 (rad)；实机起步建议 0.02
     deadman_required: false     # true=必须收到 /gp11/rl/deadman 心跳才发布
 
-  # 观测预处理
+  # 观测预处理（Gazebo 速度有限差分噪声，需低通滤波）
   obs_filter:
     dq_alpha: 1.0               # 速度低通系数 [0,1]，1.0=不滤波（直通）
     # 2026-07-26 定标（RL 仓库 docs/delay/01 测试 F）：实机 dq 无测量噪声，
