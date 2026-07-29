@@ -1,22 +1,8 @@
 #!/usr/bin/env python3
-"""执行器辨识拟合（01 文档测试 B/C）：session 数据 → (τd, τm 或 ωn/ζ, v_max) 参数表。
+"""执行器辨识拟合：session 数据 → 局部增量 v2 阶跃/扫频报告。
 
-输入是实机激励脚本（../actuator_id_node.py）产出的 session 目录，
-里面每组一个 group_*.npz（字段 t/cmd/q/dq/joint/joint_index/kind/name）。
-session.bag 只作归档，本工具不依赖 rosbag，用带 numpy/scipy 的解释器跑。
-
-用法：
-  python3 scripts/delay/fit_actuator_id.py \
-      --rundir ~/actuator_id_runs/<stamp> \
-      --outdir ~/actuator_id_runs/<stamp>/fit/
-
-输出：
-  actuator-id-table.md   关节 × 方向 × 幅值 → (τd, τm, v_max) + σ + NRMSE（测试 B 参数表）
-  bode.md                关节 × 频率 → 幅值比 / 相位滞后（测试 C），附模型预测对比
-  summary.json           机器可读全量结果（含每次阶跃的逐事件拟合）
-  fit_<group>.png        每组阶跃拟合叠图；bode_<joint>.png 幅频/相频图
-
-判据（01 测试 B）：组内 τd 标准差 < 10ms；模型复现 NRMSE < 10%。
+输入是 actuator_id_node.py 产出的 group_*.npz；不读取 rosbag。输出 v2
+summary.json、阶跃参数表和 Bode 表/图。前向链保持：纯延迟 → 速率限制 → 动态环节。
 """
 
 import argparse
@@ -25,43 +11,56 @@ import json
 from pathlib import Path
 
 import numpy as np
+from scipy.linalg import expm
 from scipy.optimize import least_squares
 
 
 # --------------------------------------------------------------------------- #
-# 前向模型：纯延迟 → 速率限制 → 一阶惯性 / 二阶                                  #
-# 与 RL 仓库 sim2deploy/gp11_reach/injection_chain.py 的注入链同构（顺序一致）    #
+# 前向模型：局部命令增量的纯延迟 → 速率限制 → 一阶/二阶动态
 # --------------------------------------------------------------------------- #
 
-def simulate(t, cmd, td, vmax, tau, q0, wn=None, zeta=None):
-    """按 t 采样点前向仿真。tau 为一阶时间常数；给 wn/zeta 则改二阶。"""
+def simulate(t, cmd, td, vmax, tau, q0, wn=None, zeta=None, K=1.0):
+    """按采样点前向仿真，保留旧调用签名，新增可选直流增益 ``K``。
+
+    ``cmd`` 可为绝对命令（旧 API）或局部增量。内部总是以 ``cmd[0]`` 为
+    命令基线，输出为 ``q0 + K * dynamic(cmd-cmd[0])``。
+    """
+    t = np.asarray(t, dtype=np.float64)
+    cmd = np.asarray(cmd, dtype=np.float64)
+    if len(t) < 2:
+        return np.full_like(cmd, float(q0))
     dt = float(np.median(np.diff(t)))
-    delayed = np.interp(t - td, t, cmd, left=cmd[0], right=cmd[-1])
-    # 速率限制（对延迟后的目标做斜坡跟随）
+    u = cmd - cmd[0]
+    delayed = np.interp(t - td, t, u, left=0.0, right=float(u[-1]))
+
     ramp = np.empty_like(delayed)
-    state = q0
-    lim = vmax * dt
+    state = 0.0
+    lim = float(vmax) * dt
     for i, target in enumerate(delayed):
         state += np.clip(target - state, -lim, lim)
         ramp[i] = state
-    # 惯性环节
-    q = np.empty_like(ramp)
+
+    dynamic = np.empty_like(ramp)
     if wn is None:
-        alpha = dt / (tau + dt)
-        pos = q0
+        # 与旧实现相同的后向 Euler 一阶离散；仅状态改为局部增量。
+        alpha = dt / (float(tau) + dt)
+        state = 0.0
         for i, target in enumerate(ramp):
-            pos += alpha * (target - pos)
-            q[i] = pos
+            state += alpha * (target - state)
+            dynamic[i] = state
     else:
-        pos, vel = q0, 0.0
-        sub, h = 4, dt / 4.0
+        # ZOH 精确离散。避免显式子步 Euler 在高 wn 下发散/overflow。
+        wn, zeta = float(wn), float(zeta)
+        augmented = np.array([[0.0, 1.0, 0.0],
+                              [-wn * wn, -2.0 * zeta * wn, wn * wn],
+                              [0.0, 0.0, 0.0]])
+        transition = expm(augmented * dt)
+        ad, bd = transition[:2, :2], transition[:2, 2]
+        state = np.zeros(2)
         for i, target in enumerate(ramp):
-            for _ in range(sub):
-                acc = wn * wn * (target - pos) - 2.0 * zeta * wn * vel
-                vel += acc * h
-                pos += vel * h
-            q[i] = pos
-    return q
+            state = ad @ state + bd * target
+            dynamic[i] = state[0]
+    return float(q0) + float(K) * dynamic
 
 
 def nrmse(q_meas, q_model):
@@ -72,132 +71,188 @@ def nrmse(q_meas, q_model):
 
 
 # --------------------------------------------------------------------------- #
-# 测试 B：阶跃事件切分与拟合                                                     #
+# 阶跃事件
 # --------------------------------------------------------------------------- #
 
 def find_step_edges(t, cmd, amp, pre_s=0.3, post_s=None):
-    """返回 [(i0, i_edge, i1), ...]：每个阶跃沿前后各留一段窗口。"""
+    """返回 ``(i0, i_edge, i1)`` 阶跃局部窗口。"""
     dt = float(np.median(np.diff(t)))
-    jump = np.abs(np.diff(cmd)) > abs(amp) * 0.5
+    jump = np.abs(np.diff(cmd)) > max(abs(amp) * 0.5, 1e-9)
     edges = np.flatnonzero(jump) + 1
     n_pre = int(round(pre_s / dt))
     out = []
-    for k, e in enumerate(edges):
-        nxt = edges[k + 1] if k + 1 < len(edges) else len(cmd)
-        i1 = nxt if post_s is None else min(nxt, e + int(round(post_s / dt)))
-        i0 = max(0, e - n_pre)
-        if i1 - e > int(round(0.5 / dt)):        # 至少 0.5s 响应段才可拟合
-            out.append((i0, e, i1))
+    for k, edge in enumerate(edges):
+        next_edge = edges[k + 1] if k + 1 < len(edges) else len(cmd)
+        i1 = next_edge if post_s is None else min(next_edge, edge + int(round(post_s / dt)))
+        i0 = max(0, edge - n_pre)
+        if i1 - edge > int(round(0.5 / dt)):
+            out.append((i0, edge, i1))
     return out
 
 
+def _bound_hits(x, lo, hi):
+    x, lo, hi = np.asarray(x), np.asarray(lo), np.asarray(hi)
+    tol = 1e-6 + 1e-4 * (hi - lo)
+    return (np.abs(x - lo) <= tol) | (np.abs(x - hi) <= tol)
+
+
+def _local_baselines(t, cmd, q):
+    edge = int(np.argmax(np.abs(np.diff(cmd))) + 1)
+    pre = slice(0, max(edge, 1))
+    return edge, float(np.median(cmd[pre])), float(np.median(q[pre]))
+
+
 def fit_step_event(t, cmd, q, second_order=False):
-    """单个阶跃事件拟合。返回 dict（含参数、NRMSE、τd 的几何估计）。"""
-    t = t - t[0]
-    q0 = float(q[0])
-
-    def resid(p):
-        if second_order:
-            td, wn, zeta = abs(p[0]), abs(p[1]), abs(p[2])
-            model = simulate(t, cmd, td, 1e3, None, q0, wn=wn, zeta=zeta)
-        else:
-            td, vmax, tau = abs(p[0]), abs(p[1]), abs(p[2])
-            model = simulate(t, cmd, td, vmax, tau, q0)
-        return model - q
-
-    p0 = [0.06, 12.0, 3.0] if second_order else [0.06, 6.0, 0.05]
-    lo = [0.0, 0.5, 0.2] if second_order else [0.0, 0.2, 0.002]
-    hi = [0.30, 200.0, 30.0] if second_order else [0.30, 60.0, 0.60]
-    sol = least_squares(resid, p0, bounds=(lo, hi), xtol=1e-10, ftol=1e-10)
-    p = np.abs(sol.x)
+    """在局部增量坐标拟合单个阶跃，并返回参数、质量诊断和模型。"""
+    t = np.asarray(t, dtype=np.float64) - float(t[0])
+    cmd, q = np.asarray(cmd, dtype=np.float64), np.asarray(q, dtype=np.float64)
+    edge, cmd_pre, q_pre = _local_baselines(t, cmd, q)
+    u = cmd - cmd_pre
     if second_order:
-        model = simulate(t, cmd, p[0], 1e3, None, q0, wn=p[1], zeta=p[2])
-        params = {"td": float(p[0]), "wn": float(p[1]), "zeta": float(p[2])}
-    else:
-        model = simulate(t, cmd, p[0], p[1], p[2], q0)
-        params = {"td": float(p[0]), "vmax": float(p[1]), "tau_m": float(p[2])}
-    params["nrmse"] = nrmse(q, model)
+        names = ("td", "wn", "zeta", "K")
+        p0, lo, hi = ([0.06, 12.0, 0.7, 1.0], [0.0, 0.5, 0.05, 0.1],
+                      [0.30, 200.0, 30.0, 3.0])
 
-    # τd 的独立几何估计：命令跳变到 q 越过 2% 幅值的时间（与拟合值交叉验证）
-    amp = float(cmd[-1] - cmd[0])
-    i_edge = int(np.argmax(np.abs(np.diff(cmd))) + 1)
-    thresh = max(abs(amp) * 0.02, 2e-4)
-    moved = np.flatnonzero(np.abs(q[i_edge:] - q0) > thresh)
-    params["td_geom"] = float(t[i_edge + moved[0]] - t[i_edge]) if len(moved) else float("nan")
-    # 恒斜率占比：运动样本中"接近峰值速度"的比例（分母只算运动段，静置段不稀释）。
-    # 速率限制主导 → 上升段 dq 近似恒定 → 接近 1；一阶惯性主导 → dq 指数衰减 → ~0.1
+        def forward(p):
+            return simulate(t, u, p[0], 1e6, None, q_pre, wn=p[1], zeta=p[2], K=p[3])
+    else:
+        names = ("td", "vmax", "tau_m", "K")
+        p0, lo, hi = ([0.06, 6.0, 0.05, 1.0], [0.0, 0.2, 0.002, 0.1],
+                      [0.30, 60.0, 0.60, 3.0])
+
+        def forward(p):
+            return simulate(t, u, p[0], p[1], p[2], q_pre, K=p[3])
+
+    sol = least_squares(lambda p: forward(p) - q, p0, bounds=(lo, hi),
+                        xtol=1e-10, ftol=1e-10, gtol=1e-10, max_nfev=2000)
+    model = forward(sol.x)
+    params = {name: float(value) for name, value in zip(names, sol.x)}
+    hits = _bound_hits(sol.x, lo, hi)
+    optimizer = {"success": bool(sol.success), "status": int(sol.status),
+                 "message": str(sol.message), "cost": float(sol.cost),
+                 "optimality": float(sol.optimality), "nfev": int(sol.nfev),
+                 "active_mask": [int(x) for x in sol.active_mask]}
+    params.update({
+        "cmd_pre": cmd_pre,
+        "q_pre": q_pre,
+        "nrmse": nrmse(q, model),
+        # 顶层字段方便 JSON 审计；optimizer 保留为结构化兼容别名。
+        **optimizer,
+        "optimizer": optimizer,
+        "bound_hits": {name: bool(hit) for name, hit in zip(names, hits)},
+        "any_bound_hit": bool(np.any(hits)),
+    })
+
+    command_delta = float(np.median(cmd[-max(1, len(cmd) // 8):]) - cmd_pre)
+    q_tail = float(np.median(q[-max(1, len(q) // 8):]))
+    response = q - q_pre
+    signed = np.sign(command_delta) if abs(command_delta) > 1e-9 else 1.0
+    final_delta = q_tail - q_pre
+    params["dc_gain"] = float(final_delta / command_delta) if abs(command_delta) > 1e-9 else float("nan")
+    params["overshoot"] = float(max(0.0, np.max(signed * response) - signed * final_delta))
+    params["steady_error"] = float(q_tail - (q_pre + params["K"] * command_delta))
+
+    threshold = max(abs(command_delta) * 0.02, 2e-4)
+    moved = np.flatnonzero(np.abs(q[edge:] - q_pre) > threshold)
+    params["td_geom"] = float(t[edge + moved[0]] - t[edge]) if len(moved) else float("nan")
     dq = np.gradient(q, t)
     peak = float(np.percentile(np.abs(dq), 98))
     moving = np.abs(dq) > 0.1 * peak
-    params["rate_sat_frac"] = (
-        float(np.mean(np.abs(dq[moving]) > 0.8 * peak)) if peak > 1e-6 and moving.any() else 0.0)
+    params["rate_sat_frac"] = (float(np.mean(np.abs(dq[moving]) > 0.8 * peak))
+                               if peak > 1e-6 and moving.any() else 0.0)
     params["dq_peak"] = peak
+    params["rate_identifiable"] = bool(not second_order and params["rate_sat_frac"] > 0.6
+                                        and not params["bound_hits"]["vmax"])
+    params["fit_valid"] = bool(sol.success and np.isfinite(sol.cost) and np.isfinite(params["nrmse"])
+                               and not params["any_bound_hit"])
     return params, model
 
 
 # --------------------------------------------------------------------------- #
-# 测试 C：单频最小二乘（幅值比 / 相位滞后）                                       #
+# 扫频：兼容 sweep_points；组处理严格按采集协议切段
 # --------------------------------------------------------------------------- #
 
-def sine_fit(t, x, f):
-    """在已知频率 f 上拟合 x ≈ a·sin + b·cos + c，返回 (幅值, 相位 rad)。"""
+def _sine_design(t, f):
+    centered = t - float(np.mean(t))
     w = 2.0 * np.pi * f
-    A = np.column_stack([np.sin(w * t), np.cos(w * t), np.ones_like(t)])
-    coef, *_ = np.linalg.lstsq(A, x, rcond=None)
-    a, b = coef[0], coef[1]
-    return float(np.hypot(a, b)), float(np.arctan2(b, a))
+    return np.column_stack([np.sin(w * t), np.cos(w * t), np.ones_like(t), centered])
+
+
+def sine_fit(t, x, f):
+    """旧 API：返回已知频率上的 ``(amplitude, phase_rad)``。"""
+    coef, *_ = np.linalg.lstsq(_sine_design(np.asarray(t), f), np.asarray(x), rcond=None)
+    return float(np.hypot(coef[0], coef[1])), float(np.arctan2(coef[1], coef[0]))
+
+
+def _fit_sine_window(t, cmd, q, f, window_start, window_end, n_cycles):
+    mask = (t >= window_start) & (t < window_end)
+    tt, cc, qq = t[mask], cmd[mask], q[mask]
+    if len(tt) < 8:
+        return None
+    amp_cmd, phase_cmd = sine_fit(tt, cc, f)
+    if amp_cmd < 1e-6:
+        return None
+    amp_q, phase_q = sine_fit(tt, qq, f)
+    pred = _sine_design(tt, f) @ np.linalg.lstsq(_sine_design(tt, f), qq, rcond=None)[0]
+    lag = float(np.degrees(phase_cmd - phase_q))
+    wrapped = (lag + 180.0) % 360.0 - 180.0
+    rms = float(np.sqrt(np.mean((qq - pred) ** 2)))
+    return {"freq_hz": float(f), "amp_cmd": amp_cmd, "amp_ratio": float(amp_q / amp_cmd),
+            "phase_lag_deg": wrapped, "phase_lag_unwrapped_deg": wrapped,
+            "window_start": float(window_start), "window_end": float(window_end),
+            "n_samples": int(len(tt)), "n_cycles": float(n_cycles),
+            "residual_rms": rms,
+            "residual_ratio": float(rms / amp_q) if amp_q > 1e-9 else float("nan")}
 
 
 def sweep_points(t, cmd, q, freqs):
-    """对每个频点截出命令确有该频率成分的窗口，返回逐频点幅值比/相位滞后。"""
+    """旧 API：整窗单频拟合，供旧调用方与兼容测试使用。"""
     pts = []
     for f in freqs:
-        amp_c, ph_c = sine_fit(t, cmd, f)
-        # 命令幅值太小说明该窗口不含此频率（合成组里其它频段），跳过
+        amp_c, phase_c = sine_fit(t, cmd, f)
         if amp_c < 1e-3:
             continue
-        amp_q, ph_q = sine_fit(t, q, f)
-        lag = np.degrees(ph_c - ph_q)
-        while lag < -180.0:
-            lag += 360.0
-        while lag > 180.0:
-            lag -= 360.0
-        pts.append({"freq_hz": float(f), "amp_ratio": amp_q / amp_c,
-                    "phase_lag_deg": float(lag), "amp_cmd": amp_c})
+        amp_q, phase_q = sine_fit(t, q, f)
+        lag = (np.degrees(phase_c - phase_q) + 180.0) % 360.0 - 180.0
+        pts.append({"freq_hz": float(f), "amp_ratio": float(amp_q / amp_c),
+                    "phase_lag_deg": float(lag), "amp_cmd": float(amp_c)})
     return pts
 
 
-def model_bode(f, td, tau, wn=None, zeta=None):
-    """一阶（或二阶）+ 纯延迟的解析 Bode 点，用于与测试 C 交叉验证。"""
+def _unwrap_points(points):
+    if points:
+        order = np.argsort([p["freq_hz"] for p in points])
+        vals = np.unwrap(np.radians([points[i]["phase_lag_deg"] for i in order]))
+        for i, value in zip(order, np.degrees(vals)):
+            points[i]["phase_lag_unwrapped_deg"] = float(value)
+
+
+def model_bode(f, td, tau=None, wn=None, zeta=None, K=1.0):
+    """带直流增益 K 的一阶/二阶连续解析 Bode 点。"""
     w = 2.0 * np.pi * f
     if wn is None:
         h = 1.0 / (1.0 + 1j * w * tau)
     else:
         h = wn ** 2 / (wn ** 2 - w ** 2 + 2j * zeta * wn * w)
-    h = h * np.exp(-1j * w * td)
+    h = float(K) * h * np.exp(-1j * w * td)
     return float(np.abs(h)), float(-np.degrees(np.angle(h)))
 
 
 # --------------------------------------------------------------------------- #
-# 组遍历与聚合                                                                  #
+# 组遍历与聚合
 # --------------------------------------------------------------------------- #
 
 def load_groups(rundir):
     groups = []
-    for p in sorted(Path(rundir).glob("group_*.npz")):
-        d = np.load(p, allow_pickle=True)
-        groups.append({
-            "path": p,
-            "name": str(d["name"]),
-            "joint": str(d["joint"]),
-            "kind": str(d["kind"]),
-            "j": int(d["joint_index"]),
-            "t": np.asarray(d["t"], dtype=np.float64),
-            "cmd": np.asarray(d["cmd"], dtype=np.float64),
-            "q": np.asarray(d["q"], dtype=np.float64),
-            "dq": np.asarray(d["dq"], dtype=np.float64),
-            "meta": ast.literal_eval(str(d["meta"])) if "meta" in d else {},
-        })
+    for path in sorted(Path(rundir).glob("group_*.npz")):
+        data = np.load(path, allow_pickle=True)
+        groups.append({"path": path, "name": str(data["name"]), "joint": str(data["joint"]),
+                       "kind": str(data["kind"]), "j": int(data["joint_index"]),
+                       "t": np.asarray(data["t"], dtype=np.float64),
+                       "cmd": np.asarray(data["cmd"], dtype=np.float64),
+                       "q": np.asarray(data["q"], dtype=np.float64),
+                       "dq": np.asarray(data["dq"], dtype=np.float64),
+                       "meta": ast.literal_eval(str(data["meta"])) if "meta" in data else {}})
     if not groups:
         raise SystemExit(f"{rundir} 下没有 group_*.npz")
     return groups
@@ -207,278 +262,218 @@ def process_step_group(g, second_order, outdir, make_plot=True):
     j = g["j"]
     t, cmd, q = g["t"], g["cmd"][:, j], g["q"][:, j]
     amp = float(g["meta"].get("amplitude", 0.0)) or float(np.max(np.abs(np.diff(cmd))))
-    events = []
-    overlays = []
-    for i0, e, i1 in find_step_edges(t, cmd, amp):
-        seg_t, seg_cmd, seg_q = t[i0:i1], cmd[i0:i1], q[i0:i1]
-        params, model = fit_step_event(seg_t, seg_cmd, seg_q, second_order)
-        # 按沿的实际运动方向分组统计（01 测试 B 的"方向不对称"分支要用）。
-        # 注意：不能用 |cmd末-cmd初| 判方向——抬起沿与回落沿的幅值绝对值相同。
-        params["dir"] = "+" if float(cmd[e] - cmd[e - 1]) > 0 else "-"
-        params["t_edge"] = float(t[e] - t[0])
+    events, overlays = [], []
+    for i0, edge, i1 in find_step_edges(t, cmd, amp):
+        params, model = fit_step_event(t[i0:i1], cmd[i0:i1], q[i0:i1], second_order)
+        params["dir"] = "+" if float(cmd[edge] - cmd[edge - 1]) > 0 else "-"
+        params["t_edge"] = float(t[edge] - t[0])
         events.append(params)
-        overlays.append((seg_t - seg_t[0], seg_cmd, seg_q, model, params["dir"]))
+        overlays.append((t[i0:i1] - t[i0], cmd[i0:i1], q[i0:i1], model, params["dir"]))
     if make_plot and overlays:
         _plot_step_fit(g, overlays, outdir)
-    by_dir = {d: [e for e in events if e["dir"] == d] for d in ("+", "-")}
-    return {"group": g["name"], "joint": g["joint"], "kind": "step",
-            "amplitude": amp, "n_events": len(events), "events": events,
-            "agg_by_dir": {d: _aggregate(evs, second_order)
-                           for d, evs in by_dir.items() if evs},
+    by_dir = {d: [event for event in events if event["dir"] == d] for d in ("+", "-")}
+    return {"group": g["name"], "joint": g["joint"], "kind": "step", "amplitude": amp,
+            "n_events": len(events), "events": events,
+            "agg_by_dir": {d: _aggregate(events, second_order) for d, events in by_dir.items() if events},
             "agg": _aggregate(events, second_order)}
 
 
 def _aggregate(events, second_order):
     if not events:
         return {}
-    keys = ["td", "wn", "zeta"] if second_order else ["td", "vmax", "tau_m"]
+    keys = (["td", "wn", "zeta", "K"] if second_order
+            else ["td", "vmax", "tau_m", "K"])
     agg = {}
-    for k in keys + ["nrmse", "td_geom", "rate_sat_frac", "dq_peak"]:
-        vals = np.array([e[k] for e in events if not np.isnan(e.get(k, np.nan))])
-        if len(vals):
-            agg[k] = {"mean": float(vals.mean()), "std": float(vals.std()),
-                      "min": float(vals.min()), "max": float(vals.max())}
+    for key in keys + ["nrmse", "td_geom", "rate_sat_frac", "dq_peak", "dc_gain", "overshoot", "steady_error"]:
+        values = np.array([e[key] for e in events if np.isfinite(e.get(key, np.nan))])
+        if len(values):
+            agg[key] = {"mean": float(values.mean()), "std": float(values.std()),
+                        "min": float(values.min()), "max": float(values.max())}
     td = agg.get("td", {})
-    agg["pass_td_std"] = bool(td.get("std", 1.0) < 0.010)          # < 10ms
+    agg["pass_td_std"] = bool(td.get("std", 1.0) < 0.010)
     agg["pass_nrmse"] = bool(agg.get("nrmse", {}).get("mean", 1.0) < 0.10)
+    agg["pass_optimizer"] = bool(all(e.get("optimizer", {}).get("success", False) for e in events))
+    agg["pass_no_bounds"] = bool(not any(e.get("any_bound_hit", True) for e in events))
+    agg["pass_all"] = bool(agg["pass_td_std"] and agg["pass_nrmse"]
+                           and agg["pass_optimizer"] and agg["pass_no_bounds"])
+    agg["rate_identifiable"] = bool(any(e.get("rate_identifiable", False) for e in events))
     return agg
 
 
 def process_sweep_group(g, freqs_hint):
+    """严格按 actuator_id_node 的 1s hold/周期协议切分，丢弃每段首周期。"""
     j = g["j"]
-    t, cmd, q = g["t"], g["cmd"][:, j], g["q"][:, j]
-    meta = g["meta"]
+    t = np.asarray(g["t"], dtype=np.float64) - float(g["t"][0])
+    cmd, q, meta = g["cmd"][:, j], g["q"][:, j], g["meta"]
     freqs = ([float(meta["freq_hz"])] if "freq_hz" in meta
              else [float(f) for f in meta.get("freqs", freqs_hint)])
-    pts = sweep_points(t - t[0], cmd, q, freqs)
-    return {"group": g["name"], "joint": g["joint"], "kind": "sweep", "points": pts}
+    cursor, points = 0.0, []
+    for f in freqs:
+        cycles = 6 if f < 1.0 else 10
+        sine_start, sine_end = cursor + 1.0, cursor + 1.0 + cycles / f
+        point = _fit_sine_window(t, cmd, q, f, sine_start + 1.0 / f, sine_end, cycles - 1)
+        if point is not None:
+            points.append(point)
+        cursor = sine_end
+    _unwrap_points(points)
+    return {"group": g["name"], "joint": g["joint"], "kind": "sweep", "points": points}
+
+
+def _unwrap_all_sweeps(results):
+    by_joint = {}
+    for result in results:
+        by_joint.setdefault(result["joint"], []).extend(result["points"])
+    for points in by_joint.values():
+        _unwrap_points(points)
 
 
 # --------------------------------------------------------------------------- #
-# 绘图                                                                         #
+# 图与报告
 # --------------------------------------------------------------------------- #
 
 def _plot_step_fit(g, overlays, outdir):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-
-    n = len(overlays)
-    fig, axes = plt.subplots(1, n, figsize=(3.2 * n, 3.0), squeeze=False, sharey=True)
-    for ax, (tt, cc, qq, mm, d) in zip(axes[0], overlays):
+    fig, axes = plt.subplots(1, len(overlays), figsize=(3.2 * len(overlays), 3.0), squeeze=False, sharey=True)
+    for ax, (tt, cc, qq, mm, direction) in zip(axes[0], overlays):
         ax.plot(tt, cc, "k--", lw=1.0, label="cmd")
         ax.plot(tt, qq, "C0", lw=1.2, label="q measured")
-        ax.plot(tt, mm, "C3", lw=1.0, label="model")
-        ax.set_title(f"edge {d}", fontsize=8)
-        ax.set_xlabel("t [s]")
-        ax.grid(alpha=0.3)
-    axes[0][0].set_ylabel("position [rad]")
-    axes[0][0].legend(fontsize=7)
-    fig.suptitle(f"{g['name']} step fit", fontsize=9)
-    fig.tight_layout()
-    out = Path(outdir) / f"fit_{g['name'].replace('/', '_')}.png"
-    fig.savefig(out, dpi=110)
-    plt.close(fig)
+        ax.plot(tt, mm, "C3", lw=1.0, label="K·model")
+        ax.set_title(f"edge {direction}", fontsize=8); ax.set_xlabel("t [s]"); ax.grid(alpha=0.3)
+    axes[0][0].set_ylabel("position [rad]"); axes[0][0].legend(fontsize=7)
+    fig.suptitle(f"{g['name']} local-increment step fit", fontsize=9); fig.tight_layout()
+    fig.savefig(Path(outdir) / f"fit_{g['name'].replace('/', '_')}.png", dpi=110); plt.close(fig)
 
 
 def _plot_bode(joint, pts, model, outdir):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-
-    f = np.array([p["freq_hz"] for p in pts])
-    order = np.argsort(f)
-    f = f[order]
-    mag = np.array([p["amp_ratio"] for p in pts])[order]
-    lag = np.array([p["phase_lag_deg"] for p in pts])[order]
-    fig, (a1, a2) = plt.subplots(2, 1, figsize=(5.2, 5.0), sharex=True)
+    pts = sorted(pts, key=lambda point: point["freq_hz"])
+    f = np.array([p["freq_hz"] for p in pts]); mag = np.array([p["amp_ratio"] for p in pts])
+    wrapped = np.array([p["phase_lag_deg"] for p in pts]); unwrapped = np.array([p["phase_lag_unwrapped_deg"] for p in pts])
+    residual = np.array([p["residual_ratio"] for p in pts])
+    fig, (a1, a2, a3) = plt.subplots(3, 1, figsize=(5.4, 6.4), sharex=True)
     a1.semilogx(f, mag, "C0o-", label="measured")
-    a2.semilogx(f, lag, "C0o-", label="measured")
+    a2.semilogx(f, wrapped, "C0o-", label="wrapped")
+    a2.semilogx(f, unwrapped, "C2s--", label="unwrapped")
+    a3.semilogx(f, residual, "C1o-", label="fit residual / response amplitude")
     if model is not None:
-        fm = np.geomspace(max(f.min(), 0.05), f.max() * 1.2, 120)
-        mm = [model_bode(x, **model) for x in fm]
-        a1.semilogx(fm, [m[0] for m in mm], "C3--", label="step-fit model")
-        a2.semilogx(fm, [m[1] for m in mm], "C3--", label="step-fit model")
+        fm = np.geomspace(max(f.min(), 0.05), f.max() * 1.2, 120); mm = [model_bode(x, **model) for x in fm]
+        a1.semilogx(fm, [m[0] for m in mm], "C3--", label="approved step model")
+        a2.semilogx(fm, [m[1] for m in mm], "C3--", label="model phase")
+    for p in pts:
+        a3.annotate(f"{p['n_cycles']:g} cyc", (p["freq_hz"], p["residual_ratio"]), fontsize=6)
     a1.axhline(1.0, color="gray", lw=0.6)
-    a1.set_ylabel("amplitude ratio")
-    a1.grid(alpha=0.3, which="both")
-    a1.legend(fontsize=7)
-    a2.set_ylabel("phase lag [deg]")
-    a2.set_xlabel("f [Hz]")
-    a2.grid(alpha=0.3, which="both")
-    fig.suptitle(f"{joint} Bode (test C)", fontsize=9)
-    fig.tight_layout()
-    fig.savefig(Path(outdir) / f"bode_{joint}.png", dpi=110)
-    plt.close(fig)
+    for ax in (a1, a2, a3): ax.grid(alpha=0.3, which="both"); ax.legend(fontsize=7)
+    a1.set_ylabel("amplitude ratio"); a2.set_ylabel("phase lag [deg]"); a3.set_ylabel("residual ratio"); a3.set_xlabel("f [Hz]")
+    fig.suptitle(f"{joint} Bode (segmented test C)", fontsize=9); fig.tight_layout()
+    fig.savefig(Path(outdir) / f"bode_{joint}.png", dpi=110); plt.close(fig)
 
 
-# --------------------------------------------------------------------------- #
-# 报告                                                                         #
-# --------------------------------------------------------------------------- #
+def _f(agg, key, scale=1.0, fmt="{:.2f}±{:.2f}"):
+    value = agg.get(key)
+    return "-" if not value else fmt.format(value["mean"] * scale, value["std"] * scale)
 
-def _f(agg, key, scale=1.0, fmt="{:.1f}±{:.1f}"):
-    d = agg.get(key)
-    if not d:
-        return "-"
-    return fmt.format(d["mean"] * scale, d["std"] * scale)
+
+def _mark(value):
+    return "PASS" if value else "FAIL"
 
 
 def write_table(step_results, second_order, path, rundir):
-    lines = [
-        "# 执行器辨识参数表（01 测试 B）",
-        "",
-        f"数据来源：`{rundir}`　拟合工具：`scripts/delay/fit_actuator_id.py`",
-        f"模型：纯延迟 τd → 速率限制 v_max → " +
-        ("二阶 (ωn, ζ)" if second_order else "一阶 τm"),
-        "",
-        "判据：组内 τd 标准差 < 10ms、NRMSE < 10%（两列 ✅/❌）",
-        "",
-    ]
+    dynamic = "二阶 (ωn, ζ)" if second_order else "一阶 τm"
+    lines = ["# 执行器辨识参数表（v2，测试 B）", "", f"数据来源：`{rundir}`", "",
+             f"局部增量模型：q_pre + K·(纯延迟 τd → 速率限制 → {dynamic})。",
+             "`pass_all` = τd σ、NRMSE、优化器成功且无边界命中均通过；触边界或优化失败不可批准。", ""]
+    columns = ["组", "关节", "沿", "n", "τd ms", "K"]
     if second_order:
-        head = ("| 组 | 关节 | 指令幅值 rad | 沿 | n | τd ms | ωn rad/s | ζ | "
-                "dq峰 rad/s | NRMSE | τd σ | NRMSE |")
-        sep = "|---|---|---|---|---|---|---|---|---|---|---|---|"
+        columns += ["ωn rad/s", "ζ"]
     else:
-        head = ("| 组 | 关节 | 指令幅值 rad | 沿 | n | τd ms | τd(几何) ms | v_max rad/s | "
-                "τm ms | 恒斜率占比 | NRMSE | τd σ | NRMSE |")
-        sep = "|---|---|---|---|---|---|---|---|---|---|---|---|---|"
-    lines += [head, sep]
-    for r in step_results:
-        # 抬起沿与回落沿分行：同一组里两者混算会把方向不对称藏进 σ 里
-        for d, a in sorted(r.get("agg_by_dir", {}).items()):
-            if not a:
-                continue
-            n = sum(1 for e in r["events"] if e["dir"] == d)
-            mark = lambda k: "✅" if a.get(k) else "❌"  # noqa: E731
+        columns += ["v_max rad/s", "τm ms", "rate identifiable"]
+    columns += ["实测 dc_gain", "overshoot rad", "steady_error rad", "NRMSE",
+                "optimizer", "bounds", "pass_all"]
+    lines += ["| " + " | ".join(columns) + " |",
+              "|" + "|".join(["---"] * len(columns)) + "|"]
+    for result in step_results:
+        for direction, agg in sorted(result.get("agg_by_dir", {}).items()):
+            n = sum(e["dir"] == direction for e in result["events"])
+            values = [result["group"], result["joint"], direction, str(n),
+                      _f(agg, "td", 1e3, "{:.1f}±{:.1f}"), _f(agg, "K")]
             if second_order:
-                cells = [r["group"], r["joint"], f"{r['amplitude']:+.3f}", d, str(n),
-                         _f(a, "td", 1e3), _f(a, "wn"), _f(a, "zeta", 1.0, "{:.2f}±{:.2f}"),
-                         _f(a, "dq_peak", 1.0, "{:.2f}±{:.2f}"),
-                         _f(a, "nrmse", 100.0, "{:.1f}±{:.1f}%"),
-                         mark("pass_td_std"), mark("pass_nrmse")]
+                values += [_f(agg, "wn"), _f(agg, "zeta")]
             else:
-                cells = [r["group"], r["joint"], f"{r['amplitude']:+.3f}", d, str(n),
-                         _f(a, "td", 1e3), _f(a, "td_geom", 1e3),
-                         _f(a, "vmax", 1.0, "{:.2f}±{:.2f}"), _f(a, "tau_m", 1e3),
-                         _f(a, "rate_sat_frac", 1.0, "{:.2f}±{:.2f}"),
-                         _f(a, "nrmse", 100.0, "{:.1f}±{:.1f}%"),
-                         mark("pass_td_std"), mark("pass_nrmse")]
-            lines.append("| " + " | ".join(cells) + " |")
-    lines += [
-        "",
-        "## 读表要点",
-        "",
-        "- `τd` 是拟合值，`τd(几何)` 是命令跳变到 q 越过 2% 幅值的时间，两者应接近；",
-        "  差异大说明一阶/速率限制的结构不对（考虑改二阶：`--second-order`）。",
-        "- `沿` 列 `+`=离开基准位姿的抬起沿，`-`=回到基准位姿的回落沿。两者参数差异大",
-        "  → 齿隙/摩擦方向性，走 01 测试 B 的「方向不对称」分支（模型分方向参数化）。",
-        "  判据按沿分别评（混算会把方向差异藏进 σ 里）。",
-        "- `恒斜率占比` >0.6 → 该幅值下速率限制主导，v_max 可信、τm 不可信；",
-        "  <0.45 → 惯性主导，τm 可信而 **v_max 不可辨识**（拟合值会停在初值附近，只当下界看）。",
-        "  按 01 测试 B 的分支：v_max 取大幅值组，τm 取小幅值组。",
-        "- T3 的 DR 范围 = 实测均值 ± max(2σ, 20%)。",
-        "",
-    ]
+                values += [_f(agg, "vmax"), _f(agg, "tau_m", 1e3, "{:.1f}±{:.1f}"),
+                           "YES" if agg.get("rate_identifiable") else "NO"]
+            values += [_f(agg, "dc_gain"), _f(agg, "overshoot"), _f(agg, "steady_error"),
+                       _f(agg, "nrmse", 100.0, "{:.1f}±{:.1f}%"),
+                       _mark(agg.get("pass_optimizer")), _mark(agg.get("pass_no_bounds")),
+                       _mark(agg.get("pass_all"))]
+            lines.append("| " + " | ".join(values) + " |")
+    if not second_order:
+        lines += ["", "一阶中只有 `rate_sat_frac > 0.6` 且 `vmax` 未触边界时 `rate_identifiable=true`；",
+                  "否则 v_max 仅作事件诊断，绝不进入批准代表模型。"]
     Path(path).write_text("\n".join(lines), encoding="utf-8")
 
 
 def write_bode(sweep_results, model_by_joint, path, rundir):
-    lines = [
-        "# 执行器频域响应（01 测试 C）",
-        "",
-        f"数据来源：`{rundir}`　单频最小二乘拟合（幅值比 = |q|/|cmd|）",
-        "",
-        "| 关节 | f Hz | 幅值比 | 相位滞后 deg | 模型幅值比 | 模型相位 deg |",
-        "|---|---|---|---|---|---|",
-    ]
-    for r in sweep_results:
-        m = model_by_joint.get(r["joint"])
-        for p in sorted(r["points"], key=lambda x: x["freq_hz"]):
-            mm = model_bode(p["freq_hz"], **m) if m else (float("nan"),) * 2
-            lines.append(
-                f"| {r['joint']} | {p['freq_hz']:.2f} | {p['amp_ratio']:.3f} | "
-                f"{p['phase_lag_deg']:.1f} | {mm[0]:.3f} | {mm[1]:.1f} |")
-    lines += [
-        "",
-        "判读（01 测试 C 分支）：幅值比在 1.5–2.2Hz 出现 >1 的谐振峰 → 二阶欠阻尼，",
-        "T3 模型必须复现该谐振；高频相位滞后远超模型 → 有未建模高阶滞后，进测试 D。",
-        "",
-    ]
+    lines = ["# 执行器频域响应（v2，测试 C）", "", f"数据来源：`{rundir}`。每频点丢弃前 1 秒 hold 和首周期，",
+             "在剩余稳态段最小二乘拟合 `[sin, cos, constant, linear trend]`。", "",
+             "| 关节 | f Hz | amp_cmd | amp_ratio | phase wrapped deg | phase unwrapped deg | cycles | residual RMS | residual ratio | model amp | model phase |",
+             "|---|---|---|---|---|---|---|---|---|---|---|"]
+    for result in sweep_results:
+        model = model_by_joint.get(result["joint"])
+        for point in sorted(result["points"], key=lambda item: item["freq_hz"]):
+            pred = model_bode(point["freq_hz"], **model) if model else (float("nan"), float("nan"))
+            lines.append(f"| {result['joint']} | {point['freq_hz']:.2f} | {point['amp_cmd']:.4f} | {point['amp_ratio']:.3f} | {point['phase_lag_deg']:.1f} | {point['phase_lag_unwrapped_deg']:.1f} | {point['n_cycles']:g} | {point['residual_rms']:.5f} | {point['residual_ratio']:.3f} | {pred[0]:.3f} | {pred[1]:.1f} |")
     Path(path).write_text("\n".join(lines), encoding="utf-8")
 
 
-# --------------------------------------------------------------------------- #
-# main                                                                         #
-# --------------------------------------------------------------------------- #
+def _approved_models(step_results, second_order):
+    models = {}
+    for result in sorted(step_results, key=lambda item: abs(item["amplitude"])):
+        aggregate = result.get("agg_by_dir", {}).get("+") or result.get("agg", {})
+        if result["joint"] in models or not aggregate.get("pass_all", False):
+            continue
+        if second_order:
+            models[result["joint"]] = {"td": aggregate["td"]["mean"], "tau": None,
+                                        "wn": aggregate["wn"]["mean"], "zeta": aggregate["zeta"]["mean"],
+                                        "K": aggregate["K"]["mean"]}
+        else:
+            models[result["joint"]] = {"td": aggregate["td"]["mean"], "tau": aggregate["tau_m"]["mean"],
+                                        "K": aggregate["K"]["mean"]}
+            if aggregate.get("rate_identifiable", False):
+                models[result["joint"]]["vmax"] = aggregate["vmax"]["mean"]
+    return models
+
 
 def main():
-    p = argparse.ArgumentParser(description=__doc__,
-                                formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--rundir", required=True, help="actuator_id_node 的 session 目录")
-    p.add_argument("--outdir", required=True)
-    p.add_argument("--second-order", action="store_true",
-                   help="改用二阶 (ωn, ζ) 拟合（一阶拟合不上时，见 01 测试 B ❌ 分支）")
-    p.add_argument("--no-plots", action="store_true")
-    args = p.parse_args()
-
-    outdir = Path(args.outdir)
-    outdir.mkdir(parents=True, exist_ok=True)
-    groups = load_groups(args.rundir)
-
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--rundir", required=True, help="actuator_id_node 的 session 目录")
+    parser.add_argument("--outdir", required=True)
+    parser.add_argument("--second-order", action="store_true")
+    parser.add_argument("--no-plots", action="store_true")
+    args = parser.parse_args()
+    outdir = Path(args.outdir); outdir.mkdir(parents=True, exist_ok=True)
     step_results, sweep_results = [], []
-    for g in groups:
-        if g["kind"] == "step":
-            step_results.append(process_step_group(g, args.second_order, outdir,
-                                                   make_plot=not args.no_plots))
+    for group in load_groups(args.rundir):
+        if group["kind"] == "step":
+            step_results.append(process_step_group(group, args.second_order, outdir, not args.no_plots))
         else:
-            sweep_results.append(process_sweep_group(g, freqs_hint=[]))
-
-    # 每个关节取小幅值组的模型作为 Bode 对比基准（惯性主导，参数最可信）
-    model_by_joint = {}
-    for r in sorted(step_results, key=lambda x: abs(x["amplitude"])):
-        # 取抬起沿（+）的聚合；没有则退回全沿聚合
-        a = r.get("agg_by_dir", {}).get("+") or r["agg"]
-        if not a or r["joint"] in model_by_joint:
-            continue
-        if args.second_order:
-            model_by_joint[r["joint"]] = {
-                "td": a["td"]["mean"], "tau": None,
-                "wn": a["wn"]["mean"], "zeta": a["zeta"]["mean"]}
-        else:
-            model_by_joint[r["joint"]] = {"td": a["td"]["mean"], "tau": a["tau_m"]["mean"]}
-
+            sweep_results.append(process_sweep_group(group, []))
+    _unwrap_all_sweeps(sweep_results)
+    models = _approved_models(step_results, args.second_order)
     write_table(step_results, args.second_order, outdir / "actuator-id-table.md", args.rundir)
     if sweep_results:
-        write_bode(sweep_results, model_by_joint, outdir / "bode.md", args.rundir)
+        write_bode(sweep_results, models, outdir / "bode.md", args.rundir)
         if not args.no_plots:
             by_joint = {}
-            for r in sweep_results:
-                by_joint.setdefault(r["joint"], []).extend(r["points"])
-            for joint, pts in by_joint.items():
-                if pts:
-                    _plot_bode(joint, pts, model_by_joint.get(joint), outdir)
-
-    (outdir / "summary.json").write_text(json.dumps({
-        "rundir": str(args.rundir),
-        "second_order": args.second_order,
-        "step": step_results,
-        "sweep": sweep_results,
-        "model_by_joint": model_by_joint,
-    }, indent=2, ensure_ascii=False), encoding="utf-8")
-
+            for result in sweep_results: by_joint.setdefault(result["joint"], []).extend(result["points"])
+            for joint, points in by_joint.items():
+                if points: _plot_bode(joint, points, models.get(joint), outdir)
+    summary = {"schema_version": 2, "model_description": "q_pre + K * dynamic(cmd-cmd_pre); delay → rate limit → first/second order", "rundir": str(args.rundir), "second_order": args.second_order, "step": step_results, "sweep": sweep_results, "model_by_joint": models}
+    (outdir / "summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"阶跃组 {len(step_results)}，扫频组 {len(sweep_results)} → {outdir}")
-    key = "wn" if args.second_order else "tau_m"
-    for r in step_results:
-        if not r.get("agg_by_dir"):
-            print(f"  {r['group']}: 无可用阶跃事件")
-            continue
-        for d, a in sorted(r["agg_by_dir"].items()):
-            n = sum(1 for e in r["events"] if e["dir"] == d)
-            print(f"  {r['group']} 沿{d}: n={n} τd={a['td']['mean']*1e3:.1f}±"
-                  f"{a['td']['std']*1e3:.1f}ms {key}={a[key]['mean']:.4f} "
-                  f"NRMSE={a['nrmse']['mean']*100:.1f}% "
-                  f"[{'✅' if a['pass_td_std'] else '❌'}τdσ "
-                  f"{'✅' if a['pass_nrmse'] else '❌'}NRMSE]")
 
 
 if __name__ == "__main__":
