@@ -9,6 +9,8 @@ steering_engine_hw:
     angular_velocity_covariance_diagonal: [0.0004, 0.0004, 0.0004]
     linear_acceleration_covariance_diagonal: [0.01, 0.01, 0.01]
   protocol:
+    # 0=关闭，1=左第一腿部关节，2=右第一腿部关节
+    gravity_compensation_mode: 0
     id_map:
       left_first_leg_joint: 2
       left_second_leg_joint: 5

@@ -18,9 +18,12 @@ struct AutoStateData
     std_msgs::Header header;
 
     bool lower_alive{false};
+    bool imu_ready{false};
     bool grip_confirmed{false};
     bool joint_fault{false};
     bool grip_fault{false};
+    std::array<double, 4> remote_joint_increment{};
+    bool remote_control_stage_complete{false};
 
     bool obstacle_detected{false};
     ObstacleType obstacle_type{ObstacleType::OBSTACLE_UNKNOWN};

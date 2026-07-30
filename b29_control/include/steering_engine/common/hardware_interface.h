@@ -229,13 +229,27 @@ private:
   int rx_len_;
   std::vector<uint8_t> rx_buffer_;
   int tx_len_;
-  static constexpr size_t k_frame_length_ = 51;
+  static constexpr size_t k_frame_length_ = 52;
   static constexpr size_t k_header_length_ = 2;
   static constexpr size_t k_ctrl_length_ = 1;
   static constexpr size_t k_length_ = 1;
   static constexpr size_t k_data_length_ = 44;
+  static constexpr size_t k_gravity_compensation_length_ = 1;
   static constexpr size_t k_crc_length_ = 1;
   static constexpr size_t k_tail_length_ = 2;
+  static constexpr size_t k_feedback_motor_count_ = kActuatorCount;
+  static constexpr size_t k_feedback_motor_entry_length_ = 13;
+  static constexpr size_t k_feedback_imu_float_count_ = 10;
+  static constexpr size_t k_feedback_remote_joint_count_ = 4;
+  static constexpr size_t k_feedback_status_length_ = 4;
+  static constexpr size_t k_feedback_payload_length_ =
+      k_feedback_motor_count_ * k_feedback_motor_entry_length_ +
+      k_feedback_imu_float_count_ * sizeof(float) +
+      k_feedback_remote_joint_count_ * sizeof(float) +
+      k_feedback_status_length_;
+  static constexpr size_t k_feedback_frame_length_ =
+      k_header_length_ + k_ctrl_length_ + k_length_ +
+      k_feedback_payload_length_ + k_crc_length_ + k_tail_length_;
   uint8_t tx_buffer_[k_frame_length_];
 
   //通信协议常量
@@ -258,6 +272,7 @@ private:
   std::unordered_map<std::string, ActuatorIndex> joint_to_actuator_{};
   ControlMap control_map_{};
   ProtocolTopics protocol_topics_{};
+  uint8_t gravity_compensation_mode_{0};
   double joint_speed_target_{1.0};
   std::array<double, 2> claw_speed_target_{{1.0, 1.0}};
   ros::Subscriber joint_speed_sub_;
@@ -269,7 +284,10 @@ typedef struct {
   unsigned char ctrl_;      // k_ctrl_length_
   unsigned char length_;    // k_length_
   unsigned char data_[44];  // k_data_length_
+  unsigned char gravity_compensation_mode_;
   unsigned char crc_;       // k_crc_length_
   unsigned char ender_[2];  // k_tail_length_
 } __packed SerialFrame;
+static_assert(sizeof(SerialFrame) == 52,
+              "SerialFrame must match the 52-byte control protocol");
 } // namespace steering_engine_hw

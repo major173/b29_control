@@ -131,6 +131,8 @@ void StRobotHW::write(const ros::Time &time, const ros::Duration &period) {
   }
   
   static std::array<uint8_t, k_data_length_> last_send_data{};
+  static uint8_t last_gravity_compensation_mode = 0;
+  static bool has_last_send = false;
   std::array<uint8_t, k_data_length_> data{};
 
   if (jnt_to_act_position_interface_) {
@@ -203,17 +205,21 @@ void StRobotHW::write(const ros::Time &time, const ros::Duration &period) {
     packFloat(static_cast<float>(joint_angle_target));
   }
 
-  if (memcmp(data.data(), last_send_data.data(), data.size()) != 0) {
+  if (!has_last_send ||
+      memcmp(data.data(), last_send_data.data(), data.size()) != 0 ||
+      gravity_compensation_mode_ != last_gravity_compensation_mode) {
     pack(tx_buffer_, control_code_, data.data());
     tx_len_ = sizeof(tx_buffer_);
     try {
       serial_.write(tx_buffer_, tx_len_);
-    } 
+    }
     catch (const serial::IOException& e) {
       handleSerialIoError("Serial write() failed", e);
       return;
     }
     memcpy(last_send_data.data(), data.data(), data.size());
+    last_gravity_compensation_mode = gravity_compensation_mode_;
+    has_last_send = true;
   }
 
   clearTxBuffer();
@@ -409,6 +415,17 @@ void StRobotHW::setInterface() {
 }
 
 bool StRobotHW::loadProtocolConfig(ros::NodeHandle &root_nh) {
+  int gravity_compensation_mode = 0;
+  root_nh.param<int>(
+      "/steering_engine_hw/protocol/gravity_compensation_mode",
+      gravity_compensation_mode, 0);
+  if (gravity_compensation_mode < 0 || gravity_compensation_mode > 2) {
+    ROS_ERROR("protocol/gravity_compensation_mode must be 0, 1, or 2");
+    return false;
+  }
+  gravity_compensation_mode_ =
+      static_cast<uint8_t>(gravity_compensation_mode);
+
   XmlRpc::XmlRpcValue id_map;
   if (!root_nh.getParam("/steering_engine_hw/protocol/id_map", id_map)) {
     ROS_ERROR("Missing steering_engine_hw/protocol/id_map");
@@ -594,9 +611,12 @@ void StRobotHW::pack(unsigned char *tx_buffer, unsigned char ctrl,
   frame->length_ = k_data_length_;
   // set data
   memcpy(frame->data_, data, k_data_length_);
+  // This byte is outside the declared 44-byte payload but covered by CRC.
+  frame->gravity_compensation_mode_ = gravity_compensation_mode_;
   // set crc
   frame->crc_ = getCrc8(tx_buffer, k_header_length_ + k_ctrl_length_ +
-                                       k_length_ + k_data_length_);
+                                       k_length_ + k_data_length_ +
+                                       k_gravity_compensation_length_);
   // set ender
   for (int i = 0; i < 2; i++) {
     frame->ender_[i] = ender[i];
@@ -604,6 +624,12 @@ void StRobotHW::pack(unsigned char *tx_buffer, unsigned char ctrl,
 }
 
 void StRobotHW::unpack(std::vector<uint8_t> rx_buffer,const ros::Time &time) {
+  if (rx_buffer.size() != k_feedback_frame_length_) {
+    ROS_WARN_THROTTLE(10, "Received message length %zu is invalid; expected %zu",
+                      rx_buffer.size(), k_feedback_frame_length_);
+    return;
+  }
+
   // check header and ender
   if (rx_buffer[0] != header[0] || rx_buffer[1] != header[1]) {
     return;
@@ -659,40 +685,21 @@ void StRobotHW::unpack(std::vector<uint8_t> rx_buffer,const ros::Time &time) {
     return value;
   };
 
-  constexpr size_t kImuFloatCount = 10;
-  constexpr size_t kImuPayloadSize = kImuFloatCount * sizeof(float);
-  constexpr size_t kStatusPayloadSize = 2;
-  constexpr size_t kMotorIdLength = 1;
-  const size_t entry_size = kMotorIdLength + 3 * sizeof(float);
+  struct MotorState {
+    int id;
+    float pos;
+    float vel;
+    float tor;
+  };
+  std::array<MotorState, k_feedback_motor_count_> motor_states{};
+  std::array<double, k_feedback_remote_joint_count_> remote_joint_increment{};
 
-  const size_t motor_payload_size = static_cast<size_t>(length) - kImuPayloadSize - kStatusPayloadSize;
-  if (motor_payload_size % entry_size != 0) {
-    ROS_WARN_THROTTLE(10, "Received message data length %u is invalid", length);
-    return;
-  }
-
-  const size_t motor_count = motor_payload_size / entry_size;
   size_t index = payload_start;
-  for (size_t i = 0; i < motor_count; ++i) {
-    const int id = rx_buffer[index++];
-    const float pos = unpackFloat(index);
-    const float vel = unpackFloat(index);
-    const float tor = unpackFloat(index);
-
-    auto it = id_to_actuator_.find(id);
-    if (it == id_to_actuator_.end()) {
-      continue;
-    }
-
-    ActuatorIndex actuator_index = it->second;
-    angle_[actuator_index]  = static_cast<double>(pos) - offset_vector_[actuator_index];
-    vel_[actuator_index]    = static_cast<double>(vel);
-    effort_[actuator_index] = static_cast<double>(tor);
-  }
-
-  if (index + kImuPayloadSize > payload_start + static_cast<size_t>(length)) {
-    ROS_WARN_THROTTLE(10, "Received IMU payload is incomplete");
-    return;
+  for (auto &motor_state : motor_states) {
+    motor_state.id = rx_buffer[index++];
+    motor_state.pos = unpackFloat(index);
+    motor_state.vel = unpackFloat(index);
+    motor_state.tor = unpackFloat(index);
   }
 
   const double acc_x = static_cast<double>(unpackFloat(index));
@@ -708,44 +715,60 @@ void StRobotHW::unpack(std::vector<uint8_t> rx_buffer,const ros::Time &time) {
   const double qy = static_cast<double>(unpackFloat(index));
   const double qz = static_cast<double>(unpackFloat(index));
 
-  updateImuState(acc_x, acc_y, acc_z,
-                 gyro_x, gyro_y, gyro_z,
-                 qw, qx, qy, qz);
+  for (double &increment : remote_joint_increment) {
+    increment = static_cast<double>(unpackFloat(index));
+  }
 
-  if(index + kStatusPayloadSize > payload_start + static_cast<size_t>(length)) {
-    ROS_WARN_THROTTLE(10, "Received status payload is incomplete");
+  const uint8_t remote_control_stage_complete = rx_buffer[index++];
+  const uint8_t motor_health = rx_buffer[index++];
+  const uint8_t grip_confirmed = rx_buffer[index++];
+  const uint8_t imu_ready = rx_buffer[index++];
+
+  if (index != payload_start + k_feedback_payload_length_) {
+    ROS_WARN_THROTTLE(10, "Received payload was not consumed completely");
     return;
   }
 
-  const uint8_t motor_fault     = rx_buffer[index++];
-  const uint8_t grip_confirmed  = rx_buffer[index++];
-
-  constexpr size_t joint_motor_fault_bit = 4;
-  constexpr size_t wheel_motor_fault_bit = 2;
-  constexpr size_t grip_motor_fault_bit  = 2;
-
-  auto_state_data_.joint_fault = 0;
-  for (size_t i = 0; i < joint_motor_fault_bit; ++i)
-  {
-    if (!(motor_fault & (1U << i)))
-    {
-      auto_state_data_.joint_fault = 1;
+  bool joint_fault = false;
+  for (size_t i = 0; i < 4; ++i) {
+    if (!(motor_health & (1U << i))) {
+      joint_fault = true;
       break;
     }
   }
 
-  auto_state_data_.grip_fault = 0;
-  for (size_t i = 0; i < grip_motor_fault_bit; ++i)
-  {
-    size_t bit_pos = i + joint_motor_fault_bit + wheel_motor_fault_bit;
-    if (!(motor_fault & (1U << bit_pos)))
-    {
-      auto_state_data_.grip_fault = 1;
+  bool grip_fault = false;
+  for (size_t i = 6; i < 8; ++i) {
+    if (!(motor_health & (1U << i))) {
+      grip_fault = true;
       break;
     }
   }
-  auto_state_data_.grip_confirmed = grip_confirmed;
 
+  for (const auto &motor_state : motor_states) {
+    auto it = id_to_actuator_.find(motor_state.id);
+    if (it == id_to_actuator_.end()) {
+      continue;
+    }
+
+    const ActuatorIndex actuator_index = it->second;
+    angle_[actuator_index] =
+        static_cast<double>(motor_state.pos) - offset_vector_[actuator_index];
+    vel_[actuator_index] = static_cast<double>(motor_state.vel);
+    effort_[actuator_index] = static_cast<double>(motor_state.tor);
+  }
+
+  updateImuState(acc_x, acc_y, acc_z,
+                 gyro_x, gyro_y, gyro_z,
+                 qw, qx, qy, qz);
+  auto_state_data_.remote_joint_increment = remote_joint_increment;
+  auto_state_data_.remote_control_stage_complete =
+      remote_control_stage_complete != 0;
+  auto_state_data_.joint_fault = joint_fault;
+  auto_state_data_.grip_fault = grip_fault;
+  auto_state_data_.grip_confirmed = grip_confirmed != 0;
+  auto_state_data_.imu_ready = imu_ready != 0;
+  auto_state_data_.header.stamp = time;
   last_rx_time_ = time;
 }
 
@@ -786,23 +809,19 @@ void StRobotHW::processRxBuffer(const ros::Time& time) {
       return;
     }
 
+    const uint8_t ctrl = rx_buffer_[k_header_length_];
     const uint8_t length = rx_buffer_[k_header_length_ + k_ctrl_length_];
-    const size_t expected_size =
-        payload_start + static_cast<size_t>(length) + k_crc_length_ +
-        k_tail_length_;
-    if (expected_size < min_frame_length) {
+    if (ctrl != control_code_ ||
+        static_cast<size_t>(length) != k_feedback_payload_length_) {
       rx_buffer_.erase(rx_buffer_.begin());
       continue;
     }
+
+    const size_t expected_size = k_feedback_frame_length_;
     if (rx_buffer_.size() < expected_size) {
       return;
     }
 
-    const uint8_t ctrl = rx_buffer_[k_header_length_];
-    if (ctrl != control_code_) {
-      rx_buffer_.erase(rx_buffer_.begin());
-      continue;
-    }
     if (rx_buffer_[expected_size - 2] != ender[0] ||
         rx_buffer_[expected_size - 1] != ender[1]) {
       rx_buffer_.erase(rx_buffer_.begin());
@@ -863,9 +882,12 @@ void StRobotHW::updateImuState(double acc_x, double acc_y, double acc_z,
 
 bool StRobotHW::initAutoStateData(AutoStateData &data) {
   data.lower_alive = false;
+  data.imu_ready = false;
   data.grip_confirmed = false;
   data.joint_fault = false;
   data.grip_fault = false;
+  data.remote_joint_increment.fill(0.0);
+  data.remote_control_stage_complete = false;
   return true;
 }
 

@@ -79,6 +79,7 @@ AutoInputSnapshot AutoInputMux::buildSnapshot() const
   if (has_auto_state_)
   {
     snapshot.lower_alive = auto_state_.lower_alive;
+    snapshot.imu_ready = auto_state_.imu_ready;
     snapshot.grip_confirmed = auto_state_.grip_confirmed;
     snapshot.joint_fault = auto_state_.joint_fault;
     snapshot.grip_fault = auto_state_.grip_fault;
@@ -106,12 +107,15 @@ AutoInputSnapshot AutoInputMux::buildSnapshot() const
     snapshot.stamp = latestStamp(snapshot.stamp, joint_state_.header.stamp);
   }
 
+  const bool base_imu_ready = has_base_imu_ && isBaseImuReady();
   if (has_base_imu_)
   {
     snapshot.posture_ready = isPostureWithinThreshold();
-    snapshot.imu_ready = isBaseImuReady();
     snapshot.stamp = latestStamp(snapshot.stamp, base_imu_.header.stamp);
   }
+  snapshot.imu_ready = (has_auto_state_ || has_sensor_input_)
+                           ? snapshot.imu_ready && base_imu_ready
+                           : base_imu_ready;
 
   applyDebugOverride(snapshot);
   return snapshot;
