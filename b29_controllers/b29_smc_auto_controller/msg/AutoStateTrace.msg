@@ -105,12 +105,19 @@ uint64 remote_control_sample_sequence
 bool remote_control_complete
 bool remote_control_completion_rising_edge
 
+# 双轮实际位置反馈相对本次越障周期基准的有符号净角行程，单位 rad
+float64 left_wheel_travel_baseline_position
+float64 right_wheel_travel_baseline_position
+float64 left_wheel_travel_current_position
+float64 right_wheel_travel_current_position
+float64 signed_wheel_travel
+bool wheel_travel_baseline_initialized
+
 # Debug validation mode switch and current input of debug override function
 bool debug_validation_enabled
 bool simulation_only
 bool debug_override_active
-bool debug_obstacle_detected
-float64 debug_obstacle_distance
+bool debug_obstacle_crossing_trigger
 
 # Software emergency stop latch status and manual reset request flag
 bool software_emergency_stop_latched
@@ -123,5 +130,15 @@ bool posture_ready
 bool grip_confirmed
 bool joint_fault
 bool grip_fault
-bool obstacle_detected
-float64 range_to_obstacle
+uint8 cruise_drive_request_raw
+string cruise_drive_request
+bool cruise_drive_request_valid
+bool auto_start
+bool manual_reset
+bool obstacle_crossing_trigger
+uint64 auto_start_rising_edge_sequence
+uint64 manual_reset_rising_edge_sequence
+bool obstacle_trigger_rising_edge
+bool obstacle_trigger_falling_edge
+uint64 obstacle_trigger_rising_edge_sequence
+uint64 obstacle_trigger_falling_edge_sequence

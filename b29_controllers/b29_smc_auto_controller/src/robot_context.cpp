@@ -7,9 +7,7 @@
 
 namespace
 {
-constexpr double kCruiseSpeedMps = -0.10;
-constexpr double kApproachSpeedMps = -0.03;
-constexpr double kCrossObstaclesDistanceM = 0.30;
+constexpr double kCruiseSpeedMagnitudeMps = 0.10;
 constexpr double kReconnectTimeoutSec = 5.0;
 constexpr double kAutoInitTimeoutSec = 2.0;
 }
@@ -27,6 +25,7 @@ void RobotContext::start()
 
   started_ = true;
   fsm_.enterStartState();
+  setIdleSoftHoldCommand("idle_initial_soft_hold");
 }
 
 void RobotContext::tick(const ros::Duration& period)
@@ -136,16 +135,44 @@ void RobotContext::tick(const ros::Duration& period)
 
 void RobotContext::setInputSnapshot(const b29_smc_auto_controller::AutoInputSnapshot& input)
 {
+  if (!input_edges_initialized_)
+  {
+    input_edges_initialized_ = true;
+    last_input_auto_start_requested_ = input.auto_start_requested;
+    last_input_manual_reset_requested_ = input.manual_reset_requested;
+    last_auto_start_rising_edge_sequence_ = input.auto_start_rising_edge_sequence;
+    last_manual_reset_rising_edge_sequence_ = input.manual_reset_rising_edge_sequence;
+    input_ = input;
+    input_.manual_reset_requested = false;
+    return;
+  }
+
+  const bool auto_start_level_rising =
+      input.auto_start_requested && !last_input_auto_start_requested_;
+  const bool auto_start_sequence_changed =
+      input.auto_start_edge_sequence_valid &&
+      input.auto_start_rising_edge_sequence != last_auto_start_rising_edge_sequence_;
+  const bool manual_reset_level_rising =
+      input.manual_reset_requested && !last_input_manual_reset_requested_;
+  const bool manual_reset_sequence_changed =
+      input.manual_reset_edge_sequence_valid &&
+      input.manual_reset_rising_edge_sequence != last_manual_reset_rising_edge_sequence_;
   const bool allow_auto_start_latch =
       !started_ || (currentStateId() == RobotFSM::Idle.getId());
 
-  if (allow_auto_start_latch && input.auto_start_requested && !last_input_auto_start_requested_)
+  if (allow_auto_start_latch &&
+      (auto_start_level_rising || auto_start_sequence_changed))
   {
     auto_start_requested_ = true;
   }
 
   last_input_auto_start_requested_ = input.auto_start_requested;
+  last_input_manual_reset_requested_ = input.manual_reset_requested;
+  last_auto_start_rising_edge_sequence_ = input.auto_start_rising_edge_sequence;
+  last_manual_reset_rising_edge_sequence_ = input.manual_reset_rising_edge_sequence;
   input_ = input;
+  input_.manual_reset_requested =
+      manual_reset_level_rising || manual_reset_sequence_changed;
 }
 
 void RobotContext::requestAutoStart()
@@ -227,37 +254,32 @@ bool RobotContext::isGripConfirmed() const
   return input_.grip_confirmed;
 }
 
-bool RobotContext::isObstacleDetected() const
-{
-  return input_.obstacle_detected;
-}
-
-bool RobotContext::isObstacleWithinCrossObstaclesDistance() const
-{
-  return input_.obstacle_detected && input_.range_to_obstacle <= kCrossObstaclesDistanceM;
-}
-
 void RobotContext::setCruiseCommand()
 {
-  setDriveMode(robot_fsm::DriveMode::Forward);
-  setTargetSpeed(getCruiseSpeed());
   command_.freeze_joints = false;
-  setCommandReason("cruise_command");
-}
-
-void RobotContext::setApproachCommand()
-{
-  setDriveMode(robot_fsm::DriveMode::Forward);
-  setTargetSpeed(getApproachSpeed());
-  command_.freeze_joints = false;
-  setCommandReason("approach_command");
-}
-
-void RobotContext::setWheelStop()
-{
-  stopAllMotors();
-  command_.freeze_joints = false;
-  setCommandReason("waiting_obstacle_crossing");
+  switch (input_.cruise_drive_request)
+  {
+    case b29_smc_auto_controller::CruiseDriveRequest::Forward:
+      setDriveMode(robot_fsm::DriveMode::Forward);
+      setTargetSpeed(kCruiseSpeedMagnitudeMps);
+      setCommandReason("cruise_forward_request");
+      return;
+    case b29_smc_auto_controller::CruiseDriveRequest::Reverse:
+      setDriveMode(robot_fsm::DriveMode::Reverse);
+      setTargetSpeed(-kCruiseSpeedMagnitudeMps);
+      setCommandReason("cruise_reverse_request");
+      return;
+    case b29_smc_auto_controller::CruiseDriveRequest::Stop:
+      stopAllMotors();
+      command_.freeze_joints = false;
+      setCommandReason("cruise_stop_request");
+      return;
+    case b29_smc_auto_controller::CruiseDriveRequest::Invalid:
+      stopAllMotors();
+      command_.freeze_joints = false;
+      setCommandReason("invalid_cruise_drive_request");
+      return;
+  }
 }
 
 void RobotContext::setSafeStopCommand(const std::string& reason)
@@ -364,11 +386,6 @@ bool RobotContext::isReadyToTraverse() const
   return canStartAuto();
 }
 
-bool RobotContext::isObstacleNotDetected() const
-{
-  return !isObstacleDetected();
-}
-
 bool RobotContext::hasSafetyFault() const
 {
   return input_.joint_fault || input_.grip_fault || !input_.imu_ready;
@@ -437,7 +454,7 @@ void RobotContext::reportAutoRunPause()
 {
   last_error_.clear();
   last_alert_ = "auto_run_pause";
-  setSafeStopCommand("auto_run_pause");
+  setIdleSoftHoldCommand("auto_run_pause_soft_hold");
   logTransition("Traversing->Idle");
 }
 
@@ -485,16 +502,6 @@ void RobotContext::logSafeStopToIdle()
   logTransition("SafeStop->Idle");
 }
 
-double RobotContext::getCruiseSpeed() const
-{
-  return kCruiseSpeedMps;
-}
-
-double RobotContext::getApproachSpeed() const
-{
-  return kApproachSpeedMps;
-}
-
 int RobotContext::currentStateId() const
 {
   if (!started_)
@@ -529,6 +536,13 @@ void RobotContext::setDriveMode(robot_fsm::DriveMode mode)
   command_.drive_mode = toAutoDriveMode(mode);
 }
 
+void RobotContext::setIdleSoftHoldCommand(std::string_view reason)
+{
+  stopAllMotors();
+  command_.freeze_joints = false;
+  setCommandReason(reason);
+}
+
 void RobotContext::setCommandReason(std::string_view reason)
 {
   command_.command_reason = std::string(reason);
@@ -540,6 +554,8 @@ b29_smc_auto_controller::DriveMode RobotContext::toAutoDriveMode(robot_fsm::Driv
   {
     case robot_fsm::DriveMode::Forward:
       return b29_smc_auto_controller::DriveMode::Forward;
+    case robot_fsm::DriveMode::Reverse:
+      return b29_smc_auto_controller::DriveMode::Reverse;
     case robot_fsm::DriveMode::Stop:
     default:
       return b29_smc_auto_controller::DriveMode::Stop;

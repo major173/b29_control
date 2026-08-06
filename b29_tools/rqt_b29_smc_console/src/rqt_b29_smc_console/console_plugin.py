@@ -112,6 +112,9 @@ _VALIDATION_TRACE_GROUPS = (
         'remote_control_applied_increments', 'remote_control_joint_targets',
         'remote_control_increments_valid', 'remote_control_sample_sequence',
         'remote_control_complete', 'remote_control_completion_rising_edge',
+        'signed_wheel_travel', 'wheel_travel_baseline_initialized',
+        'left_wheel_travel_baseline_position', 'right_wheel_travel_baseline_position',
+        'left_wheel_travel_current_position', 'right_wheel_travel_current_position',
     )),
     ('Command & Safety', (
         'command_reason', 'drive_mode', 'stop_all', 'freeze_joints', 'gravity_compensation_mode',
@@ -121,9 +124,14 @@ _VALIDATION_TRACE_GROUPS = (
         'software_emergency_stop_latched',
     )),
     ('Inputs', (
-        'debug_override_active', 'debug_obstacle_detected', 'debug_obstacle_distance',
+        'debug_override_active', 'debug_obstacle_crossing_trigger',
         'manual_reset_requested', 'lower_alive', 'imu_ready', 'posture_ready',
-        'grip_confirmed', 'joint_fault', 'grip_fault', 'obstacle_detected', 'range_to_obstacle',
+        'grip_confirmed', 'joint_fault', 'grip_fault',
+        'cruise_drive_request_raw', 'cruise_drive_request', 'cruise_drive_request_valid',
+        'auto_start', 'manual_reset', 'obstacle_crossing_trigger',
+        'auto_start_rising_edge_sequence', 'manual_reset_rising_edge_sequence',
+        'obstacle_trigger_rising_edge', 'obstacle_trigger_falling_edge',
+        'obstacle_trigger_rising_edge_sequence', 'obstacle_trigger_falling_edge_sequence',
     )),
 )
 _GROUP_TRANSLATIONS = {
@@ -174,7 +182,7 @@ _TEXTS = {
         'sensor_inputs_title': 'Sensor Input',
         'preset_base_ready': 'Base Ready',
         'preset_comms_loss': 'Comms Loss',
-        'preset_obstacle': 'Obstacle Detected',
+        'preset_obstacle': 'Crossing Trigger',
         'preset_clear': 'Clear All',
         'publish_sensor_input': 'Publish Sensor Input',
         'override_title': 'Override Composer',
@@ -431,7 +439,7 @@ def _comms_loss_preset(sensor_registry):
     return payload
 
 
-def _obstacle_detected_preset(sensor_registry, base_ready_sensor_payload):
+def _obstacle_triggered_preset(sensor_registry, base_ready_sensor_payload):
     payload = dict(base_ready_sensor_payload or _fallback_sensor_preset(sensor_registry))
     obstacle_type_descriptor = _lookup_descriptor(sensor_registry, 'obstacle_type')
     obstacle_value = 1
@@ -442,10 +450,9 @@ def _obstacle_detected_preset(sensor_registry, base_ready_sensor_payload):
             obstacle_value = obstacle_type_descriptor.default_value
     payload.update(
         {
-            'obstacle_detected': True,
+            'obstacle_crossing_trigger': True,
             'obstacle_type': obstacle_value,
             'classification_stable': True,
-            'range_to_obstacle': 0.35,
         }
     )
     return payload
@@ -477,8 +484,8 @@ class _NullTopicFacade(object):
     def pulse_override(self, field_name, value=True):
         return field_name, value
 
-    def publish_obstacle_override(self, detected, distance):
-        return detected, distance
+    def publish_obstacle_trigger_override(self, triggered):
+        return triggered
 
     def call_planner_release(self):
         raise RuntimeError('planner_release service is unavailable in offline mode')
@@ -675,23 +682,18 @@ class B29SmcConsolePlugin(Plugin):
         self.autoStartButton = QPushButton('Auto Start')
         self.pauseButton = QPushButton('Pause')
         self.commsLossButton = QPushButton('Comms Loss')
-        self.obstacleDetectedCheckBox = QCheckBox('Obstacle Detected')
-        self.obstacleDistanceSpinBox = QDoubleSpinBox()
-        self.obstacleDistanceSpinBox.setRange(0.0, 100.0)
-        self.obstacleDistanceSpinBox.setDecimals(3)
-        self.obstacleDistanceSpinBox.setValue(0.50)
-        self.publishObstacleButton = QPushButton('Publish Obstacle Override')
-        self.clearObstacleButton = QPushButton('Obstacle Clear')
+        self.obstacleCrossingTriggerCheckBox = QCheckBox('Obstacle Crossing Trigger')
+        self.publishObstacleTriggerButton = QPushButton('Publish Trigger Level')
+        self.clearObstacleTriggerButton = QPushButton('Clear Trigger')
         action_grid.addWidget(self.emergencyStopButton, 0, 0)
         action_grid.addWidget(self.manualResetButton, 0, 1)
         action_grid.addWidget(self.plannerReleaseButton, 0, 2)
         action_grid.addWidget(self.autoStartButton, 1, 0)
         action_grid.addWidget(self.pauseButton, 1, 1)
         action_grid.addWidget(self.commsLossButton, 1, 2)
-        action_grid.addWidget(self.obstacleDetectedCheckBox, 2, 0)
-        action_grid.addWidget(self.obstacleDistanceSpinBox, 2, 1)
-        action_grid.addWidget(self.publishObstacleButton, 2, 2)
-        action_grid.addWidget(self.clearObstacleButton, 3, 2)
+        action_grid.addWidget(self.obstacleCrossingTriggerCheckBox, 2, 0)
+        action_grid.addWidget(self.publishObstacleTriggerButton, 2, 2)
+        action_grid.addWidget(self.clearObstacleTriggerButton, 3, 2)
         actions_layout.addLayout(action_grid)
         actions_layout.addStretch(1)
         self.validationTabs.addTab(actions_tab, 'Actions')
@@ -703,8 +705,8 @@ class B29SmcConsolePlugin(Plugin):
         self.autoStartButton.clicked.connect(lambda: self._send_validation_override('auto_start_requested', True, pulse=True))
         self.pauseButton.clicked.connect(lambda: self._send_validation_override('auto_run_pause', True, pulse=True))
         self.commsLossButton.clicked.connect(lambda: self._send_validation_override('lower_alive', False))
-        self.publishObstacleButton.clicked.connect(self._publish_obstacle_override)
-        self.clearObstacleButton.clicked.connect(self._clear_obstacle_override)
+        self.publishObstacleTriggerButton.clicked.connect(self._publish_obstacle_trigger_override)
+        self.clearObstacleTriggerButton.clicked.connect(self._clear_obstacle_trigger_override)
         self.plannerReleaseButton.setEnabled(False)
 
     def _build_sensor_inputs(self):
@@ -766,7 +768,7 @@ class B29SmcConsolePlugin(Plugin):
         )
         self.presetCommsLossButton.clicked.connect(lambda: self._apply_sensor_preset(_comms_loss_preset(self._sensor_registry)))
         self.presetObstacleButton.clicked.connect(
-            lambda: self._apply_sensor_preset(_obstacle_detected_preset(self._sensor_registry, self._base_ready_sensor_payload))
+            lambda: self._apply_sensor_preset(_obstacle_triggered_preset(self._sensor_registry, self._base_ready_sensor_payload))
         )
         self.presetClearButton.clicked.connect(lambda: self._apply_sensor_preset(_fallback_sensor_preset(self._sensor_registry)))
         self.publishSensorInputButton.clicked.connect(self._publish_sensor_input)
@@ -974,19 +976,17 @@ class B29SmcConsolePlugin(Plugin):
         except Exception as exc:
             self._set_workflow_status('failed', message=str(exc))
 
-    def _publish_obstacle_override(self):
+    def _publish_obstacle_trigger_override(self):
         try:
-            self._topic_facade.publish_obstacle_override(
-                self.obstacleDetectedCheckBox.isChecked(),
-                self.obstacleDistanceSpinBox.value(),
+            self._topic_facade.publish_obstacle_trigger_override(
+                self.obstacleCrossingTriggerCheckBox.isChecked(),
             )
         except Exception as exc:
             self._set_workflow_status('failed', message=str(exc))
 
-    def _clear_obstacle_override(self):
-        self.obstacleDetectedCheckBox.setChecked(False)
-        self.obstacleDistanceSpinBox.setValue(0.0)
-        self._publish_obstacle_override()
+    def _clear_obstacle_trigger_override(self):
+        self.obstacleCrossingTriggerCheckBox.setChecked(False)
+        self._publish_obstacle_trigger_override()
 
     def _request_software_emergency_stop(self):
         self._call_validation_service('software_emergency_stop', self._topic_facade.call_software_emergency_stop)

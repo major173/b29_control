@@ -98,6 +98,8 @@ private:
   bool isSafetyBlocked(const AutoControlCommand& effective) const;
   void resetObstacleCrossingState(const ros::Time& time = ros::Time{});
   void updateObstacleCrossingRuntime(const ros::Time& time);
+  void updateSignedWheelTravel();
+  void resetWheelTravelBaseline();
   DisconnectCableProcess::Outcome collectDisconnectOutcome();
   ObstacleCrossingRuntime::PlannerOutcome collectPlannerOutcome(const ros::Time& time);
   bool collectRemoteControlCompletion();
@@ -138,6 +140,10 @@ private:
   std::array<double, kPositionJointCount> last_effective_joint_targets_{};
   bool has_last_effective_joint_targets_{false};
   bool remote_control_completion_rising_edge_{false};
+  std::array<double, kWheelJointCount> wheel_travel_baseline_positions_{};
+  std::array<double, kWheelJointCount> wheel_travel_current_positions_{};
+  double signed_wheel_travel_{0.0};
+  bool wheel_travel_baseline_initialized_{false};
 
   std::array<hardware_interface::JointStateHandle, kPositionJointCount> joint_state_handles_{};
   CommandDispatcher::PositionJointHandles position_joint_handles_{};

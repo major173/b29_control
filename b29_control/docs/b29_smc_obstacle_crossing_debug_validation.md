@@ -61,40 +61,45 @@ rosrun rqt_b29_smc_console rqt_b29_smc_console
 rostopic echo /b29_controller/b29_smc_auto_controller/state_trace
 ```
 
-## 3. 障碍物调试输入
+## 3. 巡航与越障触发调试输入
 
 ```bash
 OVERRIDE_TOPIC=/b29_controller/b29_smc_auto_controller/debug_override
 ```
 
-障碍物字段 mask：
+相关字段 mask：
 
 ```text
-FIELD_OBSTACLE_DETECTED = 512
-FIELD_RANGE_TO_OBSTACLE = 4096
+FIELD_OBSTACLE_CROSSING_TRIGGER = 512
+FIELD_CRUISE_DRIVE_REQUEST = 4096
 field_mask = 4608
 ```
 
-未检测到障碍或清除障碍：
+设置正值巡航并保持越障触发为低：
 
 ```bash
 rostopic pub -1 "$OVERRIDE_TOPIC" b29_smc_auto_controller/AutoDebugOverride \
-'{enabled: true, field_mask: 4608, obstacle_detected: false, range_to_obstacle: 0.0}'
+'{enabled: true, field_mask: 4608, obstacle_crossing_trigger: false, cruise_drive_request: 1}'
 ```
 
-远距离障碍，不进入当前 `0.30m` 翻越阈值：
+启动越障，必须从低电平切换到高电平：
 
 ```bash
 rostopic pub -1 "$OVERRIDE_TOPIC" b29_smc_auto_controller/AutoDebugOverride \
-'{enabled: true, field_mask: 4608, obstacle_detected: true, range_to_obstacle: 0.50}'
+'{enabled: true, field_mask: 4608, obstacle_crossing_trigger: true, cruise_drive_request: 1}'
 ```
 
-阈值内障碍：
+完成两侧越障并进入 `CompleteWaitObstacleClear` 后，再发送下降沿：
 
 ```bash
 rostopic pub -1 "$OVERRIDE_TOPIC" b29_smc_auto_controller/AutoDebugOverride \
-'{enabled: true, field_mask: 4608, obstacle_detected: true, range_to_obstacle: 0.20}'
+'{enabled: true, field_mask: 4608, obstacle_crossing_trigger: false, cruise_drive_request: 1}'
 ```
+
+越障期间提前发送下降沿无效，不会在进入 `CompleteWaitObstacleClear` 后补记。
+若提前拉低，必须先重新拉高，再在完成等待阶段拉低。
+巡航请求含义为 `0=Stop`、`1=Forward(+0.10)`、`2=Reverse(-0.10)`。
+Forward/Reverse 仅表示左右轮下发速度的数值正负。
 
 每条 override 消息会替换上一条覆盖配置。需要同时保持 `lower_alive`、`posture_ready` 或 `grip_confirmed` 时，必须合并字段和 mask。GUI 的 Override Composer 会自动组合 mask。
 
@@ -180,7 +185,7 @@ rosservice call /b29_controller/b29_smc_auto_controller/manual_reset
 
 ## 7. Trace 验收重点
 
-越障进入阈值后：
+越障触发上升沿后：
 
 ```text
 obstacle_crossing_stage = CloseBothGrippers
@@ -222,7 +227,9 @@ grip_confirmed == true
 | `DisconnectCable` / `PlannerControl` / `Regrip`，当前为首侧 | 当前侧视为已人工完成并回夹，开始另一侧：`OpenGripperBeforeGravityCompensation` -> `EnableGravityCompensation` -> `Disconnecting` |
 | `DisconnectCable` / `PlannerControl` / `Regrip`，当前为第二侧 | 当前侧视为已人工完成并回夹，进入 `CompleteWaitObstacleClear` |
 
-首侧由巡航速度符号决定：正速度先左侧，负速度先右侧。
+首侧由上次完整越障成功后累计的双轮实际位置反馈净角行程决定：正值先左侧，负值先右侧。
+trace 中的 `signed_wheel_travel`、轮位置基准和当前轮位置可用于核对该判断；进入
+`CompleteWaitObstacleClear` 后该基准会立即重建并从零重新累计。
 
 ## 8. 推荐验证顺序
 
@@ -249,7 +256,8 @@ rosrun b29_smc_auto_controller replay_scenario.py \
 - Planner 点不覆盖：检查 `planner_point_available`、`planner_point_fresh` 和 `planner_override_applied`。
 - `safe_hold` 下 Step7 不成功：该模式不会推动机构；必须在受控环境中切换为 `normal` 才能验证物理反馈路径。
 - reset 后仍在 `SafeStop`：检查 `lower_alive`、`imu_ready`、`joint_fault` 和 `grip_fault`。
-- 完成后重复翻越：清除障碍，使 `obstacle_detected=false`。
+- 完成后仍停留在等待阶段：确认进入 `CompleteWaitObstacleClear` 后才发送了新的
+  `obstacle_crossing_trigger: 1 -> 0` 下降沿；越障期间提前下降不会放行。
 
 ## 10. 构建与静态检查
 

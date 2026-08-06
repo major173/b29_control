@@ -57,14 +57,20 @@ struct ControllerTraceState
   bool remote_control_complete{false};
   bool remote_control_completion_rising_edge{false};
 
+  double left_wheel_travel_baseline_position{0.0};
+  double right_wheel_travel_baseline_position{0.0};
+  double left_wheel_travel_current_position{0.0};
+  double right_wheel_travel_current_position{0.0};
+  double signed_wheel_travel{0.0};
+  bool wheel_travel_baseline_initialized{false};
+
   bool command_dispatch_attempted{false};
   bool command_dispatch_succeeded{false};
 
   bool debug_validation_enabled{false};
   bool simulation_only{false};
   bool debug_override_active{false};
-  bool debug_obstacle_detected{false};
-  double debug_obstacle_distance{0.0};
+  bool debug_obstacle_crossing_trigger{false};
   bool software_emergency_stop_latched{false};
 
   bool manual_reset_requested{false};
@@ -74,8 +80,17 @@ struct ControllerTraceState
   bool grip_confirmed{false};
   bool joint_fault{false};
   bool grip_fault{false};
-  bool obstacle_detected{false};
-  double range_to_obstacle{0.0};
+  uint8_t cruise_drive_request_raw{0};
+  bool cruise_drive_request_valid{false};
+  bool auto_start{false};
+  bool manual_reset{false};
+  bool obstacle_crossing_trigger{false};
+  std::uint64_t auto_start_rising_edge_sequence{0};
+  std::uint64_t manual_reset_rising_edge_sequence{0};
+  bool obstacle_trigger_rising_edge{false};
+  bool obstacle_trigger_falling_edge{false};
+  std::uint64_t obstacle_trigger_rising_edge_sequence{0};
+  std::uint64_t obstacle_trigger_falling_edge_sequence{0};
 };
 
 class ControllerTraceBuilder

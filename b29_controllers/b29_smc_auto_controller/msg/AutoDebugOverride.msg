@@ -11,10 +11,10 @@ uint32 FIELD_POSTURE_READY=32
 uint32 FIELD_GRIP_CONFIRMED=64
 uint32 FIELD_JOINT_FAULT=128
 uint32 FIELD_GRIP_FAULT=256
-uint32 FIELD_OBSTACLE_DETECTED=512
+uint32 FIELD_OBSTACLE_CROSSING_TRIGGER=512
 uint32 FIELD_OBSTACLE_TYPE=1024
 uint32 FIELD_CLASSIFICATION_STABLE=2048
-uint32 FIELD_RANGE_TO_OBSTACLE=4096
+uint32 FIELD_CRUISE_DRIVE_REQUEST=4096
 uint32 FIELD_AT_CROSSING_POSITION=8192
 uint32 FIELD_CROSSING_STEP_DONE=16384
 uint32 FIELD_CROSSING_COMPLETE=32768
@@ -34,10 +34,10 @@ bool posture_ready
 bool grip_confirmed
 bool joint_fault
 bool grip_fault
-bool obstacle_detected
+bool obstacle_crossing_trigger
 uint8 obstacle_type
 bool classification_stable
-float64 range_to_obstacle
+uint8 cruise_drive_request
 bool at_crossing_position
 bool crossing_step_done
 bool crossing_complete

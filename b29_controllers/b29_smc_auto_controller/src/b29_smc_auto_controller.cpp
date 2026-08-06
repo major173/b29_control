@@ -76,6 +76,7 @@ void B29SmcAutoController::starting(const ros::Time& time)
   }
 
   robot_context_.start();
+  resetWheelTravelBaseline();
   writeAutoStateCommand(AutoControlCommand{});
   CallbackInputs inputs = copyCallbackInputs();
   inputs.sensor_input.header.stamp = time;
@@ -452,6 +453,7 @@ AutoControlCommand B29SmcAutoController::buildEffectiveCommand(const ros::Time& 
   planner_control_coordinator_.beginCycle();
   planner_dispatch_ticket_ = PlannerControlCoordinator::DispatchTicket{};
   remote_control_completion_rising_edge_ = false;
+  updateSignedWheelTravel();
   getCurrentJointStateToCommand(effective);
   planner_control_coordinator_.refreshReferenceIfUncommanded(currentPlannerReferencePositions(), time);
 
@@ -620,6 +622,10 @@ void B29SmcAutoController::applyRuntimeActions(const ObstacleCrossingRuntime::Ac
     remote_control_session_.reset();
     remote_control_completion_rising_edge_ = false;
   }
+  if (actions.reset_wheel_travel)
+  {
+    resetWheelTravelBaseline();
+  }
   if (actions.start_remote_control_session)
   {
     RemoteControlSession::Input input;
@@ -637,9 +643,15 @@ void B29SmcAutoController::updateObstacleCrossingRuntime(const ros::Time& time)
 {
   ObstacleCrossingRuntime::Inputs inputs;
   inputs.traversing = robot_context_.isTraversing();
-  inputs.obstacle_detected = robot_context_.isObstacleDetected();
-  inputs.obstacle_within_threshold = robot_context_.isObstacleWithinCrossObstaclesDistance();
-  inputs.cruise_speed = robot_context_.getCruiseSpeed();
+  inputs.obstacle_crossing_trigger =
+      last_input_snapshot_.obstacle_crossing_trigger;
+  inputs.obstacle_trigger_edge_sequences_valid =
+      last_input_snapshot_.obstacle_trigger_edge_sequences_valid;
+  inputs.obstacle_trigger_rising_edge_sequence =
+      last_input_snapshot_.obstacle_trigger_rising_edge_sequence;
+  inputs.obstacle_trigger_falling_edge_sequence =
+      last_input_snapshot_.obstacle_trigger_falling_edge_sequence;
+  inputs.signed_wheel_travel = signed_wheel_travel_;
   inputs.grip_confirmed = robot_context_.isGripConfirmed();
 
   ObstacleCrossingRuntime::Events events;
@@ -649,6 +661,45 @@ void B29SmcAutoController::updateObstacleCrossingRuntime(const ros::Time& time)
 
   const ObstacleCrossingRuntime::Actions actions = crossing_runtime_.update(time, inputs, events);
   applyRuntimeActions(actions, time);
+}
+
+void B29SmcAutoController::updateSignedWheelTravel()
+{
+  if (!robot_context_.isLowerAlive())
+  {
+    return;
+  }
+
+  for (std::size_t index = 0; index < wheel_joint_handles_.size(); ++index)
+  {
+    const double position = wheel_joint_handles_[index].getPosition();
+    if (!std::isfinite(position))
+    {
+      return;
+    }
+    wheel_travel_current_positions_[index] = position;
+  }
+
+  if (!wheel_travel_baseline_initialized_)
+  {
+    wheel_travel_baseline_positions_ = wheel_travel_current_positions_;
+    signed_wheel_travel_ = 0.0;
+    wheel_travel_baseline_initialized_ = true;
+    return;
+  }
+
+  const double left_travel =
+      wheel_travel_current_positions_[0] - wheel_travel_baseline_positions_[0];
+  const double right_travel =
+      wheel_travel_current_positions_[1] - wheel_travel_baseline_positions_[1];
+  signed_wheel_travel_ = (left_travel + right_travel) * 0.5;
+}
+
+void B29SmcAutoController::resetWheelTravelBaseline()
+{
+  wheel_travel_baseline_initialized_ = false;
+  signed_wheel_travel_ = 0.0;
+  updateSignedWheelTravel();
 }
 
 
@@ -671,11 +722,6 @@ void B29SmcAutoController::applyObstacleCrossingCommand(const ros::Time& time,
       return;
     case ObstacleCrossingStage::CompleteWaitObstacleClear:
     {
-      const double cruise_speed = robot_context_.getCruiseSpeed();
-      effective.drive_mode = DriveMode::Forward;
-      effective.left_wheel_speed = cruise_speed;
-      effective.right_wheel_speed = cruise_speed;
-      effective.stop_all = false;
       effective.freeze_joints = false;
       setBothGrippers(effective, GripperState::HalfOpen);
       effective.command_reason = "crossing_complete_wait_obstacle_clear";
@@ -844,13 +890,19 @@ ControllerTraceState B29SmcAutoController::captureControllerTraceState(const ros
   state.remote_control_sample_sequence = last_input_snapshot_.remote_control_sample_sequence;
   state.remote_control_complete = last_input_snapshot_.remote_control_complete;
   state.remote_control_completion_rising_edge = remote_control_completion_rising_edge_;
+  state.left_wheel_travel_baseline_position = wheel_travel_baseline_positions_[0];
+  state.right_wheel_travel_baseline_position = wheel_travel_baseline_positions_[1];
+  state.left_wheel_travel_current_position = wheel_travel_current_positions_[0];
+  state.right_wheel_travel_current_position = wheel_travel_current_positions_[1];
+  state.signed_wheel_travel = signed_wheel_travel_;
+  state.wheel_travel_baseline_initialized = wheel_travel_baseline_initialized_;
   state.command_dispatch_attempted = command_dispatch_attempted_;
   state.command_dispatch_succeeded = command_dispatch_succeeded_;
   state.debug_validation_enabled = debug_validation_enabled_;
   state.simulation_only = simulation_only_;
   state.debug_override_active = debug_validation_enabled_ && applied_debug_override_.enabled;
-  state.debug_obstacle_detected = applied_debug_override_.obstacle_detected;
-  state.debug_obstacle_distance = applied_debug_override_.range_to_obstacle;
+  state.debug_obstacle_crossing_trigger =
+      applied_debug_override_.obstacle_crossing_trigger;
   state.software_emergency_stop_latched = software_emergency_stop_latched_.load();
   state.manual_reset_requested = last_input_snapshot_.manual_reset_requested;
   state.lower_alive = last_input_snapshot_.lower_alive;
@@ -859,8 +911,26 @@ ControllerTraceState B29SmcAutoController::captureControllerTraceState(const ros
   state.grip_confirmed = last_input_snapshot_.grip_confirmed;
   state.joint_fault = last_input_snapshot_.joint_fault;
   state.grip_fault = last_input_snapshot_.grip_fault;
-  state.obstacle_detected = last_input_snapshot_.obstacle_detected;
-  state.range_to_obstacle = last_input_snapshot_.range_to_obstacle;
+  state.cruise_drive_request_raw =
+      last_input_snapshot_.cruise_drive_request_raw;
+  state.cruise_drive_request_valid =
+      last_input_snapshot_.cruise_drive_request_valid;
+  state.auto_start = last_input_snapshot_.auto_start_requested;
+  state.manual_reset = last_input_snapshot_.manual_reset_requested;
+  state.obstacle_crossing_trigger =
+      crossing_state.obstacle_crossing_trigger;
+  state.auto_start_rising_edge_sequence =
+      last_input_snapshot_.auto_start_rising_edge_sequence;
+  state.manual_reset_rising_edge_sequence =
+      last_input_snapshot_.manual_reset_rising_edge_sequence;
+  state.obstacle_trigger_rising_edge =
+      crossing_state.obstacle_trigger_rising_edge;
+  state.obstacle_trigger_falling_edge =
+      crossing_state.obstacle_trigger_falling_edge;
+  state.obstacle_trigger_rising_edge_sequence =
+      crossing_state.obstacle_trigger_rising_edge_sequence;
+  state.obstacle_trigger_falling_edge_sequence =
+      crossing_state.obstacle_trigger_falling_edge_sequence;
   return state;
 }
 

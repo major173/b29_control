@@ -354,7 +354,7 @@ QGroupBox::title {
                <bool>true</bool>
               </property>
               <property name="text">
-               <string>障碍出现</string>
+               <string>越障触发</string>
               </property>
              </widget>
             </item>

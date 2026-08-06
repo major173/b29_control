@@ -28,6 +28,14 @@
   只负责正式 Planner 协议的 session、sequence 和点校验。
 - `B29SmcAutoController` 只收集硬件/Planner/遥控事件，调用运行时对象，生成 effective command，
   然后通过既有 dispatcher 下发。
+- 下位机巡航请求使用 `0=Stop`、`1=Forward(+0.10)`、`2=Reverse(-0.10)`；
+  Forward/Reverse 只表示下发轮速的数值正负。非零轮速只允许出现在外层
+  `Traversing` 且越障阶段为 `Idle` 或 `CompleteWaitObstacleClear` 时。
+- `AutoStart`、`ManualReset` 和越障触发信号由硬件层统计边沿序号，避免短脉冲被控制周期漏采。
+  越障触发上升沿启动流程；只有已经进入 `CompleteWaitObstacleClear` 后出现的新下降沿才结束等待。
+- 首侧不再取巡航速度命令的符号，而是取控制器启动或上次完整越障成功后，左右驱动轮实际位置反馈
+  相对基准的平均有符号净角行程：正值先左侧，负值先右侧。进入
+  `CompleteWaitObstacleClear` 时重新建立轮位置基准；SafeStop、CommsLoss 和普通暂停不清零。
 
 详细状态转换、命令原因和人工恢复映射见
 [`OBSTACLE_CROSSING_WORKFLOW.md`](OBSTACLE_CROSSING_WORKFLOW.md)。
@@ -67,7 +75,9 @@
 
 - `lower_alive`
 - `grip_confirmed / grip_fault`
-- `obstacle_detected / obstacle_type / classification_stable / range_to_obstacle`
+- `cruise_drive_request`
+- `auto_start / manual_reset / obstacle_crossing_trigger`
+- `obstacle_type / classification_stable`
 - `at_crossing_position`
 - `post_check_passed / post_check_failed`
 - `auto_run_pause`
@@ -115,6 +125,11 @@
 - `auto_run_pause` 当前通过 `AutoDebugOverride` / `AutoInputMux` 注入，用于恢复最小暂停链路
 
 ### CommandDispatcher
+
+`Idle` 的关节保持策略取决于进入来源：控制器初始启动以及 `Traversing -> Idle`
+的正常暂停只停止驱动轮，并以当前反馈位置作为每周期目标（软保持）；
+`CommsLoss -> Idle` 与 `SafeStop -> Idle` 保留此前安全路径锁存的关节目标
+（硬保持）。
 
 `CommandDispatcher` 负责把 `AutoControlCommand` 写入硬件句柄：
 
@@ -165,12 +180,10 @@
 
 #### `Traversing`
 
-- 自动巡航前进态，表示机器人已经进入自动运行主链
-- 进入状态时执行 `setCruiseCommand()`，给出向前巡航命令
-- 当前最小实现中：
-  - 若未检测到障碍，`evTick` 会继续刷新巡航命令
-  - 若检测到障碍，当前仍停留在 `Traversing`，只是不额外刷新巡航动作
-- 这意味着“识别到障碍后的细分停障/接近/越障状态”还没有在当前版本展开
+- 自动巡航态，表示机器人已经进入自动运行主链
+- 进入状态和每次 `evTick` 都执行 `setCruiseCommand()`
+- `cruise_drive_request=0` 时停轮，`1` 时下发固定正轮速，`2` 时下发固定负轮速
+- 越障触发和越障阶段由 `ObstacleCrossingRuntime` 管理；活动越障阶段会覆盖基础命令并强制停轮
 - 收到 `evCommsLost` 时，转入 `CommsLoss`
 - 收到 `evEmergencyStop` 时，转入 `SafeStop`
 - 收到 `evAutoRunPause` 时，转入 `Idle`，并停止当前自动运行输出
@@ -291,16 +304,14 @@
 - 含义：是否可以从 `AutoInit` 进入 `Traversing`
 - 当前实现直接复用 `canStartAuto()`，后续可以单独细化
 
-#### `isObstacleDetected()`
+#### 越障触发边沿
 
-- 含义：当前是否检测到障碍
-- 当前只影响 `Traversing` 中 `evTick` 的分支选择
-- 还没有展开成独立的“停障/接近/越障”状态
-
-#### `isObstacleNotDetected()`
-
-- 含义：`isObstacleDetected()` 的反条件
-- 当前用于在 `Traversing` 中持续刷新巡航命令
+- `ObstacleCrossingRuntime::Idle` 仅消费当前控制器运行期间的新
+  `obstacle_crossing_trigger: 0 -> 1`
+- 越障期间提前出现的下降沿直接丢弃
+- `CompleteWaitObstacleClear` 仅消费进入该阶段之后的新
+  `obstacle_crossing_trigger: 1 -> 0`
+- 因此下位机必须保持触发信号为高，直到控制器进入完成等待阶段
 
 
 

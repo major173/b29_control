@@ -44,9 +44,17 @@ def _obstacle_enum_options() -> Tuple[EnumOption, ...]:
         EnumOption(value=AutoDebugOverride.OBSTACLE_DAMPER, label='Damper'),
     )
 
+def _cruise_drive_request_options() -> Tuple[EnumOption, ...]:
+    return (
+        EnumOption(value=0, label='Stop'),
+        EnumOption(value=1, label='Forward (+)'),
+        EnumOption(value=2, label='Reverse (-)'),
+    )
+
 
 def _build_debug_override_registry() -> Dict[str, FieldDescriptor]:
     obstacle_options = _obstacle_enum_options()
+    cruise_drive_options = _cruise_drive_request_options()
     return {
         'auto_start_requested': _field(
             name='auto_start_requested',
@@ -132,14 +140,14 @@ def _build_debug_override_registry() -> Dict[str, FieldDescriptor]:
             default_value=False,
             bit=AutoDebugOverride.FIELD_GRIP_FAULT,
         ),
-        'obstacle_detected': _field(
-            name='obstacle_detected',
-            label='障碍检测',
+        'obstacle_crossing_trigger': _field(
+            name='obstacle_crossing_trigger',
+            label='越障触发信号',
             group=_GROUP_OBSTACLE,
             message_kind=MessageKind.DEBUG_OVERRIDE,
             value_type=FieldValueType.BOOL,
             default_value=False,
-            bit=AutoDebugOverride.FIELD_OBSTACLE_DETECTED,
+            bit=AutoDebugOverride.FIELD_OBSTACLE_CROSSING_TRIGGER,
         ),
         'obstacle_type': _field(
             name='obstacle_type',
@@ -160,14 +168,15 @@ def _build_debug_override_registry() -> Dict[str, FieldDescriptor]:
             default_value=False,
             bit=AutoDebugOverride.FIELD_CLASSIFICATION_STABLE,
         ),
-        'range_to_obstacle': _field(
-            name='range_to_obstacle',
-            label='障碍距离',
-            group=_GROUP_OBSTACLE,
+        'cruise_drive_request': _field(
+            name='cruise_drive_request',
+            label='巡航方向请求',
+            group=_GROUP_BASE,
             message_kind=MessageKind.DEBUG_OVERRIDE,
-            value_type=FieldValueType.FLOAT,
-            default_value=0.0,
-            bit=AutoDebugOverride.FIELD_RANGE_TO_OBSTACLE,
+            value_type=FieldValueType.ENUM,
+            default_value=0,
+            bit=AutoDebugOverride.FIELD_CRUISE_DRIVE_REQUEST,
+            enum_options=cruise_drive_options,
         ),
         'at_crossing_position': _field(
             name='at_crossing_position',
@@ -233,6 +242,7 @@ def _build_sensor_input_registry() -> Dict[str, FieldDescriptor]:
         EnumOption(value=AutoSensorInput.OBSTACLE_LINE_CLAMP, label='Line Clamp'),
         EnumOption(value=AutoSensorInput.OBSTACLE_DAMPER, label='Damper'),
     )
+    cruise_drive_options = _cruise_drive_request_options()
     return {
         'lower_alive': _field(
             name='lower_alive',
@@ -274,9 +284,34 @@ def _build_sensor_input_registry() -> Dict[str, FieldDescriptor]:
             value_type=FieldValueType.BOOL,
             default_value=False,
         ),
-        'obstacle_detected': _field(
-            name='obstacle_detected',
-            label='障碍检测',
+        'cruise_drive_request': _field(
+            name='cruise_drive_request',
+            label='巡航方向请求',
+            group=_GROUP_BASE,
+            message_kind=MessageKind.SENSOR_INPUT,
+            value_type=FieldValueType.ENUM,
+            default_value=0,
+            enum_options=cruise_drive_options,
+        ),
+        'auto_start': _field(
+            name='auto_start',
+            label='下位机自动启动',
+            group=_GROUP_START_RESET,
+            message_kind=MessageKind.SENSOR_INPUT,
+            value_type=FieldValueType.BOOL,
+            default_value=False,
+        ),
+        'manual_reset': _field(
+            name='manual_reset',
+            label='下位机人工复位',
+            group=_GROUP_START_RESET,
+            message_kind=MessageKind.SENSOR_INPUT,
+            value_type=FieldValueType.BOOL,
+            default_value=False,
+        ),
+        'obstacle_crossing_trigger': _field(
+            name='obstacle_crossing_trigger',
+            label='越障触发信号',
             group=_GROUP_OBSTACLE,
             message_kind=MessageKind.SENSOR_INPUT,
             value_type=FieldValueType.BOOL,
@@ -298,14 +333,6 @@ def _build_sensor_input_registry() -> Dict[str, FieldDescriptor]:
             message_kind=MessageKind.SENSOR_INPUT,
             value_type=FieldValueType.BOOL,
             default_value=False,
-        ),
-        'range_to_obstacle': _field(
-            name='range_to_obstacle',
-            label='障碍距离',
-            group=_GROUP_OBSTACLE,
-            message_kind=MessageKind.SENSOR_INPUT,
-            value_type=FieldValueType.FLOAT,
-            default_value=0.0,
         ),
         'at_crossing_position': _field(
             name='at_crossing_position',

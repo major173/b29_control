@@ -4,7 +4,7 @@
        <arg name="smc_controller_namespace" default="/b29_controller/b29_smc_auto_controller"/>
        <arg name="rviz_config" default="$(find b29_control)/rviz/config.rviz"/>
        <arg name="model" default="$(find b29_control)/urdf/b29/b29.urdf.xacro"/>
-       <arg name="use_rviz" default="true"/>
+       <arg name="use_rviz" default="false"/>
 
        <param name="robot_description"
               command="$(find xacro)/xacro $(arg model) use_simulation:=false"/>

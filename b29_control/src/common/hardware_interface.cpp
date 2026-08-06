@@ -192,10 +192,10 @@ void StRobotHW::write(const ros::Time &time, const ros::Duration &period) {
     index += sizeof(float);
   };
 
-  // packFloat(static_cast<float>(wheel_speed_left));
-  // packFloat(static_cast<float>(wheel_speed_right));
-  packFloat(static_cast<float>(0.0));  // 调试
-  packFloat(static_cast<float>(0.0));
+  packFloat(static_cast<float>(wheel_speed_left));
+  packFloat(static_cast<float>(wheel_speed_right));
+  // packFloat(static_cast<float>(0.0));
+  // packFloat(static_cast<float>(0.0));
   packFloat(static_cast<float>(claw_speed_left));
   packFloat(static_cast<float>(claw_speed_right));
   packFloat(static_cast<float>(claw_angle_left));
@@ -678,12 +678,14 @@ void StRobotHW::unpack(std::vector<uint8_t> rx_buffer,const ros::Time &time) {
   constexpr size_t kRemoteControlJointCount = 4;
   constexpr size_t kRemoteControlPayloadSize =
       kRemoteControlJointCount * sizeof(float) + sizeof(uint8_t);
+  constexpr size_t kAutoControlInputPayloadSize = 2 * sizeof(uint8_t);
   constexpr size_t kStatusPayloadSize = 3;
   constexpr size_t kMotorIdLength = 1;
   const size_t entry_size = kMotorIdLength + 3 * sizeof(float);
 
   const size_t fixed_payload_size =
-      kImuPayloadSize + kRemoteControlPayloadSize + kStatusPayloadSize;
+      kImuPayloadSize + kRemoteControlPayloadSize +
+      kAutoControlInputPayloadSize + kStatusPayloadSize;
   if (static_cast<size_t>(length) < fixed_payload_size) {
     ROS_WARN_THROTTLE(10, "Received message data length %u is too short", length);
     return;
@@ -761,6 +763,55 @@ void StRobotHW::unpack(std::vector<uint8_t> rx_buffer,const ros::Time &time) {
   previous_remote_control_complete_ = remote_control_complete;
   if (!remote_control_increments_valid) {
     ROS_WARN_THROTTLE(1.0, "Ignoring non-finite remote control joint increment");
+  }
+
+  if (index + kAutoControlInputPayloadSize >
+      payload_start + static_cast<size_t>(length)) {
+    ROS_WARN_THROTTLE(10, "Received automatic control input payload is incomplete");
+    return;
+  }
+
+  constexpr uint8_t kAutoStartMask = 1u << 0;
+  constexpr uint8_t kManualResetMask = 1u << 1;
+  constexpr uint8_t kObstacleCrossingTriggerMask = 1u << 2;
+  constexpr uint8_t kKnownControlSignalMask =
+      kAutoStartMask | kManualResetMask | kObstacleCrossingTriggerMask;
+
+  const uint8_t cruise_drive_request_raw = rx_buffer[index++];
+  const uint8_t control_signal_bits = rx_buffer[index++];
+  const bool auto_start = (control_signal_bits & kAutoStartMask) != 0;
+  const bool manual_reset = (control_signal_bits & kManualResetMask) != 0;
+  const bool obstacle_crossing_trigger =
+      (control_signal_bits & kObstacleCrossingTriggerMask) != 0;
+
+  auto_state_data_.cruise_drive_request_raw = cruise_drive_request_raw;
+  auto_state_data_.cruise_drive_request_valid = cruise_drive_request_raw <= 2u;
+  auto_state_data_.auto_start = auto_start;
+  auto_state_data_.manual_reset = manual_reset;
+  auto_state_data_.obstacle_crossing_trigger = obstacle_crossing_trigger;
+  if (!previous_auto_start_ && auto_start) {
+    ++auto_state_data_.auto_start_rising_edge_sequence;
+  }
+  if (!previous_manual_reset_ && manual_reset) {
+    ++auto_state_data_.manual_reset_rising_edge_sequence;
+  }
+  if (!previous_obstacle_crossing_trigger_ && obstacle_crossing_trigger) {
+    ++auto_state_data_.obstacle_trigger_rising_edge_sequence;
+  }
+  if (previous_obstacle_crossing_trigger_ && !obstacle_crossing_trigger) {
+    ++auto_state_data_.obstacle_trigger_falling_edge_sequence;
+  }
+  previous_auto_start_ = auto_start;
+  previous_manual_reset_ = manual_reset;
+  previous_obstacle_crossing_trigger_ = obstacle_crossing_trigger;
+
+  if (!auto_state_data_.cruise_drive_request_valid) {
+    ROS_WARN_THROTTLE(1.0, "Received invalid cruise drive request: %u",
+                      static_cast<unsigned int>(cruise_drive_request_raw));
+  }
+  if ((control_signal_bits & static_cast<uint8_t>(~kKnownControlSignalMask)) != 0) {
+    ROS_WARN_THROTTLE(1.0, "Received non-zero reserved automatic control signal bits: 0x%02x",
+                      static_cast<unsigned int>(control_signal_bits));
   }
 
   if(index + kStatusPayloadSize > payload_start + static_cast<size_t>(length)) {
@@ -918,6 +969,15 @@ bool StRobotHW::initAutoStateData(AutoStateData &data) {
   data.joint_fault = false;
   data.grip_fault = false;
   data.imu_ready = false;
+  data.cruise_drive_request_raw = 0;
+  data.cruise_drive_request_valid = true;
+  data.auto_start = false;
+  data.manual_reset = false;
+  data.obstacle_crossing_trigger = false;
+  data.auto_start_rising_edge_sequence = 0;
+  data.manual_reset_rising_edge_sequence = 0;
+  data.obstacle_trigger_rising_edge_sequence = 0;
+  data.obstacle_trigger_falling_edge_sequence = 0;
   data.gravity_compensation_mode = 0;
   return true;
 }

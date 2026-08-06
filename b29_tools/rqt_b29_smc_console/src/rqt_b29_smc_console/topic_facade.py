@@ -118,7 +118,7 @@ class TopicFacade:
         subscriber_factory: Callable = None,
         service_proxy_factory: Callable = None,
         release_scheduler: Callable[[float, Callable[[], None]], object] = None,
-        pulse_hold_sec: float = 0.05,
+        pulse_hold_sec: float = 0.20,
     ):
         self._namespace = namespace
         self._composer = OverrideComposer()
@@ -187,11 +187,10 @@ class TopicFacade:
         self._override_publisher.publish(message)
         return message
 
-    def publish_obstacle_override(self, detected: bool, distance: float) -> AutoDebugOverride:
+    def publish_obstacle_trigger_override(self, triggered: bool) -> AutoDebugOverride:
         message = self._composer.latch_many(
             {
-                'obstacle_detected': bool(detected),
-                'range_to_obstacle': float(distance),
+                'obstacle_crossing_trigger': bool(triggered),
             }
         )
         self._override_publisher.publish(message)

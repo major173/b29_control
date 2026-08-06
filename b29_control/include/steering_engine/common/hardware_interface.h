@@ -207,6 +207,9 @@ private:
   AutoStateData auto_state_data_{};
   RemoteControlData remote_control_data_{};
   bool previous_remote_control_complete_{false};
+  bool previous_auto_start_{false};
+  bool previous_manual_reset_{false};
+  bool previous_obstacle_crossing_trigger_{false};
   ros::Time last_rx_time_{};
 
   // transmission of the robot

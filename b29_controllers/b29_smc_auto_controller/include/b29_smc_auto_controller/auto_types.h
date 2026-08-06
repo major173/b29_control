@@ -20,6 +20,15 @@ enum class DriveMode : uint8_t
 {
   Stop = 0,
   Forward = 1,
+  Reverse = 2,
+};
+
+enum class CruiseDriveRequest : uint8_t
+{
+  Stop = 0,
+  Forward = 1,
+  Reverse = 2,
+  Invalid = 255,
 };
 
 enum class CrossingStrategy : uint8_t
@@ -95,10 +104,10 @@ struct DebugOverrideMask
   static constexpr uint32_t GripConfirmed = 1u << 6;
   static constexpr uint32_t JointFault = 1u << 7;
   static constexpr uint32_t GripFault = 1u << 8;
-  static constexpr uint32_t ObstacleDetected = 1u << 9;
+  static constexpr uint32_t ObstacleCrossingTrigger = 1u << 9;
   static constexpr uint32_t ObstacleType = 1u << 10;
   static constexpr uint32_t ClassificationStable = 1u << 11;
-  static constexpr uint32_t RangeToObstacle = 1u << 12;
+  static constexpr uint32_t CruiseDriveRequest = 1u << 12;
   static constexpr uint32_t AtCrossingPosition = 1u << 13;
   static constexpr uint32_t CrossingStepDone = 1u << 14;
   static constexpr uint32_t CrossingComplete = 1u << 15;
@@ -121,10 +130,10 @@ struct DebugOverrideData
   bool grip_confirmed{false};
   bool joint_fault{false};
   bool grip_fault{false};
-  bool obstacle_detected{false};
+  bool obstacle_crossing_trigger{false};
   ObstacleType obstacle_type{ObstacleType::Unknown};
   bool classification_stable{false};
-  double range_to_obstacle{0.0};
+  uint8_t cruise_drive_request_raw{0};
   bool at_crossing_position{false};
   bool crossing_step_done{false};
   bool crossing_complete{false};
@@ -159,10 +168,19 @@ struct AutoInputSnapshot
   bool grip_confirmed{false};
   bool joint_fault{false};
   bool grip_fault{false};
-  bool obstacle_detected{false};
+  CruiseDriveRequest cruise_drive_request{CruiseDriveRequest::Stop};
+  uint8_t cruise_drive_request_raw{0};
+  bool cruise_drive_request_valid{true};
+  bool obstacle_crossing_trigger{false};
+  bool auto_start_edge_sequence_valid{false};
+  bool manual_reset_edge_sequence_valid{false};
+  bool obstacle_trigger_edge_sequences_valid{false};
+  std::uint64_t auto_start_rising_edge_sequence{0};
+  std::uint64_t manual_reset_rising_edge_sequence{0};
+  std::uint64_t obstacle_trigger_rising_edge_sequence{0};
+  std::uint64_t obstacle_trigger_falling_edge_sequence{0};
   ObstacleType obstacle_type{ObstacleType::Unknown};
   bool classification_stable{false};
-  double range_to_obstacle{0.0};
   bool at_crossing_position{false};
   bool crossing_step_done{false};
   bool crossing_complete{false};

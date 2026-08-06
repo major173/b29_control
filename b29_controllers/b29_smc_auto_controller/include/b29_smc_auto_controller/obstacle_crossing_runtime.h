@@ -40,9 +40,12 @@ public:
   struct Inputs
   {
     bool traversing{false};
-    bool obstacle_detected{false};
-    bool obstacle_within_threshold{false};
-    double cruise_speed{0.0};
+    bool obstacle_crossing_trigger{false};
+    bool obstacle_trigger_edge_sequences_valid{false};
+    std::uint64_t obstacle_trigger_rising_edge_sequence{0};
+    std::uint64_t obstacle_trigger_falling_edge_sequence{0};
+    // Cumulative average net angular travel of dual wheels since the last successful full obstacle crossing, in radians (rad)
+    double signed_wheel_travel{0.0};
     bool grip_confirmed{false};
     bool safety_blocked{false};
   };
@@ -62,6 +65,7 @@ public:
     PlannerAction planner_action{PlannerAction::None};
     bool start_remote_control_session{false};
     bool reset_remote_control_session{false};
+    bool reset_wheel_travel{false};
   };
 
   struct TraceState
@@ -82,6 +86,11 @@ public:
     ros::Time gripper_wait_start_time{};
     double wait_for_grip_respond_time{0.0};
     std::string last_failure_reason;
+    bool obstacle_crossing_trigger{false};
+    bool obstacle_trigger_rising_edge{false};
+    bool obstacle_trigger_falling_edge{false};
+    std::uint64_t obstacle_trigger_rising_edge_sequence{0};
+    std::uint64_t obstacle_trigger_falling_edge_sequence{0};
   };
 
   void configure(const Config& config);
@@ -122,7 +131,7 @@ private:
   const int* retryCounter(FailedOperation operation, CrossingSide side) const;
   FailedOperation failedOperationForStage() const;
   static CrossingSide oppositeSide(CrossingSide side);
-  static CrossingSide firstSideFromCruiseSpeed(double cruise_speed);
+  static CrossingSide firstSideFromSignedWheelTravel(double signed_wheel_travel);
   static const char* failedOperationReasonName(FailedOperation operation);
 
   Config config_{};
@@ -135,6 +144,12 @@ private:
   ros::Time stage_enter_time_{};
   std::string transition_reason_;
   std::string last_failure_reason_;
+  bool obstacle_trigger_edges_initialized_{false};
+  bool previous_obstacle_crossing_trigger_{false};
+  bool obstacle_trigger_rising_edge_{false};
+  bool obstacle_trigger_falling_edge_{false};
+  std::uint64_t last_obstacle_trigger_rising_edge_sequence_{0};
+  std::uint64_t last_obstacle_trigger_falling_edge_sequence_{0};
   bool grip_confirmation_low_seen_{false};
   GravityCompensationMode gravity_compensation_latched_mode_{GravityCompensationMode::Off};
 };

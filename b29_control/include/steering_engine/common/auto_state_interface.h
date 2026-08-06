@@ -25,14 +25,22 @@ struct AutoStateData
     bool grip_fault{false};
     bool imu_ready{false};
 
-    bool obstacle_detected{false};
     ObstacleType obstacle_type{ObstacleType::OBSTACLE_UNKNOWN};
     bool classification_stable{false};
-    double range_to_obstacle{0.0};
-    
+
     bool at_crossing_position{false};
     bool post_check_passed{false};
     bool post_check_failed{false};
+
+    uint8_t cruise_drive_request_raw{0};
+    bool cruise_drive_request_valid{true};
+    bool auto_start{false};
+    bool manual_reset{false};
+    bool obstacle_crossing_trigger{false};
+    std::uint64_t auto_start_rising_edge_sequence{0};
+    std::uint64_t manual_reset_rising_edge_sequence{0};
+    std::uint64_t obstacle_trigger_rising_edge_sequence{0};
+    std::uint64_t obstacle_trigger_falling_edge_sequence{0};
 
     uint8_t gravity_compensation_mode{0};
 };

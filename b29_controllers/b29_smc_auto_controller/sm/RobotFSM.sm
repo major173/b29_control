@@ -103,21 +103,6 @@ Traversing
         }
 
     evTick
-        [ctxt.isObstacleWithinCrossObstaclesDistance()]
-        nil
-        {
-            setWheelStop();
-        }
-
-    evTick
-        [ctxt.isObstacleDetected()]
-        nil
-        {
-            setApproachCommand();
-        }
-
-    evTick
-        [ctxt.isObstacleNotDetected()]
         nil
         {
             setCruiseCommand();

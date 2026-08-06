@@ -94,27 +94,30 @@ uint8_t gravityCompensationMode;  // Payload 后的独立字段，0=关闭，1=�
 **流向**：下位机 (Robot) →→ 上位机 (PC)
 **作用**：告诉上位机现在各个电机的实际状态（位置、速度、力矩）。
 
-**A. 数据包结构 (171 Bytes)**
+**A. 数据包结构 (173 Bytes)**
 
-电机数量 `num = 8`。Payload 长度为 `8 * 13 + 10 * 4 + 4 * 4 + 1 + 3 = 164`
-字节，完整帧长度为 `4 + 164 + 1 + 2 = 171` 字节。
+电机数量 `num = 8`。Payload 长度为
+`8 * 13 + 10 * 4 + 4 * 4 + 1 + 1 + 1 + 3 = 166`
+字节，完整帧长度为 `4 + 166 + 1 + 2 = 173` 字节。
 
 | **顺序**      | **字段名**  | **长度**      | **值/类型**      | **说明**                               |
 | ------------- | ----------- | ------------- | ---------------- | -------------------------------------- |
 | **1**         | **帧头1**   | **1 Byte**    | **`0x55`**       | **固定头**                             |
 | **2**         | **帧头2**   | **1 Byte**    | **`0xAA`**       | **固定头**                             |
 | **3**         | **命令字**  | **1 Byte**    | **`0x01`**       | **反馈指令**                           |
-| **4**         | **长度位**  | **1 Byte**    | **`0xA4` (164)** | **后续 Payload 长度**                  |
+| **4**         | **长度位**  | **1 Byte**    | **`0xA6` (166)** | **后续 Payload 长度**                  |
 | **5 ~ 108**   | **Payload** | **104 Bytes** | **Mixed**        | **所有电机的状态列表**                 |
 | **109 ~ 148** | **Payload** | **40  Bytes** | **Mixed**        | **IMU数据**                            |
 | **149 ~ 164** | **Payload** | **16 Bytes**  | **float**        | **左一、左二、右一、右二遥控位置增量** |
 | **165**       | **Payload** | **1 Byte**    | **uint8**        | **遥控阶段完成信号，0/1上升沿**        |
-| **166**       | **Payload** | **1 Byte**    | **uint8**        | **电机异常状态位**                     |
-| **167**       | **Payload** | **1 Byte**    | **uint8**        | **夹爪夹紧标志位**                 |
-| **168**       | **Payload** | **1 Byte**    | **uint8**        | **IMU 就绪标志，0=未就绪，1=就绪**       |
-| 169           | CRC         | 1 Byte        | Calc             | CRC8 校验码                            |
-| 170           | 帧尾1       | 1 Byte        | `0x0D`           | CR                                     |
-| 171           | 帧尾2       | 1 Byte        | `0x0A`           | LF                                     |
+| **166**       | **Payload** | **1 Byte**    | **uint8**        | **巡航轮速请求：0=停止，1=正值，2=负值** |
+| **167**       | **Payload** | **1 Byte**    | **uint8 bit mask** | **自动控制信号位，见下文**             |
+| **168**       | **Payload** | **1 Byte**    | **uint8**        | **电机异常状态位**                     |
+| **169**       | **Payload** | **1 Byte**    | **uint8**        | **夹爪夹紧标志位**                     |
+| **170**       | **Payload** | **1 Byte**    | **uint8**        | **IMU 就绪标志，0=未就绪，1=就绪**     |
+| 171           | CRC         | 1 Byte        | Calc             | CRC8 校验码                            |
+| 172           | 帧尾1       | 1 Byte        | `0x0D`           | CR                                     |
+| 173           | 帧尾2       | 1 Byte        | `0x0A`           | LF                                     |
 
 **B. Payload 数据内容（电机、IMU、遥控输入和状态）**
 
@@ -163,6 +166,28 @@ Block 8 (Byte 91-103): **电机 8** 的 ID, Pos, Vel, Tor
 - 控制器将每关节单帧增量限制在 `[-0.05, +0.05] rad`。
 - 完成信号只在 `RemoteControl` 阶段内出现新的 `0 -> 1` 上升沿时有效；进入阶段时已经为 `1` 不会立即放行。
 
+**巡航轮速请求**
+
+- `0`：停止，左右轮速度目标均为 `0`。
+- `1`：Forward，左右轮速度目标使用固定正值 `+0.10`。
+- `2`：Reverse，左右轮速度目标使用固定负值 `-0.10`。
+- 具体速度目标数值大小在上位机修改。
+- 其他值无效，上位机保持轮子停止并输出告警。
+- 只有外层状态为 `Traversing`，且越障阶段为 `Idle` 或
+  `CompleteWaitObstacleClear` 时，轮速才允许非零。
+
+**自动控制信号位**
+
+| 位 | 信号 | 有效条件 |
+|---|---|---|
+| bit 0 | AutoStart | `0 -> 1` 上升沿，仅在外层 `Idle` 中消费 |
+| bit 1 | ManualReset | `0 -> 1` 上升沿，仅在外层 `SafeStop` 中消费 |
+| bit 2 | ObstacleCrossingTrigger | `0 -> 1` 启动越障；在 `CompleteWaitObstacleClear` 中新的 `1 -> 0` 结束等待 |
+| bit 3~7 | 保留 | 下位机必须置 `0` |
+
+越障触发信号必须保持到控制器进入 `CompleteWaitObstacleClear`。越障过程中提前出现的
+下降沿会被丢弃，不能用于之后退出完成等待状态。
+
 **电机异常状态位**
 
 - 以 `一个字节` 表示 `8个电机` 异常状态, `1` 表示正常  `0` 表示异常
@@ -186,8 +211,8 @@ Block 8 (Byte 91-103): **电机 8** 的 ID, Pos, Vel, Tor
 **C. 上位机如何解析**
 
 1. **寻找帧头：在串口流中寻找 `55 AA`。**
-2. **读取长度：读取 Length 字节 (`0xA4 = 164`)。**
-3. **读取 Payload：读取接下来的 164 字节。**
+2. **读取长度：读取 Length 字节 (`0xA6 = 166`)。**
+3. **读取 Payload：读取接下来的 166 字节。**
 
 ### **校验相关代码**
 
@@ -213,9 +238,12 @@ void slave_send_packet(void){
     const uint8_t motor_payload_len = (uint8_t)(motor_count * 13u);
     const uint8_t imu_payload_len = 10u * 4u;
     const uint8_t remote_control_payload_len = 4u * 4u + 1u;
+    const uint8_t auto_control_input_payload_len = 2u;
     const uint8_t status_payload_len = 3u;
     const uint8_t payload_len = (uint8_t)(motor_payload_len + imu_payload_len +
-                                          remote_control_payload_len + status_payload_len);
+                                          remote_control_payload_len +
+                                          auto_control_input_payload_len +
+                                          status_payload_len);
     const imuDataStruct_t *imu = get_imu_data();
     
     static uint8_t tx_buf[256];
@@ -274,6 +302,11 @@ void slave_send_packet(void){
         index += 4u;
     }
     tx_buf[index++] = remote_control_stage_complete ? 1u : 0u;
+    tx_buf[index++] = cruise_drive_request;  /* 0=Stop, 1=Forward(+), 2=Reverse(-) */
+    tx_buf[index++] =
+        (auto_start ? (1u << 0) : 0u) |
+        (manual_reset ? (1u << 1) : 0u) |
+        (obstacle_crossing_trigger ? (1u << 2) : 0u);
     tx_buf[index++] = motor_fault;
     tx_buf[index++] = grip_confirmed;
     tx_buf[index++] = imu_ready ? 1u : 0u;

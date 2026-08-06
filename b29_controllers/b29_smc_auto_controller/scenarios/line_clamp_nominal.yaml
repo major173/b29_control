@@ -17,9 +17,9 @@ events:
     auto_start_requested: false
   - time: 1.0
     fields:
-      - obstacle_detected
+      - obstacle_crossing_trigger
       - obstacle_type
       - classification_stable
-    obstacle_detected: true
+    obstacle_crossing_trigger: true
     obstacle_type: 1
     classification_stable: true

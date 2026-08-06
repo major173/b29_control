@@ -135,9 +135,26 @@ const char* driveModeName(DriveMode mode)
   {
     case DriveMode::Forward:
       return "Forward";
+    case DriveMode::Reverse:
+      return "Reverse";
     case DriveMode::Stop:
     default:
       return "Stop";
+  }
+}
+
+const char* cruiseDriveRequestName(uint8_t request)
+{
+  switch (request)
+  {
+    case 0u:
+      return "Stop";
+    case 1u:
+      return "Forward";
+    case 2u:
+      return "Reverse";
+    default:
+      return "Invalid";
   }
 }
 
@@ -290,6 +307,12 @@ AutoStateTrace ControllerTraceBuilder::build(const ros::Time& stamp, const AutoC
   trace.remote_control_sample_sequence = controller_state.remote_control_sample_sequence;
   trace.remote_control_complete = controller_state.remote_control_complete;
   trace.remote_control_completion_rising_edge = controller_state.remote_control_completion_rising_edge;
+  trace.left_wheel_travel_baseline_position = controller_state.left_wheel_travel_baseline_position;
+  trace.right_wheel_travel_baseline_position = controller_state.right_wheel_travel_baseline_position;
+  trace.left_wheel_travel_current_position = controller_state.left_wheel_travel_current_position;
+  trace.right_wheel_travel_current_position = controller_state.right_wheel_travel_current_position;
+  trace.signed_wheel_travel = controller_state.signed_wheel_travel;
+  trace.wheel_travel_baseline_initialized = controller_state.wheel_travel_baseline_initialized;
 
   trace.drive_mode = driveModeName(effective_command.drive_mode);
   trace.gravity_compensation_mode = static_cast<uint8_t>(effective_command.gravity_compensation_mode);
@@ -317,8 +340,8 @@ AutoStateTrace ControllerTraceBuilder::build(const ros::Time& stamp, const AutoC
   trace.debug_validation_enabled = controller_state.debug_validation_enabled;
   trace.simulation_only = controller_state.simulation_only;
   trace.debug_override_active = controller_state.debug_override_active;
-  trace.debug_obstacle_detected = controller_state.debug_obstacle_detected;
-  trace.debug_obstacle_distance = controller_state.debug_obstacle_distance;
+  trace.debug_obstacle_crossing_trigger =
+      controller_state.debug_obstacle_crossing_trigger;
   trace.software_emergency_stop_latched = controller_state.software_emergency_stop_latched;
   trace.manual_reset_requested = controller_state.manual_reset_requested;
   trace.lower_alive = controller_state.lower_alive;
@@ -327,8 +350,27 @@ AutoStateTrace ControllerTraceBuilder::build(const ros::Time& stamp, const AutoC
   trace.grip_confirmed = controller_state.grip_confirmed;
   trace.joint_fault = controller_state.joint_fault;
   trace.grip_fault = controller_state.grip_fault;
-  trace.obstacle_detected = controller_state.obstacle_detected;
-  trace.range_to_obstacle = controller_state.range_to_obstacle;
+  trace.cruise_drive_request_raw = controller_state.cruise_drive_request_raw;
+  trace.cruise_drive_request =
+      cruiseDriveRequestName(controller_state.cruise_drive_request_raw);
+  trace.cruise_drive_request_valid =
+      controller_state.cruise_drive_request_valid;
+  trace.auto_start = controller_state.auto_start;
+  trace.manual_reset = controller_state.manual_reset;
+  trace.obstacle_crossing_trigger =
+      controller_state.obstacle_crossing_trigger;
+  trace.auto_start_rising_edge_sequence =
+      controller_state.auto_start_rising_edge_sequence;
+  trace.manual_reset_rising_edge_sequence =
+      controller_state.manual_reset_rising_edge_sequence;
+  trace.obstacle_trigger_rising_edge =
+      controller_state.obstacle_trigger_rising_edge;
+  trace.obstacle_trigger_falling_edge =
+      controller_state.obstacle_trigger_falling_edge;
+  trace.obstacle_trigger_rising_edge_sequence =
+      controller_state.obstacle_trigger_rising_edge_sequence;
+  trace.obstacle_trigger_falling_edge_sequence =
+      controller_state.obstacle_trigger_falling_edge_sequence;
   return trace;
 }
 }  // namespace b29_smc_auto_controller

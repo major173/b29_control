@@ -31,8 +31,8 @@
 - `Overview`：RobotFSM、基础命令来源、`output_mode`、调试门禁和仿真标识
 - `Crossing`：越障主 FSM、脱缆 Step、Step7 判定值、retry、PlannerControl 和 RemoteControl 增量/完成上升沿
 - `Command & Safety`：effective command、六关节目标、dispatch 结果和软件急停锁存
-- `Inputs`：debug obstacle 和 RobotContext 输入快照
-- `Actions`：软件急停、人工复位、Planner release、障碍物覆盖、Auto Start、Pause、Comms Loss
+- `Inputs`：巡航请求、越障触发边沿和 RobotContext 输入快照
+- `Actions`：软件急停、人工复位、Planner release、越障触发、Auto Start、Pause、Comms Loss
 
 验证 tabs 和整个插件视图均支持滚动。rqt dock 缩小时可以继续访问全部字段和动作按钮，不需要保持固定窗口尺寸。
 
@@ -44,7 +44,7 @@
 - 支持常用预设按钮：
   - `基础可启动`
   - `通信丢失`
-  - `障碍出现`
+  - `越障触发`
   - `全部清空`
 - `发布当前 Sensor Input` 会把当前编辑值发布到 `sensor_input`
 
@@ -58,7 +58,7 @@
 - 对布尔、枚举、浮点字段使用对应编辑控件
 - 面板会实时预览当前 `field_mask`
 - 英文模式下，字段下拉优先显示代码风格文本，例如 `Base / lower_alive`
-- 对 `触发一次` 这类事件型字段，插件会先发送按下态，再延迟一个很短的时间窗发送释放态，避免 50Hz 控制周期完整错过脉冲
+- 对 `触发一次` 这类事件型字段，插件会先发送按下态，默认保持 `0.20s` 后发送释放态，降低多机通信中脉冲被错过的概率
 - 如果 `sensor_input` 或 `debug_override` 发布失败，插件会在界面中显示错误提示，而不是把异常直接抛到 UI 外层
 
 ### Workflow
@@ -69,6 +69,9 @@
   - `Idle -> AutoInit -> Traversing`
   - `EmergencyStop -> SafeStop`
   - `SafeStop -> Idle`
+
+`Idle -> AutoInit -> Traversing` 直接等待最终 `Traversing`，不要求 GUI 捕获只持续一个控制周期的
+`AutoInit` 中间状态。
 
 ### Trace
 
@@ -83,11 +86,15 @@
 
 - `基础可启动`：写入一组可进入自动链路的基础传感器值
 - `通信丢失`：将 `lower_alive` 等关键输入切到失联语义
-- `障碍出现`：构造障碍检测相关输入，便于验证障碍分支
+- `越障触发`：将 `obstacle_crossing_trigger` 置高；只有新的上升沿会启动越障
 - `全部清空`：恢复为默认基线值
 - `触发一次`：适合 `auto_start_requested`、`emergency_stop` 这类瞬时事件
 - `持续覆盖`：适合 `posture_ready`、`lower_alive` 这类需要保持的条件
 - `取消覆盖`：移除当前字段的覆盖，回到未覆盖状态
+
+越障触发必须保持到控制器进入 `CompleteWaitObstacleClear`，然后通过 `Clear Trigger`
+产生新的下降沿。越障期间提前拉低不会在完成等待阶段生效。巡航方向字段使用
+`0=Stop`、`1=Forward(正轮速)`、`2=Reverse(负轮速)`。
 
 ## 运行方式
 

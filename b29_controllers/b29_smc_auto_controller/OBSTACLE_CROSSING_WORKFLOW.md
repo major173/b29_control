@@ -58,12 +58,15 @@ stateDiagram-v2
 
 ```mermaid
 flowchart TD
-  T0["Traversing / evTick"] --> T1{"障碍进入翻越阈值?"}
-  T1 -- 是 --> T2["setWheelStop()"]
-  T1 -- 否 --> T3{"检测到障碍?"}
-  T3 -- 是 --> T4["setApproachCommand()"]
-  T3 -- 否 --> T5["setCruiseCommand()"]
+  T0["Traversing / evTick"] --> T1["setCruiseCommand()"]
+  T1 --> T2{"cruise_drive_request"}
+  T2 -->|0 Stop| T3["wheel speed = 0"]
+  T2 -->|1 Forward| T4["wheel speed = +0.10"]
+  T2 -->|2 Reverse| T5["wheel speed = -0.10"]
 ```
+
+Forward/Reverse 只表示发送给左右轮的轮速数值正负，不表示机器人机械坐标系方向。
+活动越障阶段会在最终命令仲裁中覆盖基础巡航命令并强制停轮。
 
 通信、安全故障和恢复路径：
 
@@ -201,23 +204,26 @@ flowchart LR
 进入条件：
 
 - 初始化默认状态。
-- `CompleteWaitObstacleClear` 中障碍消失后调用 `resetObstacleCrossingState()`。
+- `CompleteWaitObstacleClear` 中收到新的越障触发下降沿后调用 `resetObstacleCrossingState()`。
 - 安全阻断时调用 `resetObstacleCrossingState()`。
 
 转出条件：
 
 - `robot_context_.isTraversing() == true`
-- `robot_context_.isObstacleWithinCrossObstaclesDistance() == true`
+- 当前控制器运行期间收到新的 `obstacle_crossing_trigger: 0 -> 1` 上升沿
 
 转出动作：
 
-- `crossing_runtime_` 清零 retry 和失败操作，并根据巡航速度记录首侧。
+- `crossing_runtime_` 清零 retry 和失败操作，并根据上次完整越障成功后累计的双轮平均有符号净角行程记录首侧。
 - 阶段转入 `CloseBothGrippers`，夹爪确认门控以当前 `grip_confirmed` 初始化。
 
 首侧选择：
 
-- `robot_context_.getCruiseSpeed() < 0.0`：`first_crossing_side_ = Right`
-- 其他情况：`first_crossing_side_ = Left`
+- `signed_wheel_travel < 0.0`：`first_crossing_side_ = Right`
+- `signed_wheel_travel >= 0.0`：`first_crossing_side_ = Left`
+
+`signed_wheel_travel` 由左右驱动轮实际位置反馈相对当前基准的变化量取平均得到，单位为 rad。
+控制器启动和每次进入 `CompleteWaitObstacleClear` 时重新建立基准；SafeStop、CommsLoss 与普通暂停不重置。
 
 命令行为：
 
@@ -227,7 +233,7 @@ flowchart LR
 
 目的：
 
-- 障碍进入阈值后，先闭合两个夹爪，确认线缆被夹紧，禁止轮子运动。
+- 收到越障触发上升沿后，先闭合两个夹爪，确认线缆被夹紧，禁止轮子运动。
 
 命令行为：
 
@@ -456,14 +462,13 @@ Planner 覆盖关节：
 
 目的：
 
-- 左右两侧均完成脱缆、Planner 接管和回夹后，恢复巡航基础命令，但等待障碍检测消失，防止同一个障碍重复触发。
+- 左右两侧均完成脱缆、Planner 接管和回夹后，恢复巡航基础命令，但等待下位机撤销越障触发信号，防止同一次触发重复启动。
+- 进入该阶段时立即关闭重力补偿，并重新建立双轮行程基准。
 
 命令行为：
 
-- `drive_mode = Forward`
-- `left_wheel_speed = robot_context_.getCruiseSpeed()`
-- `right_wheel_speed = robot_context_.getCruiseSpeed()`
-- `stop_all = false`
+- 保留 `RobotContext::setCruiseCommand()` 根据 `cruise_drive_request` 生成的轮速
+- `0=Stop`、`1=Forward(+0.10)`、`2=Reverse(-0.10)`
 - `freeze_joints = false`
 - `LeftGripper = HALFOPEN`
 - `RightGripper = HALFOPEN`
@@ -471,11 +476,12 @@ Planner 覆盖关节：
 
 转出条件：
 
-- `robot_context_.isObstacleDetected() == false`
+- 已经进入本阶段后，收到新的 `obstacle_crossing_trigger: 1 -> 0` 下降沿
+- 越障期间提前出现的下降沿会被丢弃；下位机必须重新产生一个有效下降沿
 
 转出动作：
 
-- `resetObstacleCrossingState()`
+- `resetObstacleCrossingState()`，转换原因记录为 `obstacle_trigger_falling_edge`
 
 ### 4.11 ManualIntervention
 
@@ -680,7 +686,7 @@ controller 追加的 trace 字段：
 |---|---|---|
 | `obstacle_crossing_stage_` | `ObstacleCrossingStage` | 障碍翻越主状态 |
 | `crossing_side_` | `CrossingSide` | 当前处理侧：`Left` / `Right` / `None` |
-| `first_crossing_side_` | `CrossingSide` | 本次越障首侧，由巡航速度符号确定，并决定 FirstSide / SecondSide 顺序 |
+| `first_crossing_side_` | `CrossingSide` | 本次越障首侧，由双轮实际位置反馈的有符号净行程确定，并决定 FirstSide / SecondSide 顺序 |
 | `failed_operation_` | `FailedOperation` | 进入人工干预的失败动作 |
 | `crossing_runtime_` | `ObstacleCrossingRuntime` | 主阶段、侧别、retry、人工恢复、夹爪确认门控和重力补偿锁存 |
 | `disconnect_cable_process_` | `DisconnectCableProcess` | 脱缆步骤、步骤计时、Step6 参考位置、插值和成功/失败事件 |
@@ -799,8 +805,8 @@ sequenceDiagram
   CTRL->>HW: SecondSide gripper CLOSED
   CTRL->>CTRL: grip_confirmed == true
   CTRL->>CTRL: CompleteWaitObstacleClear
-  CTRL->>HW: wheels Forward getCruiseSpeed(), both grippers HALFOPEN
-  CTRL->>CTRL: obstacle_detected == false
+  CTRL->>HW: apply cruise drive request, both grippers HALFOPEN
+  HW->>CTRL: obstacle_crossing_trigger 1 -> 0
   CTRL->>CTRL: resetObstacleCrossingState() -> Idle
 ```
 

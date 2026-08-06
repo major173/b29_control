@@ -18,10 +18,10 @@ FIELD_MAP = {
     "grip_confirmed": AutoDebugOverride.FIELD_GRIP_CONFIRMED,
     "joint_fault": AutoDebugOverride.FIELD_JOINT_FAULT,
     "grip_fault": AutoDebugOverride.FIELD_GRIP_FAULT,
-    "obstacle_detected": AutoDebugOverride.FIELD_OBSTACLE_DETECTED,
+    "obstacle_crossing_trigger": AutoDebugOverride.FIELD_OBSTACLE_CROSSING_TRIGGER,
     "obstacle_type": AutoDebugOverride.FIELD_OBSTACLE_TYPE,
     "classification_stable": AutoDebugOverride.FIELD_CLASSIFICATION_STABLE,
-    "range_to_obstacle": AutoDebugOverride.FIELD_RANGE_TO_OBSTACLE,
+    "cruise_drive_request": AutoDebugOverride.FIELD_CRUISE_DRIVE_REQUEST,
     "at_crossing_position": AutoDebugOverride.FIELD_AT_CROSSING_POSITION,
     "crossing_step_done": AutoDebugOverride.FIELD_CROSSING_STEP_DONE,
     "crossing_complete": AutoDebugOverride.FIELD_CROSSING_COMPLETE,
@@ -62,10 +62,10 @@ def build_message(event: dict) -> AutoDebugOverride:
     msg.grip_confirmed = event.get("grip_confirmed", False)
     msg.joint_fault = event.get("joint_fault", False)
     msg.grip_fault = event.get("grip_fault", False)
-    msg.obstacle_detected = event.get("obstacle_detected", False)
+    msg.obstacle_crossing_trigger = event.get("obstacle_crossing_trigger", False)
     msg.obstacle_type = event.get("obstacle_type", AutoDebugOverride.OBSTACLE_UNKNOWN)
     msg.classification_stable = event.get("classification_stable", False)
-    msg.range_to_obstacle = event.get("range_to_obstacle", 0.0)
+    msg.cruise_drive_request = event.get("cruise_drive_request", 0)
     msg.at_crossing_position = event.get("at_crossing_position", False)
     msg.crossing_step_done = event.get("crossing_step_done", False)
     msg.crossing_complete = event.get("crossing_complete", False)

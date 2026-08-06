@@ -38,7 +38,6 @@ public:
   void requestAutoStart();
   void setTraceOutputMode(b29_smc_auto_controller::CommandDispatcher::OutputMode mode);
   const b29_smc_auto_controller::AutoControlCommand& currentCommand() const;
-  double getCruiseSpeed() const;
   std::string currentStateName() const;
   b29_smc_auto_controller::RobotContextTraceState traceState() const;
   bool isSafeStop() const;
@@ -49,12 +48,8 @@ public:
   bool isImuReady() const override;
   bool isPostureReady() const override;
   bool isGripConfirmed() const override;
-  bool isObstacleDetected() const override;
-  bool isObstacleWithinCrossObstaclesDistance() const override;
 
   void setCruiseCommand() override;
-  void setApproachCommand() override;
-  void setWheelStop() override;
   void setSafeStopCommand(const std::string& reason) override;
   void stopAllMotors() override;
   void freezeAllJoints() override;
@@ -74,7 +69,6 @@ public:
 
   bool canStartAuto() const;
   bool isReadyToTraverse() const;
-  bool isObstacleNotDetected() const;
 
   void reportEmergencyStopIdle();
   void reportEmergencyStopInit();
@@ -95,10 +89,10 @@ public:
   void logSafeStopToIdle();
 
 private:
-  double getApproachSpeed() const;
   int currentStateId() const;
   void setTargetSpeed(double speed_mps);
   void setDriveMode(robot_fsm::DriveMode mode);
+  void setIdleSoftHoldCommand(std::string_view reason);
 
   bool hasSafetyFault() const;
   std::string safetyStopReason(std::string_view fallback) const;
@@ -113,7 +107,11 @@ private:
   RobotFSMContext fsm_;
   bool started_{false};
   bool auto_start_requested_{false};
+  bool input_edges_initialized_{false};
   bool last_input_auto_start_requested_{false};
+  bool last_input_manual_reset_requested_{false};
+  std::uint64_t last_auto_start_rising_edge_sequence_{0};
+  std::uint64_t last_manual_reset_rising_edge_sequence_{0};
   bool reconnect_timer_active_{false};
   ros::Duration reconnect_timer_elapsed_{};
   bool auto_init_timer_active_{false};

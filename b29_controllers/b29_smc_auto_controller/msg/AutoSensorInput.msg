@@ -8,10 +8,12 @@ bool imu_ready
 bool grip_confirmed
 bool joint_fault
 bool grip_fault
-bool obstacle_detected
+uint8 cruise_drive_request
+bool auto_start
+bool manual_reset
+bool obstacle_crossing_trigger
 uint8 obstacle_type
 bool classification_stable
-float64 range_to_obstacle
 bool at_crossing_position
 bool post_check_passed
 bool post_check_failed

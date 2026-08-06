@@ -33,6 +33,7 @@ private:
   bool isBaseImuChange(const sensor_msgs::Imu& current, 
                        const sensor_msgs::Imu& previous) const;
   static ObstacleType toObstacleType(uint8_t obstacle_type);
+  static CruiseDriveRequest toCruiseDriveRequest(uint8_t request);
   static ros::Time latestStamp(const ros::Time& lhs, const ros::Time& rhs);
   void applyDebugOverride(AutoInputSnapshot& snapshot) const;
 
