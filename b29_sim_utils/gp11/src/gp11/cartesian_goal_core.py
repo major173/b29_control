@@ -107,87 +107,246 @@ def joint_error(joint_name, desired, actual):
     return difference
 
 
+def commissioned_large_flip_direction(anchor_side):
+    """Return the required support-second direction for each commissioned pass."""
+    return {
+        "left": 1.0,
+        "right": 1.0,
+    }.get(anchor_side, 0.0)
+
+
+def commissioned_large_flip_joints(
+        anchor_side, goal_positions, actual_positions,
+        threshold=DEFAULT_LARGE_FLIP_THRESHOLD):
+    """Return the active support-side second joint for a large flip.
+
+    Both locked-arm second joints use the positive/counter-clockwise branch:
+    left_second on the first left-anchor pass and right_second after the
+    confirmed role switch.  The target angle is still obtained from IK; only
+    its equivalent continuous-joint branch is selected here.
+    """
+    support_second = {
+        "left": "left_second_leg_joint",
+        "right": "right_second_leg_joint",
+    }.get(anchor_side)
+    if not support_second:
+        return ()
+    if (support_second not in goal_positions or
+            support_second not in actual_positions or
+            abs(joint_error(
+                support_second,
+                goal_positions[support_second],
+                actual_positions[support_second],
+            )) <= threshold):
+        return ()
+    return (support_second,)
+
+
 def positive_large_flip_joints(
         anchor_side, goal_positions, actual_positions,
         threshold=DEFAULT_LARGE_FLIP_THRESHOLD):
-    """Return support-side second joints that must use the positive branch.
+    """Compatibility wrapper for the historical helper name."""
+    return commissioned_large_flip_joints(
+        anchor_side, goal_positions, actual_positions, threshold
+    )
 
-    The positive-direction commissioning rule currently applies only while
-    the left side is the support anchor.  The free-arm right-second joint does
-    not affect the commissioned Cartesian endpoint and is deliberately left
-    free to take either approximately-180-degree direction.  Small Cartesian
-    motions also remain free to move either way.
+
+def unwrap_direction_goal(
+        actual_positions, goal_positions, joint_directions, position_bounds,
+        threshold=DEFAULT_LARGE_FLIP_THRESHOLD):
+    """Represent equivalent continuous-joint goals on required signed arcs.
+
+    KDL normalizes continuous joints, while the two commissioned passes need
+    opposite physical directions.  Adding or subtracting ``2*pi`` preserves
+    the IK pose and selects the required counter-clockwise or clockwise arc.
     """
-    left_second = "left_second_leg_joint"
-    if anchor_side != "left":
-        return ()
-    if (left_second not in goal_positions or
-            left_second not in actual_positions or
-            abs(joint_error(
-                left_second,
-                goal_positions[left_second],
-                actual_positions[left_second],
-            )) <= threshold):
-        return ()
-    return (left_second,)
-
-
-def positive_direction_seed_positions(
-        actual_positions, goal_positions, joint_names, fraction):
-    """Build an IK seed part-way along each joint's positive circular arc."""
-    if not math.isfinite(fraction) or not 0.0 < fraction < 1.0:
-        raise ValueError("positive direction seed fraction must be in (0, 1)")
-    seed = dict(actual_positions)
-    for joint_name in joint_names:
-        if joint_name not in actual_positions or joint_name not in goal_positions:
+    adjusted = dict(goal_positions)
+    for joint_name, direction in dict(joint_directions).items():
+        direction = float(direction)
+        if direction not in (-1.0, 1.0):
             raise ValueError(
-                "positive direction seed is missing {}".format(joint_name)
+                "commissioned direction for {} must be +1 or -1".format(
+                    joint_name
+                )
+            )
+        if joint_name not in actual_positions or joint_name not in adjusted:
+            raise ValueError(
+                "commissioned direction unwrap is missing {}".format(joint_name)
             )
         start = float(actual_positions[joint_name])
-        desired = float(goal_positions[joint_name])
-        positive_span = (desired - start) % (2.0 * math.pi)
-        if positive_span <= 0.0:
-            positive_span = 2.0 * math.pi
-        seed[joint_name] = start + fraction * positive_span
+        desired = float(adjusted[joint_name])
+        if not math.isfinite(start) or not math.isfinite(desired):
+            raise ValueError(
+                "commissioned direction unwrap received non-finite {}".format(
+                    joint_name
+                )
+            )
+        signed_delta = direction * (desired - start)
+        while signed_delta <= threshold:
+            desired += direction * 2.0 * math.pi
+            signed_delta = direction * (desired - start)
+        while signed_delta >= 2.0 * math.pi:
+            desired -= direction * 2.0 * math.pi
+            signed_delta = direction * (desired - start)
+        if signed_delta <= threshold:
+            raise ValueError(
+                "no equivalent {} branch for {} exceeds {:.6f} rad".format(
+                    "positive" if direction > 0.0 else "negative",
+                    joint_name,
+                    threshold,
+                )
+            )
+        if joint_name in position_bounds:
+            lower, upper = position_bounds[joint_name]
+            if desired < lower or desired > upper:
+                raise ValueError(
+                    "commissioned unwrapped goal for {} ({:+.6f}) is outside "
+                    "[{:+.6f}, {:+.6f}]".format(
+                        joint_name, desired, lower, upper
+                    )
+                )
+        adjusted[joint_name] = desired
+    return adjusted
+
+
+def unwrap_positive_direction_goal(
+        actual_positions, goal_positions, joint_names, position_bounds,
+        threshold=DEFAULT_LARGE_FLIP_THRESHOLD):
+    """Compatibility wrapper for the first-pass positive branch."""
+    return unwrap_direction_goal(
+        actual_positions,
+        goal_positions,
+        dict((name, 1.0) for name in joint_names),
+        position_bounds,
+        threshold,
+    )
+
+
+def commissioned_free_arm_second_goal(
+        actual_positions, anchor_side, left_anchor_target=-math.pi,
+        right_anchor_delta=-math.pi,
+        left_anchor_relative_to_live=False):
+    """Return the free-second joint and its commissioned goal for one pass."""
+    if anchor_side == "left":
+        joint_name = "right_second_leg_joint"
+        if left_anchor_relative_to_live:
+            if joint_name not in actual_positions:
+                raise ValueError("free-arm goal is missing {}".format(joint_name))
+            target = (
+                float(actual_positions[joint_name]) +
+                float(left_anchor_target)
+            )
+        else:
+            target = float(left_anchor_target)
+    elif anchor_side == "right":
+        joint_name = "left_second_leg_joint"
+        if joint_name not in actual_positions:
+            raise ValueError("free-arm goal is missing {}".format(joint_name))
+        target = float(actual_positions[joint_name]) + float(right_anchor_delta)
+    else:
+        raise ValueError("free-arm goal received unsupported anchor side")
+    if not math.isfinite(target):
+        raise ValueError("free-arm second goal must be finite")
+    return joint_name, target
+
+
+def large_flip_ik_seed_positions(
+        actual_positions, fraction, anchor_side="left",
+        free_arm_second_target=-math.pi):
+    """Build a live-first-joint seed on the commissioned two-second branch."""
+    if not math.isfinite(fraction) or not 0.0 <= fraction < 1.0:
+        raise ValueError("large flip IK seed fraction must be in [0, 1)")
+    if not math.isfinite(free_arm_second_target):
+        raise ValueError("large flip free-arm second target must be finite")
+    missing = [name for name in REACH_JOINTS if name not in actual_positions]
+    if missing:
+        raise ValueError(
+            "large flip IK seed is missing {}".format(", ".join(missing))
+        )
+    seed = {name: float(actual_positions[name]) for name in REACH_JOINTS}
+    if any(not math.isfinite(value) for value in seed.values()):
+        raise ValueError("large flip IK seed received a non-finite joint")
+
+    support_second = {
+        "left": "left_second_leg_joint",
+        "right": "right_second_leg_joint",
+    }.get(anchor_side)
+    free_second = {
+        "left": "right_second_leg_joint",
+        "right": "left_second_leg_joint",
+    }.get(anchor_side)
+    if not support_second or not free_second:
+        raise ValueError("large flip IK seed received unsupported anchor side")
+
+    # Preserve the two live first joints.  The first support second is seeded
+    # counter-clockwise from its commissioned neutral branch; the second pass
+    # is seeded counter-clockwise from its live right_second start.  The redundant
+    # free second uses its already-computed clockwise goal.
+    if anchor_side == "left":
+        seed[support_second] = fraction * math.pi
+    else:
+        seed[support_second] = (
+            float(actual_positions[support_second]) + fraction * math.pi
+        )
+    seed[free_second] = float(free_arm_second_target)
     return seed
+
+
+def direction_error(
+        trajectory, actual_positions, joint_directions,
+        tolerance=DEFAULT_POSITIVE_DIRECTION_TOLERANCE):
+    """Reject motion opposite to any commissioned signed joint direction."""
+    if not math.isfinite(tolerance) or tolerance < 0.0:
+        return "direction tolerance must be finite and non-negative"
+    required = dict(joint_directions)
+    if not required:
+        return ""
+    joint_trajectory = trajectory.joint_trajectory
+    if not joint_trajectory.points:
+        return "direction audit received an empty trajectory"
+    indices = {name: index for index, name in enumerate(joint_trajectory.joint_names)}
+    for joint_name, direction in required.items():
+        direction = float(direction)
+        if direction not in (-1.0, 1.0):
+            return "direction for {} must be +1 or -1".format(joint_name)
+        if joint_name not in indices or joint_name not in actual_positions:
+            return "direction audit is missing {}".format(joint_name)
+        start = float(actual_positions[joint_name])
+        furthest = direction * start
+        for point_index, point in enumerate(joint_trajectory.points):
+            if len(point.positions) <= indices[joint_name]:
+                return "direction audit found a malformed trajectory point"
+            current = float(point.positions[indices[joint_name]])
+            directed_current = direction * current
+            backtrack = directed_current - furthest
+            if backtrack < -tolerance:
+                return (
+                    "{} attempted motion opposite to direction {:+.0f} at "
+                    "point {}: directed backtrack {:+.6f} rad"
+                ).format(joint_name, direction, point_index, backtrack)
+            furthest = max(furthest, directed_current)
+        finish = float(
+            joint_trajectory.points[-1].positions[indices[joint_name]]
+        )
+        directed_delta = direction * (finish - start)
+        if directed_delta <= tolerance:
+            return (
+                "{} did not finish on direction {:+.0f}: directed delta "
+                "{:+.6f} rad"
+            ).format(joint_name, direction, directed_delta)
+    return ""
 
 
 def positive_direction_error(
         trajectory, actual_positions, joint_names,
         tolerance=DEFAULT_POSITIVE_DIRECTION_TOLERANCE):
-    """Reject a trajectory that ever decreases a required positive joint."""
-    if not math.isfinite(tolerance) or tolerance < 0.0:
-        return "positive direction tolerance must be finite and non-negative"
-    required = tuple(joint_names)
-    if not required:
-        return ""
-    joint_trajectory = trajectory.joint_trajectory
-    if not joint_trajectory.points:
-        return "positive direction audit received an empty trajectory"
-    indices = {name: index for index, name in enumerate(joint_trajectory.joint_names)}
-    for joint_name in required:
-        if joint_name not in indices or joint_name not in actual_positions:
-            return "positive direction audit is missing {}".format(joint_name)
-        highest = float(actual_positions[joint_name])
-        for point_index, point in enumerate(joint_trajectory.points):
-            if len(point.positions) <= indices[joint_name]:
-                return "positive direction audit found a malformed trajectory point"
-            current = float(point.positions[indices[joint_name]])
-            backtrack = current - highest
-            if backtrack < -tolerance:
-                return (
-                    "{} attempted negative motion at point {}: {:+.6f} rad"
-                ).format(joint_name, point_index, backtrack)
-            highest = max(highest, current)
-        finish = float(
-            joint_trajectory.points[-1].positions[indices[joint_name]]
-        )
-        total_delta = finish - float(actual_positions[joint_name])
-        if total_delta <= tolerance:
-            return (
-                "{} did not finish on the positive branch: total delta {:+.6f} rad"
-            ).format(joint_name, total_delta)
-    return ""
+    """Compatibility wrapper for positive-only callers."""
+    return direction_error(
+        trajectory,
+        actual_positions,
+        dict((name, 1.0) for name in joint_names),
+        tolerance,
+    )
 
 
 def planner_control_cancel_reason(
@@ -260,9 +419,9 @@ def build_move_group_goal(
         target, tip_link, group_name, workspace_min, workspace_max,
         position_tolerance, planning_attempts, planning_time,
         velocity_scaling, acceleration_scaling, goal_joint_positions=None,
-        goal_joint_tolerance=0.005, positive_direction_joints=(),
-        positive_direction_start_positions=None,
-        positive_direction_constraint_margin=DEFAULT_POSITIVE_DIRECTION_TOLERANCE):
+        goal_joint_tolerance=0.005, direction_signs=None,
+        direction_start_positions=None,
+        direction_constraint_margin=DEFAULT_POSITIVE_DIRECTION_TOLERANCE):
     goal = MoveGroupGoal()
     request = goal.request
     request.group_name = group_name
@@ -309,44 +468,52 @@ def build_move_group_goal(
             constraint.joint_constraints.append(joint)
     request.goal_constraints.append(constraint)
 
-    positive_direction_joints = tuple(positive_direction_joints)
-    if positive_direction_joints:
-        if goal_joint_positions is None or positive_direction_start_positions is None:
+    direction_signs = dict(direction_signs or {})
+    if direction_signs:
+        if goal_joint_positions is None or direction_start_positions is None:
             raise ValueError(
-                "positive direction constraints require joint start and goal positions"
+                "direction constraints require joint start and goal positions"
             )
-        if (not math.isfinite(positive_direction_constraint_margin) or
-                positive_direction_constraint_margin < 0.0):
+        if (not math.isfinite(direction_constraint_margin) or
+                direction_constraint_margin < 0.0):
             raise ValueError(
-                "positive direction constraint margin must be finite and non-negative"
+                "direction constraint margin must be finite and non-negative"
             )
         path_constraint = Constraints()
-        path_constraint.name = "positive_large_flip_direction"
-        for joint_name in positive_direction_joints:
-            if (joint_name not in positive_direction_start_positions or
+        path_constraint.name = "commissioned_large_flip_directions"
+        for joint_name, direction in direction_signs.items():
+            direction = float(direction)
+            if direction not in (-1.0, 1.0):
+                raise ValueError(
+                    "direction constraint for {} must be +1 or -1".format(
+                        joint_name
+                    )
+                )
+            if (joint_name not in direction_start_positions or
                     joint_name not in goal_joint_positions):
                 raise ValueError(
-                    "positive direction constraint is missing {}".format(joint_name)
+                    "direction constraint is missing {}".format(joint_name)
                 )
-            start = float(positive_direction_start_positions[joint_name])
+            start = float(direction_start_positions[joint_name])
             finish = float(goal_joint_positions[joint_name])
             span = finish - start
             if not math.isfinite(start) or not math.isfinite(finish):
                 raise ValueError(
-                    "positive direction constraint for {} is not finite".format(
+                    "direction constraint for {} is not finite".format(
                         joint_name
                     )
                 )
-            if span <= 0.0 or span >= 2.0 * math.pi:
+            directed_span = direction * span
+            if directed_span <= 0.0 or directed_span >= 2.0 * math.pi:
                 raise ValueError(
-                    "positive direction constraint for {} has invalid span {:+.6f}"
-                    .format(joint_name, span)
+                    "direction constraint for {} has invalid directed span "
+                    "{:+.6f}".format(joint_name, directed_span)
                 )
             joint = JointConstraint()
             joint.joint_name = joint_name
             joint.position = start + 0.5 * span
-            joint.tolerance_below = 0.5 * span + positive_direction_constraint_margin
-            joint.tolerance_above = 0.5 * span + positive_direction_constraint_margin
+            joint.tolerance_below = 0.5 * abs(span) + direction_constraint_margin
+            joint.tolerance_above = 0.5 * abs(span) + direction_constraint_margin
             joint.weight = 1.0
             path_constraint.joint_constraints.append(joint)
         request.path_constraints = path_constraint
@@ -461,11 +628,14 @@ def trajectory_goal_within_deadband(
 def large_flip_override_expected(
         anchor_side, trajectory, actual_positions,
         threshold=DEFAULT_LARGE_FLIP_THRESHOLD):
-    if anchor_side != "left" or not trajectory.joint_trajectory.points:
+    if anchor_side not in ("left", "right") or not trajectory.joint_trajectory.points:
         return False
     names = trajectory.joint_trajectory.joint_names
     final_positions = dict(zip(names, trajectory.joint_trajectory.points[-1].positions))
-    joint_name = "left_second_leg_joint"
+    joint_name = {
+        "left": "left_second_leg_joint",
+        "right": "right_second_leg_joint",
+    }[anchor_side]
     if joint_name not in actual_positions or joint_name not in final_positions:
         return False
     return abs(joint_error(

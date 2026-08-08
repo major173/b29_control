@@ -43,7 +43,7 @@ add_executable(${PROJECT_NAME}_node
 add_dependencies(${PROJECT_NAME}_node ${catkin_EXPORTED_TARGETS})
 target_link_libraries(${PROJECT_NAME}_node ${PROJECT_NAME} ${catkin_LIBRARIES})
 
-if(CATKIN_ENABLE_TESTING)
+if(CATKIN_ENABLE_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/test_trajectory_processor.cpp")
   catkin_add_gtest(test_trajectory_processor test/test_trajectory_processor.cpp)
   if(TARGET test_trajectory_processor)
     target_link_libraries(test_trajectory_processor ${PROJECT_NAME}_trajectory ${catkin_LIBRARIES})

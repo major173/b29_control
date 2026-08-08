@@ -63,6 +63,7 @@ class RealExecutionMonitor(object):
         self._last_detail = "等待 MoveIt / adapter / SMC 数据"
         self._last_color = (0.25, 0.70, 1.00, 0.95)
         self._last_publish_key = None
+        self._terminal_failure = False
         self._motion_threshold = max(1e-4, float(rospy.get_param("~motion_threshold", 0.005)))
         self._goal_tolerance = max(1e-4, float(rospy.get_param("~goal_tolerance", 0.025)))
         self._status_frame = rospy.get_param("~status_frame", "base_link")
@@ -168,17 +169,26 @@ class RealExecutionMonitor(object):
             )
         rospy.loginfo("GP11 real execution monitor started (read-only)")
 
-    def _set_status(self, phase, detail, color):
+    def _set_status(self, phase, detail, color, console_level="info", force=False):
         message = "{}: {}".format(phase, detail)
         key = (phase, detail)
         with self._lock:
+            if self._terminal_failure and not force:
+                return
             self._last_phase = phase
             self._last_detail = detail
             self._last_color = color
             if key == self._last_publish_key:
                 return
             self._last_publish_key = key
-        rospy.loginfo("[execution monitor] %s", message)
+        if console_level == "fatal":
+            rospy.logfatal("[execution monitor] %s", message)
+        elif console_level == "error":
+            rospy.logerr("[execution monitor] %s", message)
+        elif console_level == "warn":
+            rospy.logwarn("[execution monitor] %s", message)
+        elif console_level == "info":
+            rospy.loginfo("[execution monitor] %s", message)
         self._status_pub.publish(String(data=message))
         self._publish_marker(message, color)
 
@@ -214,6 +224,8 @@ class RealExecutionMonitor(object):
         self._marker_pub.publish(MarkerArray(markers=[background, label]))
 
     def _execute_goal_cb(self, msg):
+        with self._lock:
+            self._terminal_failure = False
         points = len(msg.goal.trajectory.joint_trajectory.points)
         self._set_status(
             "MOVEIT_EXECUTE_REQUESTED",
@@ -237,6 +249,7 @@ class RealExecutionMonitor(object):
             with self._lock:
                 previous_phase = self._last_phase
                 previous_detail = self._last_detail
+                self._terminal_failure = True
             if previous_phase in (
                 "ADAPTER_FAILED",
                 "SMC_REJECTED",
@@ -248,12 +261,16 @@ class RealExecutionMonitor(object):
                         previous_detail, msg.result.error_code.val
                     ),
                     (1.0, 0.22, 0.20, 0.98),
+                    console_level="error",
+                    force=True,
                 )
                 return
             self._set_status(
                 "MOVEIT_EXECUTE_FAILED",
                 "MoveIt code {}。".format(msg.result.error_code.val),
                 (1.0, 0.22, 0.20, 0.98),
+                console_level="error",
+                force=True,
             )
 
     def _trajectory_goal_cb(self, msg):
@@ -275,12 +292,16 @@ class RealExecutionMonitor(object):
             )
         else:
             detail = msg.result.error_string or "no adapter detail"
+            with self._lock:
+                self._terminal_failure = True
             self._set_status(
                 "ADAPTER_FAILED",
                 "status={} code={} {}".format(
                     msg.status.status, msg.result.error_code, detail
                 ),
                 (1.0, 0.22, 0.20, 0.98),
+                console_level="error",
+                force=True,
             )
 
     def _planner_command_cb(self, msg):
@@ -305,6 +326,7 @@ class RealExecutionMonitor(object):
                 ", ".join("{:.3f}".format(value) for value in positions),
             ),
             (1.0, 0.72, 0.12, 0.96),
+            console_level=None,
         )
 
     def _planner_state_cb(self, msg):
@@ -320,12 +342,14 @@ class RealExecutionMonitor(object):
                     session, sequence, msg.reject_reason
                 ),
                 (1.0, 0.22, 0.20, 0.98),
+                console_level="error",
             )
         elif msg.has_accepted_command and msg.last_accepted_sequence >= sequence:
             self._set_status(
                 "SMC_ACKNOWLEDGED",
                 "SMC 已接受 session={} sequence={}。".format(session, sequence),
                 (0.30, 0.85, 0.36, 0.96),
+                console_level=None,
             )
 
     def _state_trace_cb(self, msg):
@@ -338,12 +362,14 @@ class RealExecutionMonitor(object):
                 "COMMAND_DISPATCH_OK",
                 "SMC 已成功写入电机命令句柄；等待编码器反馈变化。",
                 (0.30, 0.85, 0.36, 0.96),
+                console_level=None,
             )
         else:
             self._set_status(
                 "COMMAND_DISPATCH_FAILED",
                 "SMC 尝试写入电机命令句柄但失败。",
                 (1.0, 0.22, 0.20, 0.98),
+                console_level="error",
             )
 
     def _joint_state_cb(self, msg):
@@ -383,6 +409,7 @@ class RealExecutionMonitor(object):
                 "ENCODER_AT_TARGET",
                 "sequence={} 最大关节误差 {:.4f} rad。".format(sequence, max_error),
                 (0.18, 0.95, 0.35, 0.96),
+                console_level=None,
             )
         elif max_movement >= self._motion_threshold:
             self._set_status(
@@ -391,6 +418,7 @@ class RealExecutionMonitor(object):
                     sequence, max_movement, max_error
                 ),
                 (0.30, 0.85, 0.36, 0.96),
+                console_level=None,
             )
 
 

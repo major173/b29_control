@@ -21,6 +21,39 @@ const std::array<std::string, kPlannerJointCount> kJointKeys{{
 const std::array<std::string, kPlannerJointCount> kFixedOutputOrder{{
     "left_first_leg_joint", "left_second_leg_joint", "right_first_leg_joint", "right_second_leg_joint"}};
 
+struct LargeFlipSideSpec
+{
+  std::size_t support_second_index{0};
+  double direction_sign{0.0};
+  const char* support_second_name{"unknown_second"};
+  const char* direction_name{"unknown_direction"};
+  bool valid{false};
+};
+
+LargeFlipSideSpec largeFlipSideSpec(uint8_t crossing_side)
+{
+  if (crossing_side == b29_smc_auto_controller::PlannerControlState::CROSSING_SIDE_RIGHT)
+  {
+    return {1, 1.0, "left_second", "counter_clockwise", true};
+  }
+  if (crossing_side == b29_smc_auto_controller::PlannerControlState::CROSSING_SIDE_LEFT)
+  {
+    return {3, 1.0, "right_second", "counter_clockwise", true};
+  }
+  return {};
+}
+
+JointVector roleMirroredTolerance(const JointVector& right_crossing_tolerance,
+                                  uint8_t crossing_side)
+{
+  if (crossing_side != b29_smc_auto_controller::PlannerControlState::CROSSING_SIDE_LEFT)
+  {
+    return right_crossing_tolerance;
+  }
+  return {{right_crossing_tolerance[2], right_crossing_tolerance[3],
+           right_crossing_tolerance[0], right_crossing_tolerance[1]}};
+}
+
 bool finitePositive(double value)
 {
   return std::isfinite(value) && value > 0.0;
@@ -105,6 +138,18 @@ bool PlannerAdapter::loadParameters()
   private_node_handle_.param<bool>("require_goal_velocity", config_.require_goal_velocity,
                                   config_.require_goal_velocity);
   private_node_handle_.param<double>("settle_time", config_.settle_time, config_.settle_time);
+  private_node_handle_.param<bool>("large_flip_completion/enabled",
+                                  config_.large_flip_completion_enabled,
+                                  config_.large_flip_completion_enabled);
+  private_node_handle_.param<double>("large_flip_completion/min_left_second_displacement",
+                                    config_.large_flip_min_left_second_displacement,
+                                    config_.large_flip_min_left_second_displacement);
+  private_node_handle_.param<double>("large_flip_completion/settle_time",
+                                    config_.large_flip_settle_time,
+                                    config_.large_flip_settle_time);
+  private_node_handle_.param<double>("large_flip_completion/timeout",
+                                    config_.large_flip_timeout,
+                                    config_.large_flip_timeout);
   private_node_handle_.param<double>("timeouts/joint_state", config_.joint_state_timeout,
                                     config_.joint_state_timeout);
   private_node_handle_.param<double>("timeouts/planner_state", config_.planner_state_timeout,
@@ -155,10 +200,22 @@ bool PlannerAdapter::loadParameters()
     ROS_ERROR("Emergency-stop timeout and direction mismatch sample count must be positive.");
     return false;
   }
+  if (config_.large_flip_completion_enabled &&
+      (!finitePositive(config_.large_flip_min_left_second_displacement) ||
+       !finitePositive(config_.large_flip_settle_time) ||
+       !finitePositive(config_.large_flip_timeout)))
+  {
+    ROS_ERROR("Large-flip completion displacement, settle time and timeout must be finite and positive.");
+    return false;
+  }
   if (!loadJointVector("tolerances/start", config_.start_tolerance, true) ||
       !loadJointVector("tolerances/path", config_.path_tolerance, true) ||
       !loadJointVector("tolerances/goal_position", config_.goal_position_tolerance, true) ||
       !loadJointVector("tolerances/goal_velocity", config_.goal_velocity_tolerance, true) ||
+      !loadJointVector("large_flip_completion/position_tolerance",
+                       config_.large_flip_position_tolerance, false) ||
+      !loadJointVector("large_flip_completion/velocity_tolerance",
+                       config_.large_flip_velocity_tolerance, false) ||
       !loadJointVector("safety/max_total_displacement", config_.max_total_displacement, false) ||
       !loadJointVector("safety/direction_target_threshold", config_.direction_target_threshold, false) ||
       !loadJointVector("safety/direction_feedback_threshold", config_.direction_feedback_threshold, false))
@@ -381,7 +438,29 @@ void PlannerAdapter::executeTrajectory(const control_msgs::FollowJointTrajectory
     return;
   }
   const double scaled_duration = trajectory.points.back().time_from_start * applied_time_scale;
-  if (scaled_duration + config_.settle_time + config_.completion_transition_timeout > config_.action_timeout)
+  const bool large_flip_completion_applicable = largeFlipCompletionApplicable(
+      planner_state.crossing_side, initial_joint_state.positions, samples.back());
+  const LargeFlipSideSpec large_flip_side = largeFlipSideSpec(planner_state.crossing_side);
+  if (config_.large_flip_completion_enabled && large_flip_side.valid &&
+      !large_flip_completion_applicable)
+  {
+    const double raw_displacement =
+        samples.back()[large_flip_side.support_second_index] -
+        initial_joint_state.positions[large_flip_side.support_second_index];
+    std::ostringstream stream;
+    stream << "commissioned PlannerControl trajectory rejected: "
+           << large_flip_side.support_second_name << " must move at least "
+           << config_.large_flip_min_left_second_displacement << " rad in "
+           << large_flip_side.direction_name << " direction; raw_displacement="
+           << raw_displacement << "; directed_displacement="
+           << large_flip_side.direction_sign * raw_displacement;
+    abortAction(control_msgs::FollowJointTrajectoryResult::INVALID_GOAL, stream.str());
+    return;
+  }
+  const double final_wait_timeout = large_flip_completion_applicable ?
+      config_.large_flip_timeout : config_.settle_time;
+  if (scaled_duration + final_wait_timeout + config_.completion_transition_timeout >
+      config_.action_timeout)
   {
     abortAction(control_msgs::FollowJointTrajectoryResult::INVALID_GOAL,
                 "scaled trajectory cannot complete within the configured action timeout");
@@ -435,8 +514,11 @@ void PlannerAdapter::executeTrajectory(const control_msgs::FollowJointTrajectory
   }
 
   const JointVector& final_positions = samples.back();
-  if (!waitForFinalSettle(session_id, sequence, final_positions,
-                          action_deadline, direction_state, error))
+  bool large_flip_completion_used = false;
+  if (!waitForFinalSettle(session_id, sequence, initial_joint_state.positions,
+                          final_positions, planner_state.crossing_side,
+                          action_deadline, direction_state,
+                          large_flip_completion_used, error))
   {
     if (action_server_->isActive())
     {
@@ -456,7 +538,9 @@ void PlannerAdapter::executeTrajectory(const control_msgs::FollowJointTrajectory
 
   control_msgs::FollowJointTrajectoryResult result;
   result.error_code = control_msgs::FollowJointTrajectoryResult::SUCCESSFUL;
-  result.error_string = "trajectory completed and SMC confirmed normal PlannerControl exit";
+  result.error_string = large_flip_completion_used ?
+      "commissioned large flip functionally completed and SMC confirmed normal PlannerControl exit" :
+      "trajectory completed and SMC confirmed normal PlannerControl exit";
   action_server_->setSucceeded(result, result.error_string);
 }
 
@@ -752,6 +836,54 @@ bool PlannerAdapter::goalWithinTolerance(const JointVector& desired,
   return true;
 }
 
+bool PlannerAdapter::largeFlipCompletionApplicable(
+    uint8_t crossing_side, const JointVector& initial_positions,
+    const JointVector& final_positions) const
+{
+  const LargeFlipSideSpec side = largeFlipSideSpec(crossing_side);
+  const double directed_displacement = side.valid ?
+      side.direction_sign *
+          (final_positions[side.support_second_index] -
+           initial_positions[side.support_second_index]) :
+      0.0;
+  return config_.large_flip_completion_enabled && side.valid &&
+         directed_displacement >= config_.large_flip_min_left_second_displacement;
+}
+
+bool PlannerAdapter::largeFlipWithinTolerance(
+    const JointVector& initial_positions, const JointVector& final_positions,
+    uint8_t crossing_side, const JointStateSnapshot& actual) const
+{
+  const LargeFlipSideSpec side = largeFlipSideSpec(crossing_side);
+  if (!side.valid)
+  {
+    return false;
+  }
+  const double directed_displacement =
+      side.direction_sign *
+      (actual.positions[side.support_second_index] -
+       initial_positions[side.support_second_index]);
+  if (!actual.has_velocities ||
+      directed_displacement < config_.large_flip_min_left_second_displacement)
+  {
+    return false;
+  }
+  const JointVector position_tolerance = roleMirroredTolerance(
+      config_.large_flip_position_tolerance, crossing_side);
+  for (std::size_t joint_index = 0; joint_index < kPlannerJointCount; ++joint_index)
+  {
+    if (std::abs(trajectory_processor_->jointError(
+            joint_index, final_positions[joint_index], actual.positions[joint_index])) >
+            position_tolerance[joint_index] ||
+        std::abs(actual.velocities[joint_index]) >
+            config_.large_flip_velocity_tolerance[joint_index])
+    {
+      return false;
+    }
+  }
+  return true;
+}
+
 void PlannerAdapter::publishFeedback(const JointVector& desired,
                                      const JointStateSnapshot& actual)
 {
@@ -772,13 +904,32 @@ void PlannerAdapter::publishFeedback(const JointVector& desired,
 }
 
 bool PlannerAdapter::waitForFinalSettle(
-    uint32_t session_id, uint32_t final_sequence, const JointVector& final_positions,
-    const ros::WallTime& action_deadline, DirectionSafetyState& direction_state,
+    uint32_t session_id, uint32_t final_sequence,
+    const JointVector& initial_positions, const JointVector& final_positions,
+    uint8_t crossing_side, const ros::WallTime& action_deadline,
+    DirectionSafetyState& direction_state, bool& large_flip_completion_used,
     std::string& error)
 {
-  ros::WallTime settle_start;
+  const bool large_flip_completion_applicable = largeFlipCompletionApplicable(
+      crossing_side, initial_positions, final_positions);
+  const ros::WallTime settle_deadline = large_flip_completion_applicable ?
+      std::min(action_deadline,
+               ros::WallTime::now() + ros::WallDuration(config_.large_flip_timeout)) :
+      action_deadline;
+  ros::WallTime strict_settle_start;
+  ros::WallTime large_flip_settle_start;
+  JointStateSnapshot last_actual;
+  large_flip_completion_used = false;
+  if (large_flip_completion_applicable)
+  {
+    const LargeFlipSideSpec side = largeFlipSideSpec(crossing_side);
+    ROS_WARN_STREAM("Commissioned large-flip functional completion fallback armed for "
+                    << config_.large_flip_timeout << " s on "
+                    << side.support_second_name << " in " << side.direction_name
+                    << " direction");
+  }
   ros::WallRate rate(config_.publish_rate);
-  while (ros::ok() && ros::WallTime::now() < action_deadline)
+  while (ros::ok() && ros::WallTime::now() < settle_deadline)
   {
     if (preemptRequested(error))
     {
@@ -803,6 +954,7 @@ bool PlannerAdapter::waitForFinalSettle(
       emergencyAbort(control_msgs::FollowJointTrajectoryResult::PATH_TOLERANCE_VIOLATED, error);
       return false;
     }
+    last_actual = actual;
     if (!validatePathTolerance(final_positions, actual, error))
     {
       recoverableAbort(control_msgs::FollowJointTrajectoryResult::PATH_TOLERANCE_VIOLATED, error);
@@ -820,24 +972,99 @@ bool PlannerAdapter::waitForFinalSettle(
       return false;
     }
     publishFeedback(final_positions, actual);
-    if (goalWithinTolerance(final_positions, actual))
+    const LargeFlipSideSpec side = largeFlipSideSpec(crossing_side);
+    const bool commissioned_direction_reached =
+        !large_flip_completion_applicable ||
+        (side.valid &&
+         side.direction_sign *
+                 (actual.positions[side.support_second_index] -
+                  initial_positions[side.support_second_index]) >=
+             config_.large_flip_min_left_second_displacement);
+    if (goalWithinTolerance(final_positions, actual) && commissioned_direction_reached)
     {
-      if (settle_start.isZero())
+      if (strict_settle_start.isZero())
       {
-        settle_start = ros::WallTime::now();
+        strict_settle_start = ros::WallTime::now();
       }
-      if ((ros::WallTime::now() - settle_start).toSec() >= config_.settle_time)
+      if ((ros::WallTime::now() - strict_settle_start).toSec() >= config_.settle_time)
       {
         return true;
       }
     }
     else
     {
-      settle_start = ros::WallTime{};
+      strict_settle_start = ros::WallTime{};
+    }
+    if (large_flip_completion_applicable &&
+        largeFlipWithinTolerance(initial_positions, final_positions, crossing_side, actual))
+    {
+      if (large_flip_settle_start.isZero())
+      {
+        large_flip_settle_start = ros::WallTime::now();
+      }
+      if ((ros::WallTime::now() - large_flip_settle_start).toSec() >=
+          config_.large_flip_settle_time)
+      {
+        large_flip_completion_used = true;
+        ROS_WARN_STREAM("Commissioned large flip accepted by functional completion fallback after "
+                        << config_.large_flip_settle_time << " s of stable encoder feedback");
+        return true;
+      }
+    }
+    else
+    {
+      large_flip_settle_start = ros::WallTime{};
     }
     rate.sleep();
   }
-  error = "final joint tolerance did not remain satisfied before the action timeout";
+  if (large_flip_completion_applicable)
+  {
+    const LargeFlipSideSpec side = largeFlipSideSpec(crossing_side);
+    std::ostringstream stream;
+    stream << "commissioned large-flip completion timed out after "
+           << config_.large_flip_timeout
+           << " s; strict and functional completion conditions were not satisfied";
+    if (last_actual.available)
+    {
+      const double raw_displacement =
+          last_actual.positions[side.support_second_index] -
+          initial_positions[side.support_second_index];
+      stream << "; " << side.support_second_name << "_raw_displacement="
+             << raw_displacement
+             << "; directed_displacement="
+             << side.direction_sign * raw_displacement
+             << "; position_errors=[";
+      for (std::size_t joint_index = 0; joint_index < kPlannerJointCount; ++joint_index)
+      {
+        if (joint_index > 0)
+        {
+          stream << ',';
+        }
+        stream << trajectory_processor_->jointError(
+            joint_index, final_positions[joint_index], last_actual.positions[joint_index]);
+      }
+      stream << "]";
+      if (last_actual.has_velocities)
+      {
+        stream << "; velocities=[";
+        for (std::size_t joint_index = 0; joint_index < kPlannerJointCount; ++joint_index)
+        {
+          if (joint_index > 0)
+          {
+            stream << ',';
+          }
+          stream << last_actual.velocities[joint_index];
+        }
+        stream << ']';
+      }
+    }
+    error = stream.str();
+    ROS_ERROR_STREAM(error);
+  }
+  else
+  {
+    error = "final joint tolerance did not remain satisfied before the action timeout";
+  }
   return false;
 }
 

@@ -58,10 +58,12 @@ float64 disconnect_step_elapsed_sec
 string disconnect_step_transition_reason
 string disconnect_step_expected_condition
 
-# Data related to cable disconnection judgment in Step7
-float64 disconnect_check_displacement
-float64 to_check_joint_pos
-float64 disconnect_cable_second_joint_success_threshold
+# Three-pose-joint settling data used by Step7
+float64 disconnect_max_abs_pose_joint_velocity
+float64 disconnect_settle_velocity_threshold
+bool disconnect_velocity_within_threshold
+float64 disconnect_velocity_stable_elapsed_sec
+float64 disconnect_settle_duration
 string current_side_gripper
 float64 current_side_gripper_target
 
@@ -117,7 +119,10 @@ bool wheel_travel_baseline_initialized
 bool debug_validation_enabled
 bool simulation_only
 bool debug_override_active
+bool temporary_allow_start_without_grip_confirmed
 bool debug_obstacle_crossing_trigger
+bool debug_obstacle_detected
+float64 debug_obstacle_distance
 
 # Software emergency stop latch status and manual reset request flag
 bool software_emergency_stop_latched
@@ -130,6 +135,10 @@ bool posture_ready
 bool grip_confirmed
 bool joint_fault
 bool grip_fault
+bool obstacle_detected
+float64 range_to_obstacle
+
+# 下位机巡航与自动流程输入，以及控制器实际消费到的边沿
 uint8 cruise_drive_request_raw
 string cruise_drive_request
 bool cruise_drive_request_valid

@@ -44,7 +44,6 @@ public:
     bool obstacle_trigger_edge_sequences_valid{false};
     std::uint64_t obstacle_trigger_rising_edge_sequence{0};
     std::uint64_t obstacle_trigger_falling_edge_sequence{0};
-    // Cumulative average net angular travel of dual wheels since the last successful full obstacle crossing, in radians (rad)
     double signed_wheel_travel{0.0};
     bool grip_confirmed{false};
     bool safety_blocked{false};
@@ -52,6 +51,8 @@ public:
 
   struct Events
   {
+    bool start_disconnect_requested{false};
+    bool start_flip_requested{false};
     DisconnectCableProcess::Outcome disconnect{DisconnectCableProcess::Outcome::None};
     PlannerOutcome planner{PlannerOutcome::None};
     bool remote_control_completion_rising_edge{false};
@@ -60,11 +61,13 @@ public:
   struct Actions
   {
     bool start_disconnect_process{false};
-    bool restart_disconnect_process{false};
     bool reset_disconnect_process{false};
     PlannerAction planner_action{PlannerAction::None};
     bool start_remote_control_session{false};
     bool reset_remote_control_session{false};
+    bool remote_control_completed_regrip_entered{false};
+    bool disconnect_succeeded_wait_flip_entered{false};
+    bool disconnect_failed_hold_entered{false};
     bool reset_wheel_travel{false};
   };
 

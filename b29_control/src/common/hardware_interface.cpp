@@ -177,11 +177,11 @@ void StRobotHW::write(const ros::Time &time, const ros::Duration &period) {
   const double joint_angle_targets[4] = {
       sanitizeCommand("left first leg angle"  , cmd_[joint_angle_indices[0]],
                       positionFallback(joint_angle_indices[0])),
-      sanitizeCommand("left second leg angle" , -cmd_[joint_angle_indices[1]],
+      sanitizeCommand("left second leg angle" , cmd_[joint_angle_indices[1]],
                       positionFallback(joint_angle_indices[1])),
       sanitizeCommand("right first leg angle" , cmd_[joint_angle_indices[2]],
                       positionFallback(joint_angle_indices[2])),
-      sanitizeCommand("right second leg angle", -cmd_[joint_angle_indices[3]],
+      sanitizeCommand("right second leg angle", cmd_[joint_angle_indices[3]],
                       positionFallback(joint_angle_indices[3])),
   };
 
@@ -194,8 +194,6 @@ void StRobotHW::write(const ros::Time &time, const ros::Duration &period) {
 
   packFloat(static_cast<float>(wheel_speed_left));
   packFloat(static_cast<float>(wheel_speed_right));
-  // packFloat(static_cast<float>(0.0));
-  // packFloat(static_cast<float>(0.0));
   packFloat(static_cast<float>(claw_speed_left));
   packFloat(static_cast<float>(claw_speed_right));
   packFloat(static_cast<float>(claw_angle_left));
@@ -810,7 +808,8 @@ void StRobotHW::unpack(std::vector<uint8_t> rx_buffer,const ros::Time &time) {
                       static_cast<unsigned int>(cruise_drive_request_raw));
   }
   if ((control_signal_bits & static_cast<uint8_t>(~kKnownControlSignalMask)) != 0) {
-    ROS_WARN_THROTTLE(1.0, "Received non-zero reserved automatic control signal bits: 0x%02x",
+    ROS_WARN_THROTTLE(1.0,
+                      "Received non-zero reserved automatic control signal bits: 0x%02x",
                       static_cast<unsigned int>(control_signal_bits));
   }
 

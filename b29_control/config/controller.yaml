@@ -14,8 +14,10 @@ b29_controller:
 
   b29_smc_auto_controller:
     type: b29_smc_auto_controller/B29SmcAutoController
-    posture_roll_limit: 0.14
-    posture_pitch_limit: 0.14
+    # Diagnostic only. Cable-suspension roll/pitch no longer blocks
+    # start_disconnect or entry into the automatic state.
+    posture_roll_limit: 0.10
+    posture_pitch_limit: 0.10
     
     joint_names:
       left_first_leg_joint: "left_first_leg_joint"
@@ -34,7 +36,7 @@ b29_controller:
     use_auto_state: true
 
     planner_interface:
-      max_delta_per_command: 0.05
+      max_delta_per_command: 0.06
       command_timeout: 1.0
       total_watchdog_timeout: 120.0
     output_mode: "normal" # "normal", "safe_hold"
@@ -43,11 +45,10 @@ b29_controller:
       wait_for_grip_respond_time: 15.0    # /s
       disconnect_cable_step_duration: 5.0
       disconnect_cable_step_interval: 1.0
-      disconnect_cable_first_joint_up_position: -0.45    # /rad
+      disconnect_cable_first_joint_up_position: -0.53    # /rad
       disconnect_cable_first_joint_down_position: -0.05
-      disconnect_cable_second_joint_move_position: -0.12
-      disconnect_cable_second_joint_check_delta: 0.2
-      disconnect_cable_second_joint_success_threshold: 0.15
+      disconnect_settle_velocity_threshold: 0.02
+      disconnect_settle_duration: 0.5
       retry_limit: 2
 
     remote_control:

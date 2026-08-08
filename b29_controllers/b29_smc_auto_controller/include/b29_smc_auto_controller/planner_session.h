@@ -20,7 +20,7 @@ public:
 
   struct Config
   {
-    double max_delta_per_command{0.10};
+    double max_delta_per_command{0.06};
     double command_timeout{1.0};
     double total_watchdog_timeout{120.0};
   };

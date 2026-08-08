@@ -1,0 +1,26 @@
+# Catkin workspace metadata and build outputs
+.catkin_tools/
+build/
+devel/
+logs/
+build_isolated/
+devel_isolated/
+install/
+install_isolated/
+compile_commands.json
+
+# Python caches
+__pycache__/
+*.py[cod]
+
+# ROS runtime data and recordings
+.ros/
+*.bag
+*.bag.active
+
+# Editor and OS-local files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

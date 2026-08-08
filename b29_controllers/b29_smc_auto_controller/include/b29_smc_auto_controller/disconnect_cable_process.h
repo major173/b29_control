@@ -16,11 +16,8 @@ enum class DisconnectCableStep
   Step1LoosenGripper,
   Step2WaitGripperRespond,
   Step3UpFirstJoint,
-  Step4MoveSecondJoint,
   Step5DownFirstJoint,
-  Step6MoveSecondJoint,
   Step7CheckIfCableDisconnected,
-  Step8ReturnToZero,
   Failed,
 };
 
@@ -34,11 +31,10 @@ public:
     double wait_for_grip_respond_time{12.0};
     double step_duration{5.0};
     double step_interval{1.0};
-    double succeed_threshold{0.17};
-    double step6_second_joint_delta{0.20};
     double step3_first_joint_target{-0.41};
-    double step4_second_joint_target{-0.12};
     double step5_first_joint_target{1.0};
+    double settle_velocity_threshold{0.02};
+    double settle_duration{0.5};
   };
 
   enum class Outcome
@@ -60,9 +56,11 @@ public:
     DisconnectCableStep step{DisconnectCableStep::Idle};
     ros::Time step_enter_time{};
     std::string transition_reason;
-    double check_displacement{0.0};
-    double check_reference_position{0.0};
-    double succeed_threshold{0.0};
+    double max_abs_pose_joint_velocity{0.0};
+    double settle_velocity_threshold{0.0};
+    bool velocity_within_threshold{false};
+    ros::Time velocity_stable_since{};
+    double settle_duration{0.0};
   };
 
   void configure(const Config& config);
@@ -71,7 +69,7 @@ public:
   void reset(const ros::Time& time, const std::string& reason);
 
   Result update(const ros::Time& time, const JointTargets& command_targets,
-                const JointTargets& joint_feedback);
+                const JointTargets& joint_feedback, const JointTargets& joint_velocities);
   Outcome consumeOutcome();
   TraceState traceState() const;
 
@@ -101,8 +99,9 @@ private:
   ros::Time step_enter_time_{};
   std::string transition_reason_;
   MotionSegment motion_segment_{};
-  double to_check_joint_pos_{0.0};
-  double disconnect_check_displacement_{0.0};
+  double max_abs_pose_joint_velocity_{0.0};
+  bool velocity_within_threshold_{false};
+  ros::Time velocity_stable_since_{};
   Outcome pending_outcome_{Outcome::None};
 };
 }  // namespace b29_smc_auto_controller

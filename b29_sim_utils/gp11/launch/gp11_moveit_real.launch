@@ -30,6 +30,10 @@
   <!-- Headless PointStamped -> MoveIt Action frontend. It is deliberately
        opt-in until plan-only and graded real-robot validation are complete. -->
   <arg name="launch_cartesian_goal_server" default="false"/>
+  <!-- Allow one action request to plan, audit and directly execute without
+       a plan_id round trip. Keep disabled unless the caller is gated by the
+       B29 PlannerControl state machine. -->
+  <arg name="allow_direct_execution" default="false"/>
   <!-- Read-only chain-of-evidence monitor for MoveIt -> adapter -> SMC ->
        encoder feedback. -->
   <arg name="launch_execution_monitor" default="true"/>
@@ -208,6 +212,7 @@
     <param name="move_group_action" value="/move_group"/>
     <param name="execute_action" value="/execute_trajectory"/>
     <param name="ik_service" value="/compute_ik"/>
+    <param name="ik_timeout" value="1.0"/>
     <param name="ik_goal_joint_tolerance" value="0.005"/>
     <param name="position_tolerance" value="0.008"/>
     <param name="min_position_tolerance" value="0.001"/>
@@ -224,20 +229,22 @@
     <param name="session_rearm_timeout" value="3.0"/>
     <param name="cached_plan_timeout" value="120.0"/>
     <param name="cached_plan_start_tolerance" value="0.436332313"/>
+    <param name="allow_direct_execution" value="$(arg allow_direct_execution)"/>
     <param name="max_trajectory_velocity" value="1.20"/>
     <param name="max_trajectory_acceleration" value="1.50"/>
     <param name="max_trajectory_point_delta" value="0.10"/>
     <param name="max_trajectory_duration" value="30.0"/>
     <param name="max_trajectory_points" value="1000"/>
     <param name="large_flip_threshold" value="2.6179938779914944"/>
-    <!-- For the commissioned left-anchor 180-degree flip, reject the
-         geometrically equivalent negative branch only for left_second. The
-         free-arm right_second does not define the Cartesian endpoint and may
-         use either smooth approximately-180-degree direction in the adapter. -->
-    <param name="require_positive_large_flip_direction" value="true"/>
-    <param name="positive_direction_tolerance" value="0.00872664626"/>
-    <param name="positive_direction_constraint_margin" value="0.00872664626"/>
-    <rosparam param="positive_ik_seed_fractions">[0.50, 0.80, 0.95]</rosparam>
+    <!-- Both locked-arm second joints use the counter-clockwise IK branch:
+         left_second on pass 1 and right_second on pass 2.  Both passes also
+         require their free-arm second to move clockwise by -pi. -->
+    <param name="require_commissioned_large_flip_direction" value="true"/>
+    <param name="direction_tolerance" value="0.00872664626"/>
+    <param name="direction_constraint_margin" value="0.00872664626"/>
+    <rosparam param="flip_ik_seed_fractions">[0.0, 0.50, 0.90]</rosparam>
+    <param name="flip_free_arm_second_target" value="-3.141592653589793"/>
+    <param name="flip_right_anchor_free_arm_second_delta" value="-3.141592653589793"/>
     <rosparam param="trajectory_joint_position_bounds">
       {left_first_leg_joint: [-1.10, 1.10],
        left_second_leg_joint: [-12.5663706144, 12.5663706144],
@@ -281,7 +288,8 @@
     <param name="display_trajectory_topic"
            value="/move_group/display_planned_path"/>
     <param name="large_flip_threshold" value="2.6179938779914944"/>
-    <param name="large_flip_right_second_target" value="3.141592653589793"/>
+    <param name="left_anchor_free_second_target" value="-3.141592653589793"/>
+    <param name="right_anchor_free_second_delta" value="-3.141592653589793"/>
   </node>
 
 </launch>

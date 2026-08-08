@@ -12,7 +12,7 @@ time_scale: 1.0
 
 # 适配器单条指令允许单关节最大位置变化量，单位rad（弧度）
 # 上层提前限速，避免指令被下层判定REJECT_DELTA_EXCEEDED拒绝
-max_output_delta: 0.10
+max_output_delta: 0.05
 
 # ===================== 4轴关节属性配置 =====================
 # FollowJointTrajectory 必须直接使用固定顺序：左一、左二、右一、右二。
@@ -56,6 +56,21 @@ require_goal_velocity: true
 
 # 终点稳定保持时长，单位s（秒）；持续满足公差0.5s才判定运动完成
 settle_time: 0.5
+
+# ===================== 指定大翻越的备用完成判断 =====================
+# 严格终点公差仍优先。两遍锁定侧second都必须逆时针正向大翻越。
+large_flip_completion:
+  enabled: true
+  # 字段名为兼容保留：Right遍检查left_second，Left遍检查right_second，均正向至少150度。
+  min_left_second_displacement: 2.6179938779914944
+  # Right遍宽终点位置范围，顺序：左一、左二、右一、右二，单位rad；Left遍按角色镜像。
+  position_tolerance: [0.15, 0.23, 0.17, 0.05]
+  # 四关节均接近静止才允许交权，单位rad/s。
+  velocity_tolerance: [0.02, 0.02, 0.02, 0.02]
+  # 宽条件必须连续保持1秒。
+  settle_time: 1.0
+  # 最后一条轨迹发完后最多等待20秒；超时保持不动并报错，不交权。
+  timeout: 20.0
 
 # ===================== 全链路超时配置（单位统一为s 秒） =====================
 timeouts:

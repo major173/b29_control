@@ -13,6 +13,7 @@ import rospy
 import tf2_geometry_msgs  # noqa: F401 - registers PointStamped transforms
 import tf2_ros
 from geometry_msgs.msg import PoseStamped, Quaternion
+from moveit_msgs.msg import MoveItErrorCodes
 from sensor_msgs.msg import JointState
 from std_msgs.msg import String
 
@@ -32,18 +33,21 @@ from gp11.cartesian_goal_core import (
     Stage,
     audit_trajectory,
     build_move_group_goal,
+    commissioned_free_arm_second_goal,
+    commissioned_large_flip_direction,
+    commissioned_large_flip_joints,
+    direction_error,
     finite_point,
     inside_workspace,
     joint_error,
     large_flip_override_expected,
     planned_goal_joint_state,
     planner_control_cancel_reason,
-    positive_direction_error,
-    positive_direction_seed_positions,
-    positive_large_flip_joints,
+    large_flip_ik_seed_positions,
     reach_joint_positions_from_state,
     tip_link_for_anchor,
     trajectory_goal_within_deadband,
+    unwrap_direction_goal,
 )
 from gp11.msg import ReachPointAction, ReachPointFeedback, ReachPointResult
 
@@ -155,24 +159,55 @@ class CartesianGoalServer(object):
         self._large_flip_threshold = _positive_param(
             "~large_flip_threshold", DEFAULT_LARGE_FLIP_THRESHOLD
         )
-        self._require_positive_large_flip_direction = bool(rospy.get_param(
+        legacy_require_direction = bool(rospy.get_param(
             "~require_positive_large_flip_direction", True
         ))
-        self._positive_direction_tolerance = _positive_param(
-            "~positive_direction_tolerance",
-            DEFAULT_POSITIVE_DIRECTION_TOLERANCE,
+        self._require_commissioned_large_flip_direction = bool(rospy.get_param(
+            "~require_commissioned_large_flip_direction",
+            legacy_require_direction,
+        ))
+        self._flip_ik_seed_fractions = tuple(float(value) for value in rospy.get_param(
+            "~flip_ik_seed_fractions", [0.0, 0.50, 0.90]
+        ))
+        if (not 1 <= len(self._flip_ik_seed_fractions) <= 3 or
+                any(not math.isfinite(value) or not 0.0 <= value < 1.0
+                    for value in self._flip_ik_seed_fractions)):
+            raise ValueError(
+                "flip_ik_seed_fractions must contain one to three values in [0, 1)"
+            )
+        self._left_anchor_free_second_target = float(rospy.get_param(
+            "~flip_free_arm_second_target", -math.pi
+        ))
+        self._right_anchor_free_second_delta = float(rospy.get_param(
+            "~flip_right_anchor_free_arm_second_delta", -math.pi
+        ))
+        if (not math.isfinite(self._left_anchor_free_second_target) or
+                not math.isfinite(self._right_anchor_free_second_delta) or
+                not math.isclose(
+                    self._left_anchor_free_second_target, -math.pi,
+                    rel_tol=0.0, abs_tol=1e-9,
+                ) or
+                not math.isclose(
+                    self._right_anchor_free_second_delta, -math.pi,
+                    rel_tol=0.0, abs_tol=1e-9,
+                )):
+            raise ValueError(
+                "commissioned free-arm requirements are fixed: pass-1 "
+                "right_second target=-pi and pass-2 left_second delta=-pi"
+            )
+        legacy_direction_tolerance = _positive_param(
+            "~positive_direction_tolerance", DEFAULT_POSITIVE_DIRECTION_TOLERANCE
         )
-        self._positive_direction_constraint_margin = _positive_param(
+        self._direction_tolerance = _positive_param(
+            "~direction_tolerance", legacy_direction_tolerance
+        )
+        legacy_constraint_margin = _positive_param(
             "~positive_direction_constraint_margin",
             DEFAULT_POSITIVE_DIRECTION_TOLERANCE,
         )
-        self._positive_ik_seed_fractions = tuple(float(value) for value in rospy.get_param(
-            "~positive_ik_seed_fractions", [0.50, 0.80, 0.95]
-        ))
-        if (not self._positive_ik_seed_fractions or
-                any(not math.isfinite(value) or not 0.0 < value < 1.0
-                    for value in self._positive_ik_seed_fractions)):
-            raise ValueError("positive_ik_seed_fractions must contain values in (0, 1)")
+        self._direction_constraint_margin = _positive_param(
+            "~direction_constraint_margin", legacy_constraint_margin
+        )
         self._joint_state_timeout = _positive_param("~joint_state_timeout", 0.5)
         self._control_state_timeout = _positive_param("~control_state_timeout", 0.5)
         self._target_max_age = _positive_param("~target_max_age", 1.0)
@@ -182,6 +217,9 @@ class CartesianGoalServer(object):
         self._cached_plan_start_tolerance = _positive_param(
             "~cached_plan_start_tolerance", math.radians(25.0)
         )
+        self._allow_direct_execution = bool(rospy.get_param(
+            "~allow_direct_execution", False
+        ))
 
         self._anchor_side = ""
         self._anchor_receipt = 0.0
@@ -403,6 +441,15 @@ class CartesianGoalServer(object):
             return None, "joint_fault or grip_fault is active"
         if trace.software_emergency_stop_latched:
             return None, "software emergency stop is latched"
+        expected_anchor = {
+            PlannerControlState.CROSSING_SIDE_RIGHT: "left",
+            PlannerControlState.CROSSING_SIDE_LEFT: "right",
+        }.get(planner.crossing_side)
+        if expected_anchor and side != expected_anchor:
+            return None, (
+                "runtime_anchor {} does not match PlannerControl crossing "
+                "side {} (expected {})"
+            ).format(side, planner.crossing_side, expected_anchor)
         return {
             "anchor": side,
             "joints": joints,
@@ -479,7 +526,7 @@ class CartesianGoalServer(object):
 
     def _store_cached_plan(
             self, trajectory, target, result, snapshot, audit_message,
-            positive_direction_joints=()):
+            direction_signs=None):
         plan_id = uuid.uuid4().hex
         cached = {
             "plan_id": plan_id,
@@ -497,7 +544,7 @@ class CartesianGoalServer(object):
             ),
             "moveit_error_code": int(result.moveit_error_code),
             "audit_message": audit_message,
-            "positive_direction_joints": tuple(positive_direction_joints),
+            "direction_signs": dict(direction_signs or {}),
         }
         with self._lock:
             self._cached_plan = cached
@@ -512,68 +559,202 @@ class CartesianGoalServer(object):
         )
         return plan_id
 
-    def _positive_branch_ik(
+    def _commissioned_free_arm_goal(self, snapshot, target_profile):
+        free_second, base_target = commissioned_free_arm_second_goal(
+            snapshot["joints"],
+            snapshot["anchor"],
+            self._left_anchor_free_second_target,
+            self._right_anchor_free_second_delta,
+            left_anchor_relative_to_live=(
+                target_profile == "reverse" and
+                snapshot["anchor"] == "left"
+            ),
+        )
+        adjusted = unwrap_direction_goal(
+            snapshot["joints"],
+            {free_second: base_target},
+            {free_second: -1.0},
+            self._joint_position_bounds,
+            self._large_flip_threshold,
+        )
+        return free_second, adjusted[free_second]
+
+    def _commissioned_branch_ik(
             self, initial_response, initial_positions, target, tip_link,
             snapshot):
-        """Retry collision-checked IK with seeds on the required positive arc."""
-        required = positive_large_flip_joints(
+        """Select the required signed IK branch without replacing the IK goal."""
+        if not self._require_commissioned_large_flip_direction:
+            return initial_response, initial_positions, {}, ""
+        required = commissioned_large_flip_joints(
             snapshot["anchor"], initial_positions, snapshot["joints"],
             self._large_flip_threshold,
-        ) if self._require_positive_large_flip_direction else ()
+        )
         if not required:
-            return initial_response, initial_positions, required, ""
+            return None, None, {}, (
+                "目标点IK没有形成要求的大翻越：当前锁定侧second相对实时起点"
+                "的最短角差未超过{:.1f}度；未生成轨迹"
+            ).format(math.degrees(self._large_flip_threshold))
 
-        def candidate_error(positions):
-            for joint_name in required:
-                delta = positions[joint_name] - snapshot["joints"][joint_name]
-                if delta <= self._large_flip_threshold:
-                    return (
-                        "{} IK delta is {:+.6f} rad; a positive large-flip "
-                        "branch above {:+.6f} rad is required"
-                    ).format(joint_name, delta, self._large_flip_threshold)
-            return ""
+        support_direction = commissioned_large_flip_direction(
+            snapshot["anchor"]
+        )
+        direction_signs = dict(
+            (joint_name, support_direction) for joint_name in required
+        )
 
-        error = candidate_error(initial_positions)
-        if not error:
-            return initial_response, initial_positions, required, ""
+        try:
+            positions = unwrap_direction_goal(
+                snapshot["joints"], initial_positions, direction_signs,
+                self._joint_position_bounds, self._large_flip_threshold,
+            )
+        except ValueError as exc:
+            return None, None, direction_signs, (
+                "无法将连续关节IK解展开到指定方向分支：{}；未生成轨迹".format(exc)
+            )
+
+        response = copy.deepcopy(initial_response)
+        response_positions = list(response.solution.joint_state.position)
+        response_indices = {
+            name: index
+            for index, name in enumerate(response.solution.joint_state.name)
+        }
+        for joint_name in required:
+            response_positions[response_indices[joint_name]] = positions[joint_name]
+        response.solution.joint_state.position = response_positions
+        self._event(
+            "cartesian_goal_commissioned_ik_unwrapped",
+            anchor=snapshot["anchor"],
+            joint_names=list(required),
+            direction_signs=[direction_signs[name] for name in required],
+            original_positions=[initial_positions[name] for name in required],
+            unwrapped_positions=[positions[name] for name in required],
+            start_positions=[snapshot["joints"][name] for name in required],
+        )
+        rospy.loginfo(
+            "Unwrapped continuous-joint IK onto the commissioned %s branch: %s",
+            "counter-clockwise" if support_direction > 0.0 else "clockwise",
+            ", ".join(
+                "{}={:+.6f}".format(name, positions[name])
+                for name in required
+            ),
+        )
+        return response, positions, direction_signs, ""
+
+    def _retry_no_solution_ik(self, initial_response, initial_error,
+                              target, tip_link, snapshot, target_profile):
+        """Retry collision-checked IK with commissioned signed-flip seeds."""
+        if (not initial_error or initial_response is None or
+                int(initial_response.error_code.val) != MoveItErrorCodes.NO_IK_SOLUTION or
+                snapshot["anchor"] not in ("left", "right") or
+                not self._require_commissioned_large_flip_direction):
+            return initial_response, initial_error
 
         rospy.logwarn(
-            "Initial IK selected a negative large-flip branch (%s); "
-            "retrying with positive-arc seeds", error,
+            "Live-state IK returned NO_IK_SOLUTION; trying %d commissioned flip seed(s)",
+            len(self._flip_ik_seed_fractions),
         )
-        for attempt, fraction in enumerate(self._positive_ik_seed_fractions, 1):
-            seed = positive_direction_seed_positions(
-                snapshot["joints"], initial_positions, required, fraction
+        last_response = initial_response
+        last_error = initial_error
+        try:
+            _free_second, free_second_target = self._commissioned_free_arm_goal(
+                snapshot, target_profile
             )
-            response, ik_error = self._core.check_ik(
+        except ValueError as exc:
+            return initial_response, "备用IK自由臂目标生成失败：{}".format(exc)
+        for attempt, fraction in enumerate(self._flip_ik_seed_fractions, 1):
+            try:
+                seed = large_flip_ik_seed_positions(
+                    snapshot["joints"], fraction,
+                    snapshot["anchor"],
+                    free_second_target,
+                )
+            except ValueError as exc:
+                return initial_response, "备用IK种子生成失败：{}".format(exc)
+
+            response, error = self._core.check_ik(
                 target, tip_link, self._group_name, seed, self._ik_timeout,
             )
-            positions = None
-            if not ik_error:
+            code = 0 if response is None else int(response.error_code.val)
+            solution_positions = []
+            if not error:
                 try:
                     positions = reach_joint_positions_from_state(response.solution)
+                    solution_positions = [positions[name] for name in REACH_JOINTS]
                 except ValueError as exc:
-                    ik_error = "IK result rejected: {}".format(exc)
-            direction_error = "" if positions is None else candidate_error(positions)
+                    error = "IK result rejected: {}".format(exc)
             self._event(
-                "cartesian_goal_positive_ik_attempt",
+                "cartesian_goal_flip_ik_seed_attempt",
+                anchor=snapshot["anchor"],
                 attempt=attempt,
                 seed_fraction=fraction,
-                success=not bool(ik_error or direction_error),
-                message=ik_error or direction_error,
-                joint_positions=(
-                    [] if positions is None else
-                    [positions[name] for name in REACH_JOINTS]
-                ),
+                seed_joint_positions=[seed[name] for name in REACH_JOINTS],
+                success=not bool(error),
+                moveit_error_code=code,
+                message=error,
+                solution_joint_positions=solution_positions,
             )
-            if not ik_error and not direction_error:
+            if not error:
                 rospy.loginfo(
-                    "Positive large-flip IK branch selected on attempt %d", attempt
+                    "Commissioned flip IK seed %d/%d succeeded (fraction=%.2f)",
+                    attempt, len(self._flip_ik_seed_fractions), fraction,
                 )
-                return response, positions, required, ""
-        return None, None, required, (
-            "无法找到满足正向约束的IK解：{}；未生成或缓存轨迹".format(error)
+                return response, ""
+            last_response = response
+            last_error = error
+
+        return last_response, (
+            "{}；{}个备用种子均未找到IK解，未生成或发布轨迹"
+        ).format(last_error, len(self._flip_ik_seed_fractions))
+
+    def _fix_commissioned_free_arm_second(
+            self, response, positions, snapshot, direction_signs,
+            target_profile):
+        """Fix the free-arm second joint to the commissioned clockwise branch."""
+        support_second = {
+            "left": "left_second_leg_joint",
+            "right": "right_second_leg_joint",
+        }.get(snapshot["anchor"])
+        if not support_second or support_second not in direction_signs:
+            return response, positions, direction_signs, ""
+
+        try:
+            free_second, free_second_target = self._commissioned_free_arm_goal(
+                snapshot, target_profile
+            )
+        except ValueError as exc:
+            return None, None, direction_signs, (
+                "自由臂second顺时针目标生成失败：{}；未生成轨迹".format(exc)
+            )
+
+        adjusted = dict(positions)
+        original = adjusted[free_second]
+        adjusted[free_second] = free_second_target
+        direction_signs = dict(direction_signs)
+        direction_signs[free_second] = -1.0
+        response = copy.deepcopy(response)
+        indices = {
+            name: index
+            for index, name in enumerate(response.solution.joint_state.name)
+        }
+        response_positions = list(response.solution.joint_state.position)
+        response_positions[indices[free_second]] = adjusted[free_second]
+        response.solution.joint_state.position = response_positions
+        self._event(
+            "cartesian_goal_free_arm_second_fixed",
+            anchor=snapshot["anchor"],
+            joint_name=free_second,
+            original_position=original,
+            fixed_position=adjusted[free_second],
+            start_position=snapshot["joints"][free_second],
+            commanded_delta=(
+                adjusted[free_second] - snapshot["joints"][free_second]
+            ),
         )
+        rospy.loginfo(
+            "Fixed commissioned %s free-arm second goal to %.6f rad",
+            snapshot["anchor"], adjusted[free_second],
+        )
+        return response, adjusted, direction_signs, ""
 
     def _load_cached_plan(self, plan_id):
         with self._lock:
@@ -619,9 +800,10 @@ class CartesianGoalServer(object):
     def _execute_goal(self, goal):
         self._operation_id = uuid.uuid4().hex
         approved_plan_id = goal.approved_plan_id.strip()
+        target_profile = goal.target_profile.strip() or "default_forward"
         with self._lock:
             self._accepted_anchor = ""
-            self._operation_execute = bool(goal.execute and approved_plan_id)
+            self._operation_execute = bool(goal.execute)
             self._execution_session_id = 0
             self._cancel_reason = ""
         self._event(
@@ -630,8 +812,16 @@ class CartesianGoalServer(object):
             point=[goal.target.point.x, goal.target.point.y, goal.target.point.z],
             execute=bool(goal.execute),
             approved_plan_id=approved_plan_id,
+            target_profile=target_profile,
             position_tolerance=float(goal.position_tolerance),
         )
+        if target_profile not in ("default_forward", "reverse"):
+            result = self._base_result(Stage.REJECTED, "invalid target profile")
+            result.message = (
+                "target_profile must be default_forward or reverse"
+            )
+            self._finish(result)
+            return
         if approved_plan_id:
             if not goal.execute:
                 result = self._base_result(Stage.REJECTED, "invalid approval request")
@@ -642,15 +832,23 @@ class CartesianGoalServer(object):
             self._execute_cached_plan(approved_plan_id)
             return
         if goal.execute:
-            result = self._base_result(Stage.REJECTED, "direct execution disabled")
-            result.message = (
-                "direct point execution is disabled; plan first, then submit its plan_id"
+            if not self._allow_direct_execution:
+                result = self._base_result(Stage.REJECTED, "direct execution disabled")
+                result.message = "direct point execution is disabled by configuration"
+                self._finish(result)
+                return
+            self._plan_goal(
+                goal, execute_after_plan=True,
+                target_profile=target_profile,
             )
-            self._finish(result)
             return
-        self._plan_goal(goal)
+        self._plan_goal(
+            goal, execute_after_plan=False,
+            target_profile=target_profile,
+        )
 
-    def _plan_goal(self, goal):
+    def _plan_goal(self, goal, execute_after_plan=False,
+                   target_profile="default_forward"):
         self._invalidate_cached_plan("new planning request")
         result = self._base_result(Stage.WAITING_STATE, "planning request received")
         tolerance = goal.position_tolerance or self._default_tolerance
@@ -664,6 +862,8 @@ class CartesianGoalServer(object):
 
         self._feedback(Stage.WAITING_STATE, "checking live robot and control state")
         snapshot, error = self._common_state_snapshot()
+        if not error and execute_after_plan:
+            error = self._execution_state_error(snapshot)
         if error:
             result.final_stage = Stage.REJECTED
             result.message = error
@@ -690,6 +890,7 @@ class CartesianGoalServer(object):
             frame_id=self._world_frame,
             point=[target.pose.position.x, target.pose.position.y, target.pose.position.z],
             anchor=snapshot["anchor"], tip_link=result.accepted_tip_link,
+            target_profile=target_profile,
         )
         if not inside_workspace(target.pose.position, self._workspace_min, self._workspace_max):
             result.final_stage = Stage.REJECTED
@@ -705,6 +906,10 @@ class CartesianGoalServer(object):
         ik_response, error = self._core.check_ik(
             target, result.accepted_tip_link, self._group_name,
             snapshot["joints"], self._ik_timeout,
+        )
+        ik_response, error = self._retry_no_solution_ik(
+            ik_response, error, target, result.accepted_tip_link, snapshot,
+            target_profile,
         )
         ik_code = 0 if ik_response is None else int(ik_response.error_code.val)
         self._event("cartesian_goal_ik_result", success=not bool(error),
@@ -726,10 +931,22 @@ class CartesianGoalServer(object):
             result.message = "IK result rejected: {}".format(exc)
             self._finish(result)
             return
-        ik_response, ik_goal_positions, positive_direction_joints, error = (
-            self._positive_branch_ik(
+        ik_response, ik_goal_positions, direction_signs, error = (
+            self._commissioned_branch_ik(
                 ik_response, ik_goal_positions, target,
                 result.accepted_tip_link, snapshot,
+            )
+        )
+        if error:
+            result.final_stage = Stage.REJECTED
+            result.moveit_error_code = ik_code
+            result.message = error
+            self._finish(result)
+            return
+        ik_response, ik_goal_positions, direction_signs, error = (
+            self._fix_commissioned_free_arm_second(
+                ik_response, ik_goal_positions, snapshot, direction_signs,
+                target_profile,
             )
         )
         if error:
@@ -742,7 +959,7 @@ class CartesianGoalServer(object):
             "cartesian_goal_ik_solution",
             joint_names=list(REACH_JOINTS),
             joint_positions=[ik_goal_positions[name] for name in REACH_JOINTS],
-            positive_direction_joints=list(positive_direction_joints),
+            direction_signs=direction_signs,
         )
 
         self._feedback(
@@ -756,10 +973,10 @@ class CartesianGoalServer(object):
             self._velocity_scaling, self._acceleration_scaling,
             goal_joint_positions=ik_goal_positions,
             goal_joint_tolerance=self._ik_goal_joint_tolerance,
-            positive_direction_joints=positive_direction_joints,
-            positive_direction_start_positions=snapshot["joints"],
-            positive_direction_constraint_margin=(
-                self._positive_direction_constraint_margin
+            direction_signs=direction_signs,
+            direction_start_positions=snapshot["joints"],
+            direction_constraint_margin=(
+                self._direction_constraint_margin
             ),
         )
         plan_result, error = self._core.plan_target(
@@ -789,18 +1006,23 @@ class CartesianGoalServer(object):
             self._max_trajectory_duration,
             self._max_trajectory_points,
         )
-        if safe and positive_direction_joints:
-            direction_error = positive_direction_error(
+        if safe and direction_signs:
+            audit_error = direction_error(
                 plan_result.planned_trajectory,
                 snapshot["joints"],
-                positive_direction_joints,
-                self._positive_direction_tolerance,
+                direction_signs,
+                self._direction_tolerance,
             )
-            if direction_error:
+            if audit_error:
                 safe = False
-                audit_message = "正向轨迹约束失败：{}".format(direction_error)
+                audit_message = "指定方向轨迹约束失败：{}".format(audit_error)
             else:
-                audit_message += "; left_second正向单调检查通过"
+                audit_message += "; 指定方向单调检查通过：{}".format(
+                    ",".join(
+                        "{}:{:+.0f}".format(name, sign)
+                        for name, sign in direction_signs.items()
+                    )
+                )
         result.planned_goal_joint_state = planned_goal_joint_state(
             plan_result.planned_trajectory
         )
@@ -810,6 +1032,7 @@ class CartesianGoalServer(object):
         )
         self._event(
             "cartesian_goal_audit_result",
+            anchor=snapshot["anchor"],
             success=bool(safe), message=audit_message,
             planned_joint_names=list(result.planned_goal_joint_state.name),
             planned_joint_positions=list(result.planned_goal_joint_state.position),
@@ -821,9 +1044,19 @@ class CartesianGoalServer(object):
             self._finish(result)
             return
 
+        if execute_after_plan:
+            self._execute_planned_trajectory(
+                result,
+                plan_result.planned_trajectory,
+                snapshot,
+                direction_signs,
+                audit_message,
+            )
+            return
+
         result.plan_id = self._store_cached_plan(
             plan_result.planned_trajectory, target, result, snapshot, audit_message,
-            positive_direction_joints,
+            direction_signs,
         )
         result.success = True
         result.final_stage = Stage.SUCCEEDED
@@ -832,6 +1065,90 @@ class CartesianGoalServer(object):
         ).format(result.plan_id, self._cached_plan_timeout, audit_message)
         self._feedback(Stage.SUCCEEDED, result.message)
         self._finish(result, "succeeded")
+
+    def _execute_planned_trajectory(
+            self, result, trajectory, planning_snapshot,
+            direction_signs, audit_message):
+        self._feedback(
+            Stage.AUDITING_TRAJECTORY,
+            "revalidating live state before direct trajectory dispatch",
+        )
+        snapshot, error = self._common_state_snapshot()
+        if not error:
+            error = self._execution_state_error(snapshot)
+        if error:
+            result.final_stage = Stage.REJECTED
+            result.message = "direct execution gate rejected: {}".format(error)
+            self._finish(result)
+            return
+        if snapshot["anchor"] != planning_snapshot["anchor"]:
+            result.final_stage = Stage.REJECTED
+            result.message = "runtime_anchor changed during direct planning"
+            self._finish(result)
+            return
+        if snapshot["planner"].session_id != planning_snapshot["planner"].session_id:
+            result.final_stage = Stage.REJECTED
+            result.message = "PlannerControl session changed during direct planning"
+            self._finish(result)
+            return
+
+        start_reference = {"start_joints": planning_snapshot["joints"]}
+        error = self._cached_start_state_error(start_reference, snapshot["joints"])
+        if error:
+            result.final_stage = Stage.REJECTED
+            result.message = "direct plan start rejected: {}".format(error)
+            self._finish(result)
+            return
+        if direction_signs:
+            error = direction_error(
+                trajectory, snapshot["joints"], direction_signs,
+                self._direction_tolerance,
+            )
+            if error:
+                result.final_stage = Stage.REJECTED
+                result.message = "direct commissioned direction rejected: {}".format(error)
+                self._finish(result)
+                return
+
+        result.large_flip_override_expected = large_flip_override_expected(
+            snapshot["anchor"], trajectory, snapshot["joints"],
+            self._large_flip_threshold,
+        )
+        self._event(
+            "cartesian_goal_direct_plan_revalidated",
+            session_id=int(snapshot["planner"].session_id),
+            audit_message=audit_message,
+            large_flip_override_expected=bool(
+                result.large_flip_override_expected
+            ),
+        )
+        if trajectory_goal_within_deadband(
+                trajectory, snapshot["joints"], self._goal_joint_deadband):
+            result.success = True
+            result.final_stage = Stage.SUCCEEDED
+            result.message = (
+                "ALREADY_AT_GOAL: final joints are within {:.3f} rad; no trajectory sent"
+            ).format(self._goal_joint_deadband)
+            self._finish(result, "succeeded")
+            return
+
+        if result.large_flip_override_expected:
+            support_second = {
+                "left": "left_second_leg_joint",
+                "right": "right_second_leg_joint",
+            }[snapshot["anchor"]]
+            direction_name = (
+                "counter-clockwise"
+                if commissioned_large_flip_direction(snapshot["anchor"]) > 0.0
+                else "clockwise"
+            )
+            self._feedback(
+                Stage.AUDITING_TRAJECTORY,
+                "commissioned {} {} large-flip completion fallback is "
+                "expected; the endpoint must be verified from encoder/TF "
+                "evidence".format(support_second, direction_name),
+            )
+        self._dispatch_trajectory(result, trajectory, snapshot, "direct")
 
     def _execute_cached_plan(self, plan_id):
         result = self._base_result(Stage.WAITING_STATE, "cached execution requested")
@@ -896,23 +1213,21 @@ class CartesianGoalServer(object):
             result.message = audit_message
             self._finish(result)
             return
-        positive_direction_joints = tuple(
-            cached.get("positive_direction_joints", ())
-        )
-        if positive_direction_joints:
-            direction_error = positive_direction_error(
+        direction_signs = dict(cached.get("direction_signs", {}))
+        if direction_signs:
+            audit_error = direction_error(
                 cached["trajectory"], snapshot["joints"],
-                positive_direction_joints,
-                self._positive_direction_tolerance,
+                direction_signs,
+                self._direction_tolerance,
             )
-            if direction_error:
+            if audit_error:
                 self._invalidate_cached_plan(
-                    "cached positive direction check failed"
+                    "cached commissioned direction check failed"
                 )
                 result.final_stage = Stage.REJECTED
                 result.message = (
-                    "cached plan positive direction rejected: {}"
-                ).format(direction_error)
+                    "cached plan commissioned direction rejected: {}"
+                ).format(audit_error)
                 self._finish(result)
                 return
         previous_flip_prediction = result.large_flip_override_expected
@@ -950,28 +1265,38 @@ class CartesianGoalServer(object):
             return
 
         if result.large_flip_override_expected:
+            support_second = {
+                "left": "left_second_leg_joint",
+                "right": "right_second_leg_joint",
+            }[snapshot["anchor"]]
+            direction_name = (
+                "counter-clockwise"
+                if commissioned_large_flip_direction(snapshot["anchor"]) > 0.0
+                else "clockwise"
+            )
             self._feedback(
                 Stage.AUDITING_TRAJECTORY,
-                "large right_second adapter override is expected; spatial endpoint "
-                "must be verified from encoder/TF evidence",
+                "commissioned {} {} large-flip completion fallback is "
+                "expected; the endpoint must be verified from encoder/TF "
+                "evidence".format(support_second, direction_name),
             )
         if not self._consume_cached_plan(plan_id):
             result.final_stage = Stage.REJECTED
             result.message = "cached plan was invalidated before dispatch"
             self._finish(result)
             return
-        self._dispatch_cached_trajectory(
+        self._dispatch_trajectory(
             result, cached["trajectory"], snapshot, plan_id
         )
 
-    def _dispatch_cached_trajectory(self, result, trajectory, snapshot, plan_id):
+    def _dispatch_trajectory(self, result, trajectory, snapshot, plan_reference):
         initial_session_id = snapshot["planner"].session_id
         with self._lock:
             self._execution_session_id = initial_session_id
-        self._feedback(Stage.EXECUTING, "sending approved cached trajectory")
+        self._feedback(Stage.EXECUTING, "sending audited trajectory")
         self._event(
             "cartesian_goal_execute_requested",
-            plan_id=plan_id,
+            plan_reference=plan_reference,
             session_id=int(initial_session_id),
             large_flip_override_expected=bool(result.large_flip_override_expected),
         )
@@ -991,9 +1316,12 @@ class CartesianGoalServer(object):
                 self._finish(result)
             return
 
-        self._feedback(Stage.WAITING_SESSION_REARM, "waiting for a fresh PlannerControl session")
+        self._feedback(
+            Stage.WAITING_SESSION_REARM,
+            "waiting for SMC PlannerControl completion confirmation",
+        )
         deadline = time.monotonic() + self._session_rearm_timeout
-        rearmed = False
+        completion_confirmed = False
         while time.monotonic() < deadline and not rospy.is_shutdown():
             reason = self._cancel_requested()
             if reason:
@@ -1001,16 +1329,24 @@ class CartesianGoalServer(object):
                 return
             with self._lock:
                 planner = copy.deepcopy(self._planner_state)
-            if (planner is not None and planner.session_id != initial_session_id and
+            if planner is not None:
+                normally_completed = (
+                    planner.last_completed_session_id == initial_session_id and
+                    planner.exit_reason == PlannerControlState.EXIT_COMPLETED
+                )
+                legacy_rearmed = (
+                    planner.session_id != initial_session_id and
                     planner.active and planner.accepting_commands and
-                    not planner.has_accepted_command):
-                rearmed = True
-                break
+                    not planner.has_accepted_command
+                )
+                if normally_completed or legacy_rearmed:
+                    completion_confirmed = True
+                    break
             rospy.sleep(0.05)
-        if not rearmed:
+        if not completion_confirmed:
             result.final_stage = Stage.FAILED
             result.message = (
-                "trajectory execution succeeded, but PlannerControl did not rearm within "
+                "trajectory execution succeeded, but SMC completion was not confirmed within "
                 "{:.1f}s; do not resend without checking live state"
             ).format(self._session_rearm_timeout)
             self._finish(result)
@@ -1019,8 +1355,8 @@ class CartesianGoalServer(object):
         result.final_stage = Stage.SUCCEEDED
         result.moveit_error_code = execute_code
         result.message = (
-            "EXECUTION_SUCCEEDED: approved cached plan completed and PlannerControl "
-            "rearmed; confirm the encoder and TF evidence"
+            "EXECUTION_SUCCEEDED: audited trajectory completed and SMC confirmed "
+            "normal PlannerControl exit; confirm the encoder and TF evidence"
         )
         self._feedback(Stage.SUCCEEDED, result.message)
         self._finish(result, "succeeded")

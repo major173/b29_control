@@ -378,7 +378,9 @@ void RobotContext::resetFaultFlags()
 
 bool RobotContext::canStartAuto() const
 {
-  return isLowerAlive() && isImuReady() && isPostureReady();
+  // Cable suspension naturally produces roll/pitch oscillation before the
+  // disconnect sequence. Keep posture_ready as telemetry, not an entry gate.
+  return isLowerAlive() && isImuReady();
 }
 
 bool RobotContext::isReadyToTraverse() const

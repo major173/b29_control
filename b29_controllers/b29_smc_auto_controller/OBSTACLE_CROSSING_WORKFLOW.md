@@ -144,11 +144,11 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-  I["Idle"] --> C["CloseBothGrippers"]
-  C --> FO["FirstSide OpenGripper"]
+  I["Idle"] --> FO["FirstSide OpenGripper"]
   FO --> FG["FirstSide EnableGravityCompensation"]
   FG --> FD["FirstSide Disconnecting"]
-  FD --> FP["FirstSide PlannerControl"]
+  FD --> FW["FirstSide DisconnectDoneWaitFlip"]
+  FW -- start_flip --> FP["FirstSide PlannerControl"]
   FP --> FC["FirstSide RemoteControl"]
   FC --> FR["FirstSide Regrip"]
   FR --> SO["SecondSide OpenGripper"]
@@ -165,20 +165,9 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-  C["CloseBothGrippers"] --> C1{"grip_confirmed?"}
-  C1 -- 是 --> FO["FirstSide OpenGripper"]
-  FO --> FG["FirstSide EnableGravityCompensation"]
-  FG --> FD["FirstSide Disconnecting"]
-  C1 -- 否, grip timeout --> C2{"retry < close limit?"}
-  C2 -- 是 --> C
-  C2 -- 否 --> MI["ManualIntervention"]
-
-  D["Disconnecting"] --> D1{"Step7 success?"}
-  D1 -- 是 --> P["PlannerControl"]
-  D1 -- 否 --> Z["Step8 ReturnToZero"]
-  Z --> D2{"retry < disconnect limit?"}
-  D2 -- 是 --> D
-  D2 -- 否 --> MI
+  D["Disconnecting"] --> D1{"Step7 3-joint\nvelocity settled?"}
+  D1 -- 是 --> DW["DisconnectDoneWaitFlip"]
+  D1 -- 否 --> MI["ManualIntervention\nno disconnect retry"]
 
   R["Regrip"] --> R1{"grip_confirmed?"}
   R1 -- 是 --> N["Next side / Complete"]
@@ -193,7 +182,6 @@ flowchart TD
 ```mermaid
 flowchart LR
   MI["ManualIntervention\n完成条件: grip_confirmed"] --> A{"failed_operation_"}
-  A -->|CloseBothGrippers| FO["FirstSide OpenGripper"]
   A -->|Disconnect / Planner / FirstSide Regrip| SO["SecondSide OpenGripper"]
   A -->|Disconnect / Planner / SecondSide Regrip| W["CompleteWaitObstacleClear"]
   A -->|Other| I["Idle"]
@@ -215,7 +203,7 @@ flowchart LR
 转出动作：
 
 - `crossing_runtime_` 清零 retry 和失败操作，并根据上次完整越障成功后累计的双轮平均有符号净角行程记录首侧。
-- 阶段转入 `CloseBothGrippers`，夹爪确认门控以当前 `grip_confirmed` 初始化。
+- 阶段直接转入 `OpenGripperBeforeGravityCompensation`，不再先执行双夹爪闭合重试。
 
 首侧选择：
 
@@ -229,11 +217,11 @@ flowchart LR
 
 - 若外层处于 `Traversing`，两个夹爪目标置为 `HALFOPEN`。
 
-### 4.2 CloseBothGrippers
+### 4.2 CloseBothGrippers（保留类型，当前自动入口不使用）
 
 目的：
 
-- 收到越障触发上升沿后，先闭合两个夹爪，确认线缆被夹紧，禁止轮子运动。
+- 该阶段仅作为兼容状态保留；当前 `start_disconnect` 和越障触发都直接进入首侧张开阶段。
 
 命令行为：
 
@@ -255,23 +243,13 @@ flowchart LR
 
 进入阶段前残留的 `grip_confirmed=true` 不会被当作本次双夹爪闭合完成。
 
-失败重试：
-
-- 条件：等待超过 `crossing_config_.wait_for_grip_respond_time` 且 `retry_counts_.close_grippers < crossing_config_.retry_limit`
-- 动作：
-  - `++retry_counts_.close_grippers`
-  - `gripper_wait_start_time_ = time`
-
-进入人工干预：
-
-- 条件：等待超过 `crossing_config_.wait_for_grip_respond_time` 且 `retry_counts_.close_grippers >= crossing_config_.retry_limit`
-- 函数：`enterManualIntervention(CloseBothGrippers, first_crossing_side_)`
+超时直接进入人工干预，不自动重试。
 
 ### 4.3 OpenGripperBeforeGravityCompensation
 
 目的：
 
-- 双夹爪闭合确认后，先张开当前越障侧夹爪，并在重力补偿关闭状态下等待夹爪完成动作。
+- 首侧确定后，先张开当前越障侧夹爪，并在重力补偿关闭状态下等待夹爪完成动作。
 
 命令行为：
 
@@ -311,25 +289,27 @@ flowchart LR
 - 调用 `applyDisconnectCableCommand(time, effective)`
 - 当前侧夹爪目标设为 `OPEN`
 - 正常进入时从 `Step3UpFirstJoint` 开始；张开命令和响应等待已由前置阶段完成。
-- Step7 失败后的内部 retry 仍从 `Step1LoosenGripper` 开始。
+- 锁定臂 second joint 全程保持原目标，不参与脱缆动作。
 
 成功转出：
 
-- 条件：脱缆 Step7 检测成功。
-- 函数：`enterPlannerControl(time, crossing_side_)`
+- 条件：锁定臂 first joint 抬升/回落完成，且 Step7 三个位姿关节低速稳定门控成功。
+- 动作：复位脱缆子流程并进入 `DisconnectDoneWaitFlip`，不启动 PlannerControl。
 
-失败重试：
+### 4.6 DisconnectDoneWaitFlip
 
-- 条件：Step8 回零完成后进入 `Failed`，且当前侧 disconnect retry 小于 `crossing_config_.retry_limit`。
-- 动作：
-  - `crossing_runtime_` 增加当前侧 retry，并请求 `disconnect_cable_process_.restart(..., "disconnect_retry")`。
+目的：
 
-进入人工干预：
+- 将脱缆和 MoveIt 翻越拆开验证。
+- 保持当前侧夹爪打开、轮子停止、最后关节目标和当前侧重力补偿。
+- 不创建 PlannerControl session，因此不受 Planner 总看门狗影响。
 
-- 条件：当前侧 disconnect retry 达到 `crossing_config_.retry_limit`
-- 函数：`enterManualIntervention(DisconnectCable, crossing_side_)`
+`start_flip`（`std_msgs/Empty`）只在该状态接受，接受后进入 `PlannerControl` 并创建正式会话。
+独立测试命令 `rosrun gp11 gp11_single_flip.py` 会完成状态检查、触发 `start_flip`，随后向
+MoveIt Cartesian Action 发送老工程已验证的左锚 180 度目标点。规划通过审计后直接发布轨迹，
+不需要人工传递 plan_id。
 
-### 4.6 PlannerControl
+### 4.7 PlannerControl
 
 目的：
 
@@ -385,8 +365,7 @@ Planner 覆盖关节：
 - `failed_operation_ = PlannerControl`，进入 `ManualIntervention`，不假定规划成功。
 
 `debug` 模式由 `roslaunch b29_control start.launch planner_mode:=debug` 统一启用；Coordinator 在该固定模式下持续等待 `planner_release`。不再提供固定时间自动放行分支；收到有效服务请求后进入 `RemoteControl`。
-
-### 4.7 RemoteControl
+### 4.8 RemoteControl
 
 目的：
 
@@ -404,10 +383,9 @@ Planner 覆盖关节：
 - 停止驱动轮，当前侧夹爪保持 `OPEN`，继续使用当前侧重力补偿策略。
 - 只有进入阶段后新的完成信号 `0 -> 1` 上升沿才进入 `Regrip`。
 
-### 4.8 Regrip
+### 4.9 Regrip
 
 目的：
-
 - RemoteControl 收到有效完成上升沿后，当前侧重新夹紧线缆。
 
 命令行为：
@@ -441,8 +419,7 @@ Planner 覆盖关节：
 
 - 条件：当前侧 regrip retry 达到 `crossing_config_.retry_limit`
 - 函数：`enterManualIntervention(Regrip, crossing_side_)`
-
-### 4.9 ReopenBeforeRemoteControl
+### 4.10 ReopenBeforeRemoteControl
 
 目的：
 
@@ -458,7 +435,7 @@ Planner 覆盖关节：
 - 条件：等待超过 `crossing_config_.wait_for_grip_respond_time`
 - 函数：`enterRemoteControl(time, crossing_side_, "regrip_retry_reopen_completed")`
 
-### 4.10 CompleteWaitObstacleClear
+### 4.11 CompleteWaitObstacleClear
 
 目的：
 
@@ -483,7 +460,7 @@ Planner 覆盖关节：
 
 - `resetObstacleCrossingState()`，转换原因记录为 `obstacle_trigger_falling_edge`
 
-### 4.11 ManualIntervention
+### 4.12 ManualIntervention
 
 目的：
 
@@ -528,23 +505,16 @@ Planner 覆盖关节：
 ```mermaid
 flowchart TD
     N0([Start]) --> N1[Idle]
-
     N1 -->|restart| N2[Step1LoosenGripper]
     N2 -->|open command recorded| N3[Step2WaitGripperRespond]
     N3 -->|gripper wait elapsed| N4[Step3UpFirstJoint]
 
-    N4 -->|motion completed| N5[Step4MoveSecondJoint]
-    N5 -->|motion completed| N6[Step5DownFirstJoint]
-    N6 -->|motion completed| N7[Step6MoveSecondJoint]
-    N7 -->|motion completed| N8[Step7CheckIfCableDisconnected]
+    N4 -->|motion completed| N5[Step5DownFirstJoint]
+    N5 -->|motion completed| N8[Step7CheckIfCableDisconnected]
 
-    N8 -->|check passed| N9([Done])
-    N8 -->|check failed| N10[Step8ReturnToZero]
-
-    N10 -->|motion completed| N11[Failed]
-
-    N11 -->|retry below limit| N2
-    N11 -->|retry limit reached| N12[ManualIntervention]
+    N8 -->|velocity settled| N9([Done])
+    N8 -->|validation failed| N10[Failed hold]
+    N10 --> N11[ManualIntervention\nno return / no retry]
 ```
 
 脱缆步骤命令细节：
@@ -554,12 +524,9 @@ flowchart TD
 | `Step1LoosenGripper` | `disconnect_<side>_step1_loosen_gripper` | 当前侧夹爪 `OPEN` | `DisconnectCableProcess::update()` 将 step 转入 `Step2WaitGripperRespond` |
 | `Step2WaitGripperRespond` | `disconnect_<side>_step2_wait_gripper` | 等待夹爪响应 | 超过 `crossing_config_.wait_for_grip_respond_time` 后 step -> `Step3UpFirstJoint` |
 | `Step3UpFirstJoint` | `disconnect_<side>_step3_up_first_joint` | 第一关节插值到 `obstacle_crossing/disconnect_cable_first_joint_up_position` | `applyMotionSegment()` |
-| `Step4MoveSecondJoint` | `disconnect_<side>_step4_move_second_joint` | 第二关节插值到 `obstacle_crossing/disconnect_cable_second_joint_move_position` | `applyMotionSegment()` |
 | `Step5DownFirstJoint` | `disconnect_<side>_step5_down_first_joint` | 第一关节插值到 `obstacle_crossing/disconnect_cable_first_joint_down_position` | `applyMotionSegment()` |
-| `Step6MoveSecondJoint` | `disconnect_<side>_step6_move_second_joint` | 第二关节从步骤起点相对 `obstacle_crossing/disconnect_cable_second_joint_check_delta` | 记录 `to_check_joint_pos_ = 当前第二关节反馈位置` |
-| `Step7CheckIfCableDisconnected` | `disconnect_<side>_step7_check_disconnect` | 检测脱缆是否成功 | 判断 `abs(current_pos - to_check_joint_pos_) >= obstacle_crossing/disconnect_cable_second_joint_success_threshold` |
-| `Step8ReturnToZero` | `disconnect_<side>_step8_return_to_zero` | 第一和第二关节插值回 `0.0` | 完成后 step -> `Failed` |
-| `Failed` | 沿用上一帧或由上层覆盖 | 增加当前侧 retry | 小于 `crossing_config_.retry_limit` 重试；达到上限进人工干预 |
+| `Step7CheckIfCableDisconnected` | `disconnect_<side>_step7_check_disconnect` | 检测脱缆后的稳定状态 | 只要求三个位姿关节最大绝对速度连续 `disconnect_settle_duration` 不超过 `disconnect_settle_velocity_threshold`。不检查固定关节角度，自由臂 second joint 不参与速度门控。 |
+| `Failed` | `disconnect_<side>_failed` | 使用当前关节反馈保持 | 上层立即进入 `ManualIntervention`，不重试 |
 
 当前侧与实际动作关节映射：
 
@@ -579,8 +546,8 @@ flowchart TD
 
 ## 6. 动作平滑机制
 
-`Step3`、`Step4`、`Step5`、`Step6`、`Step8` 由 `DisconnectCableProcess::applyMotionSegment()` 平滑插值。
-每个动作以进入该 step 时的 effective target 作为起点；Step3--Step6 的目标由
+`Step3`、`Step5` 由 `DisconnectCableProcess::applyMotionSegment()` 平滑插值。
+每个动作以进入该 step 时的 effective target 作为起点；first joint 抬升/回落目标由
 `CrossingSideProfile::motion_sign` 统一乘以侧别符号，避免在 controller 中分别维护左右方向分支。
 
 ```mermaid
@@ -668,9 +635,9 @@ controller 追加的 trace 字段：
 
 | 动作 | 计数变量 | 上限 | 成功清零位置 |
 |---|---|---|---|
-| 双夹爪闭合 | `retry_counts_.close_grippers` | `obstacle_crossing/retry_limit` | `CloseBothGrippers` 中 `isGripConfirmed()` 成功 |
-| 左脱缆 | `retry_counts_.disconnect[0]` | `obstacle_crossing/retry_limit` | Step7 成功且 `crossing_side_ == Left` |
-| 右脱缆 | `retry_counts_.disconnect[1]` | `obstacle_crossing/retry_limit` | Step7 成功且 `crossing_side_ == Right` |
+| 双夹爪闭合 | `retry_counts_.close_grippers` | 不自动重试 | 兼容状态，不作为当前自动入口 |
+| 左脱缆 | `retry_counts_.disconnect[0]` | 不自动重试 | 失败直接人工介入 |
+| 右脱缆 | `retry_counts_.disconnect[1]` | 不自动重试 | 失败直接人工介入 |
 | 左回夹 | `retry_counts_.regrip[0]` | `obstacle_crossing/retry_limit` | `Regrip` 中左侧 `isGripConfirmed()` 成功 |
 | 右回夹 | `retry_counts_.regrip[1]` | `obstacle_crossing/retry_limit` | `Regrip` 中右侧 `isGripConfirmed()` 成功 |
 
@@ -689,7 +656,7 @@ controller 追加的 trace 字段：
 | `first_crossing_side_` | `CrossingSide` | 本次越障首侧，由双轮实际位置反馈的有符号净行程确定，并决定 FirstSide / SecondSide 顺序 |
 | `failed_operation_` | `FailedOperation` | 进入人工干预的失败动作 |
 | `crossing_runtime_` | `ObstacleCrossingRuntime` | 主阶段、侧别、retry、人工恢复、夹爪确认门控和重力补偿锁存 |
-| `disconnect_cable_process_` | `DisconnectCableProcess` | 脱缆步骤、步骤计时、Step6 参考位置、插值和成功/失败事件 |
+| `disconnect_cable_process_` | `DisconnectCableProcess` | 脱缆步骤、步骤计时、插值和 Step7 稳定结果 |
 | `CrossingSideProfile` | `CrossingSideProfile` | 当前夹爪、对侧两关节、重力补偿模式和 `motion_sign` |
 | `last_effective_joint_targets_` | `array<double, 6>` | 非人工干预阶段保持上一帧目标，避免每帧从反馈重置动作起点 |
 | `has_last_effective_joint_targets_` | `bool` | 上一帧目标是否有效 |
@@ -708,9 +675,8 @@ controller 追加的 trace 字段：
 
 越障运动与安全参数的唯一配置来源是 `b29_control/config/controller.yaml`；Planner 模式的唯一入口是
 `start.launch` 的 `planner_mode` 参数，launch 会覆盖 `planner_interface/mode` 和
-`debug_validation/enabled`。`PlannerControlCoordinator` 由模式推导是否允许手动放行，不再读取独立的 `planner_control/manual_release_enabled`。`start.launch` 在启动时加载该文件；`start_in_gazebo.launch` 和
-`start_in_empty_gazebo.launch` 虽也加载该文件，但当前不启动
-`b29_smc_auto_controller`，不能用于越障 FSM 验证。
+`debug_validation/enabled`。`PlannerControlCoordinator` 由模式推导是否允许手动放行，不再读取独立的 `planner_control/manual_release_enabled`。
+`start.launch` 是 B29 当前唯一启动入口；Gazebo 专用 launch 已移除。
 
 `obstacle_crossing.yaml` 和 `start_smc_in_gazebo.launch` 已删除，不存在额外的
 越障参数覆盖层。修改 `obstacle_crossing/...`、`remote_control/...`、
@@ -729,16 +695,10 @@ controller 追加的 trace 字段：
 - `disconnect_right_step2_wait_gripper`
 - `disconnect_left_step3_up_first_joint`
 - `disconnect_right_step3_up_first_joint`
-- `disconnect_left_step4_move_second_joint`
-- `disconnect_right_step4_move_second_joint`
 - `disconnect_left_step5_down_first_joint`
 - `disconnect_right_step5_down_first_joint`
-- `disconnect_left_step6_move_second_joint`
-- `disconnect_right_step6_move_second_joint`
 - `disconnect_left_step7_check_disconnect`
 - `disconnect_right_step7_check_disconnect`
-- `disconnect_left_step8_return_to_zero`
-- `disconnect_right_step8_return_to_zero`
 - `planner_left_wait`
 - `planner_right_wait`
 - `planner_left_control`
@@ -760,17 +720,17 @@ sequenceDiagram
   participant HW as CommandDispatcher/HW
 
   RFSM->>CTRL: current_state = Traversing
-  CTRL->>CTRL: obstacle within kCrossObstaclesDistanceM
-  CTRL->>CTRL: Idle -> CloseBothGrippers
-  CTRL->>HW: stop wheels, Left/Right Gripper CLOSED
-  CTRL->>CTRL: grip_confirmed == true
+  CTRL->>CTRL: obstacle trigger rising edge / start_disconnect
+  CTRL->>CTRL: signed wheel travel selects FirstSide
+  CTRL->>CTRL: Idle -> OpenGripperBeforeGravityCompensation
+  CTRL->>HW: stop wheels, FirstSide Gripper OPEN
   CTRL->>CTRL: enterOpenGripperBeforeGravityCompensation(FirstSide)
   CTRL->>HW: FirstSide gripper OPEN, gravity compensation OFF
   CTRL->>CTRL: wait for grip respond time
   CTRL->>CTRL: enterEnableGravityCompensation(FirstSide)
   CTRL->>HW: keep FirstSide OPEN, enable opposite first-leg compensation
   CTRL->>CTRL: enterDisconnecting(FirstSide)
-  CTRL->>HW: FirstSide gripper OPEN, disconnect steps 1..8 as needed
+  CTRL->>HW: FirstSide gripper OPEN, Step3/Step5 first-joint motion
   CTRL->>CTRL: Step7 success
   CTRL->>CTRL: next control cycle enters PlannerControl(FirstSide)
   PLAN->>CTRL: PlannerJointCommand(session, sequence)
@@ -863,7 +823,7 @@ PlannerControl 正式与调试退出方式互斥：
 新增 trace 包含：
 
 - 主 FSM 和脱缆 Step 的进入时间、持续时间、转换原因
-- Step7 位移判断值、阈值、检查起点
+- Step7 三关节最大速度、速度阈值和稳定持续时间
 - 五组 retry 计数和三组上限
 - Planner 点 available/fresh、是否实际覆盖 effective targets
 - RemoteControl 原始/截断增量、累计目标、样本序号和完成上升沿

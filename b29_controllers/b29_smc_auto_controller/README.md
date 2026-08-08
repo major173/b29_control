@@ -20,9 +20,10 @@
 
 - `ObstacleCrossingRuntime` 持有越障主阶段、左右侧选择、retry、人工介入恢复、
   `grip_confirmed` 的新上升沿门控及重力补偿锁存。
-- `DisconnectCableProcess` 持有脱缆步骤、Step3--Step8 的插值、Step7 位移判定和失败回零结果。
+- `DisconnectCableProcess` 持有锁定臂 first joint 抬升/回落插值和 Step7 三个位姿关节
+  低速稳定判定。
 - `CrossingSideProfile` 统一声明当前侧夹爪、实际执行的对侧两个腿部关节、重力补偿模式以及
-  `motion_sign`。Step3、Step4、Step5 和 Step6 都按该符号输出目标。
+  `motion_sign`。first joint 抬升和回落都按该符号输出目标。
 - `PlannerControlCoordinator` 持有固定的 `normal` / `debug` 模式，协调 PlannerControl
   的会话进入与退出、完成/超时、调试放行和 dispatcher 后 ACK；其内部的 `PlannerSession`
   只负责正式 Planner 协议的 session、sequence 和点校验。
@@ -353,6 +354,81 @@
 
 `RemoteControl` 中停止驱动轮、保持当前侧夹爪张开、保持当前侧重力补偿策略。只有进入当前阶段后新的完成信号 `0 -> 1` 上升沿才进入 `Regrip`。回夹失败但未达 `retry_limit` 时，先进入 `ReopenBeforeRemoteControl` 张开夹爪，再回到 `RemoteControl`，不会重新执行 Planner。
 
+## 独立自动脱缆测试入口
+
+`normal` 模式额外订阅相对控制器命名空间的 `start_disconnect`（`std_msgs/Empty`）。
+请求只在越障运行时空闲、外层状态为 `Idle` 或 `Traversing`，且下位机在线、IMU/姿态就绪、
+无关节/夹爪故障和急停时接受。正常协议还要求双夹爪锁紧确认；当前临时参数
+`temporary_allow_start_without_grip_confirmed` 只绕过这一个启动门槛，不修改运行时真实的
+`grip_confirmed`。接受后根据双轮有符号净行程选择首侧，
+跳过 `CloseBothGrippers` 的新上升沿门控，直接进入首侧夹爪张开和重力补偿流程。
+
+脱缆现在只运动锁定臂的 first joint：先抬升到 `disconnect_cable_first_joint_up_position`，
+再回到 `disconnect_cable_first_joint_down_position`。不再移动锁定臂 second joint，
+也不再用 second joint 位移作为成功条件。Step7 只要求影响位姿的三个关节最大绝对速度连续
+`disconnect_settle_duration` 时间不超过 `disconnect_settle_velocity_threshold`；自由臂 second joint
+仍不参与三关节速度门控。成功后短暂停在 `DisconnectDoneWaitFlip`：轮子停止、当前侧夹爪保持打开、
+关节保持最后目标、当前侧重力补偿继续锁存。`start.launch` 默认启动
+`gp11_automatic_flip`，它检测到该状态后读取 SMC 当前锁存侧别，选择对应锚点的
+180 度目标点规划、审计并执行，不需要人工传递 plan_id，也不再需要单独运行翻越命令。
+
+完整流程只需要启动工程并发送一次脱缆开始命令。若要重新进行独立分段测试，可关闭自动节点：
+
+```bash
+roslaunch b29_control start.launch launch_automatic_flip:=false
+rosrun gp11 gp11_single_flip.py
+```
+
+该命令只接受 `DisconnectDoneWaitFlip/Right` 状态。规划或安全门禁失败时不会发布轨迹；
+轨迹执行成功后由 adapter 完成 PlannerControl 握手并自动进入 `RemoteControl`。此时控制器消费
+下位机反馈帧中的四关节遥控增量；进入该阶段后的新完成信号上升沿会进入 `Regrip`，上位机立即
+命令当前打开的右夹爪闭合。
+
+`start.launch` 默认启动只读轻量黑匣子 `b29_disconnect_blackbox`，以 20 Hz 记录四个腿部关节的位置、
+速度和目标，以及脱缆 Step 和速度稳定门控。文件写入
+`~/.ros/b29_disconnect_blackbox`；可用 `launch_disconnect_blackbox:=false` 关闭。
+
+后续翻越中，锁定臂 second joint 由目标点和 MoveIt 轨迹决定；目标点的实际表现可能接近逆时针
+180 度，但不能在执行层简单写成当前位置固定加 `pi`。自由臂 second joint 的顺时针预转另行生成。
+
+## 正式 PlannerControl 接口
+
+`normal` 模式通过 `planner_interface/mode: normal` 启用三项强类型接口：
+
+- `planner_control_state`：50 Hz 发布会话 ID、当前侧、接收许可、接受/拒绝序号、delta 上限、命令超时和退出原因。
+- `planner_joint_command`：接收带 `session_id` 和严格递增 `sequence` 的四关节目标。
+- `complete_planner_control`：校验当前会话和最后接受序号后，将完成请求交给下一控制周期处理。
+
+四关节顺序固定为 `[left_first, left_second, right_first, right_second]`。每次进入 `PlannerControl` 时 `session_id` 递增，首点相对实时关节位置、后续点相对上一接受点都必须满足 `planner_interface/max_delta_per_command`。同序号同内容重发是幂等操作；同序号不同内容、旧会话、跳号、陈旧时间戳、NaN/Inf 和 delta 超限会被拒绝。
+
+合法点在 callback 中先进入单槽 pending。只有该点成为 effective command，并在 `output_mode=normal`、关节未冻结时由 `CommandDispatcher` 写入关节句柄后，`last_accepted_sequence` 才推进并在同一 update 周期发布；因此下一点不能覆盖尚未实际下发的一点。
+
+`normal` 模式不使用固定时间退出 PlannerControl。完成服务请求在控制周期中确认后，Planner 会话以 `EXIT_COMPLETED` 结束，越障 FSM 进入 `RemoteControl`，而不是直接进入 `Regrip`。`planner_interface/total_watchdog_timeout` 到期会进入 `ManualIntervention`。
+
+这里有两种不同的超时：
+
+- `planner_interface/command_timeout`：最近接受点超过该时长后不再作为新鲜 Planner 覆盖，但控制器仍保持最后下发目标，并允许接收同会话的下一新鲜序号。
+- `planner_interface/total_watchdog_timeout`：限制整个 PlannerControl 会话时长；到期后撤销 Planner 权限并进入人工干预。
+
+`state_trace` 继续用于观测，`planner_release` 只用于 `debug` 模式放行；`normal` 模式调用该服务会被明确拒绝。正式 adapter 的实现和配置见 `b29_planner_adapter` 包。
+
+## Planner 后人工遥控
+
+`RemoteControlInterface` 在 `normal` 和 `debug` 模式下都只从下位机反馈帧读取
+`[left_first, left_second, right_first, right_second]` 四个位置增量和阶段完成信号；
+`AutoDebugOverride` 不包含遥控增量或完成信号字段，也不会覆盖该接口。原始增量单位为 `rad`，
+每个新反馈样本只处理一次。原始增量先经过
+`remote_control/increment_deadband` 死区过滤，再乘以 `remote_control/increment_scale`，最后按
+`remote_control/joint_direction_signs` 进行方向映射，之后按
+`remote_control/max_increment_per_sample` 逐关节截断并累加到目标位置；处理后的增量才与
+`joint_targets` 同方向。默认缩放系数为 `0.02`，用于降低反馈帧持续累加造成的遥控灵敏度。
+
+四关节方向通过 `remote_control/joint_direction_signs` 统一映射，顺序为
+`[left_first, left_second, right_first, right_second]`。当前实机映射为 `[-1, +1, +1, +1]`：
+只反转左一关节的遥控增量，其他三个关节保持下位机输入方向。
+
+`RemoteControl` 中停止驱动轮、保持当前侧夹爪张开、保持当前侧重力补偿策略。只有进入当前阶段后新的完成信号 `0 -> 1` 上升沿才进入 `Regrip`。回夹失败但未达 `retry_limit` 时，先进入 `ReopenBeforeRemoteControl` 张开夹爪，再回到 `RemoteControl`，不会重新执行 Planner。
+
 ## 运行与调试
 
 启动控制器：
@@ -366,7 +442,7 @@ roslaunch b29_control start.launch planner_mode:=normal
 - `/b29_controller/b29_smc_auto_controller/debug_override`
 - `/b29_controller/b29_smc_auto_controller/sensor_input`
 
-`start.launch` 的 `planner_mode` 是 SMC 与 Adapter 的唯一模式入口：`normal` 启用正式 Planner 会话并关闭调试门禁；`debug` 启用调试门禁和 `planner_release`。`debug_override` 仅在调试门禁开启时生效。越障调试、Planner 手动放行和软件急停命令见
+`start.launch` 的 `planner_mode` 是 SMC 与 Adapter 的主要模式入口：`normal` 启用正式 Planner 会话并默认关闭调试门禁；`debug` 启用调试门禁和 `planner_release`。当前下位机夹紧确认通信尚未完成，因此 `start.launch` 暂时默认启用 `temporary_allow_start_without_grip_confirmed`；它只绕过 `start_disconnect` 的夹紧确认入口，不伪造运行时状态。通信完成后必须把该默认值恢复为 `false`。`debug_override` 仅在调试门禁开启时生效。越障调试、Planner 手动放行和软件急停命令见
 `b29_control/docs/b29_smc_obstacle_crossing_debug_validation.md`。
 
 状态追踪 topic：
@@ -402,10 +478,8 @@ roslaunch b29_control start.launch planner_mode:=normal
 
 ## Gazebo 边界
 
-当前工作区没有会启动 `b29_smc_auto_controller` 的 Gazebo 专用 launch。
-`start_in_gazebo.launch` 和 `start_in_empty_gazebo.launch` 只加载传统关节控制器，不能用于验证
-RobotFSM、越障 FSM、PlannerControl、RemoteControl 或本控制器的 `state_trace`。已删除的
-`start_smc_in_gazebo.launch` 及其 debug overlay 也不能作为启动入口。
+Gazebo 专用 launch、配置和 debug overlay 已从 B29 工作区移除；
+RobotFSM、越障 FSM、PlannerControl、RemoteControl 和 `state_trace` 只通过真机 `start.launch` 验证。
 
 越障状态机的调试入口、模式选择和安全边界以
 `b29_control/docs/b29_smc_obstacle_crossing_debug_validation.md` 为准。

@@ -69,6 +69,7 @@ enum class ObstacleCrossingStage : uint8_t
   OpenGripperBeforeGravityCompensation,
   EnableGravityCompensation,
   Disconnecting,
+  DisconnectDoneWaitFlip,
   PlannerControl,
   RemoteControl,
   Regrip,

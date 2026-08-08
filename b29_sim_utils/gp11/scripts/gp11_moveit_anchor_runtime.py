@@ -375,7 +375,18 @@ class MoveItAnchorRuntime(object):
         rospy.set_param(ns + "/robot_description", robot_description_xml)
         with open(self._srdf_paths[side], "r") as stream:
             rospy.set_param(ns + "/robot_description_semantic", stream.read())
-        rospy.set_param(ns + "/robot_description_kinematics", self._load_yaml(self._kinematics_path))
+        kinematics = self._load_yaml(self._kinematics_path)
+        rospy.set_param(ns + "/robot_description_kinematics", kinematics)
+        # MoveGroup may deliberately run outside the private model namespace.
+        # Its KDL plugin searches robot_description_kinematics in the node
+        # namespace even though the planning-scene monitor loads the anchored
+        # robot_description by absolute name.  Keep the same commissioned
+        # position-only IK configuration visible in both places.
+        move_group_kinematics = (
+            self._move_group_namespace + "/robot_description_kinematics"
+        )
+        if move_group_kinematics != ns + "/robot_description_kinematics":
+            rospy.set_param(move_group_kinematics, kinematics)
         rospy.set_param(ns + "/robot_description_planning", self._load_yaml(self._joint_limits_path))
 
         move_group_params = {

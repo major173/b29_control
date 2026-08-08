@@ -36,9 +36,12 @@ class PlanDirectionAudit(object):
         self._large_flip_threshold = float(
             rospy.get_param("~large_flip_threshold", math.radians(150.0))
         )
-        self._large_flip_right_second_target = float(
-            rospy.get_param("~large_flip_right_second_target", math.pi)
-        )
+        self._left_anchor_free_second_target = float(rospy.get_param(
+            "~left_anchor_free_second_target", -math.pi
+        ))
+        self._right_anchor_free_second_delta = float(rospy.get_param(
+            "~right_anchor_free_second_delta", -math.pi
+        ))
         rospy.Subscriber("/joint_states", JointState, self._joint_state_cb, queue_size=10)
         rospy.Subscriber(
             "/gp11_moveit/runtime_anchor", String, self._anchor_cb, queue_size=1
@@ -103,26 +106,51 @@ class PlanDirectionAudit(object):
             len(trajectory.points),
             final.time_from_start.to_sec(),
         )
-        left_second = "left_second_leg_joint"
-        if (anchor == "left" and left_second in planned_goal and left_second in live):
-            raw_delta = planned_goal[left_second] - live[left_second]
+        support_second = {
+            "left": "left_second_leg_joint",
+            "right": "right_second_leg_joint",
+        }.get(anchor, "")
+        free_second = {
+            "left": "right_second_leg_joint",
+            "right": "left_second_leg_joint",
+        }.get(anchor, "")
+        support_direction = {
+            "left": 1.0,
+            "right": 1.0,
+        }.get(anchor, 0.0)
+        if (support_second in planned_goal and support_second in live):
+            raw_delta = planned_goal[support_second] - live[support_second]
             shortest_delta = math.atan2(math.sin(raw_delta), math.cos(raw_delta))
-            if abs(shortest_delta) > self._large_flip_threshold:
+            directed_delta = support_direction * raw_delta
+            if directed_delta > self._large_flip_threshold:
+                expected_free_goal = self._left_anchor_free_second_target
+                if anchor == "right" and free_second in live:
+                    expected_free_goal = (
+                        live[free_second] + self._right_anchor_free_second_delta
+                    )
                 rospy.logwarn(
-                    "[plan direction audit] RIGHT_SECOND_OVERRIDE_WILL_TRIGGER: "
-                    "|left_second delta|=%.3fdeg > %.3fdeg; Execute will replace "
-                    "MoveIt right_second with a smooth target of %+.3fdeg",
-                    abs(self._degrees(shortest_delta)),
+                    "[plan direction audit] FREE_SECOND_FIX_WILL_TRIGGER: "
+                    "anchor=%s %s directed_delta=%+.3fdeg > %.3fdeg; "
+                    "Execute will command %s clockwise toward %+.3fdeg",
+                    anchor,
+                    support_second,
+                    self._degrees(directed_delta),
                     self._degrees(self._large_flip_threshold),
-                    self._degrees(self._large_flip_right_second_target),
+                    free_second,
+                    self._degrees(expected_free_goal),
                 )
             else:
                 rospy.logwarn(
-                    "[plan direction audit] RIGHT_SECOND_OVERRIDE_WILL_NOT_TRIGGER: "
-                    "|left_second delta|=%.3fdeg <= %.3fdeg; Execute will preserve "
-                    "MoveIt right_second",
-                    abs(self._degrees(shortest_delta)),
+                    "[plan direction audit] FREE_SECOND_FIX_WILL_NOT_TRIGGER: "
+                    "anchor=%s %s raw_delta=%+.3fdeg shortest=%+.3fdeg "
+                    "directed=%+.3fdeg <= %.3fdeg; required direction=%+.0f",
+                    anchor,
+                    support_second,
+                    self._degrees(raw_delta),
+                    self._degrees(shortest_delta),
+                    self._degrees(directed_delta),
                     self._degrees(self._large_flip_threshold),
+                    support_direction,
                 )
         for name in LEG_JOINTS:
             if name not in planned_goal:

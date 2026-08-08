@@ -4,7 +4,6 @@ devel/
 logs/
 build_isolated/
 devel_isolated/
-b29_smc_auto_controller/test/
 
 # Python 缓存
 __pycache__/

@@ -19,6 +19,7 @@
 #include <ros/ros.h>
 #include <sensor_msgs/Imu.h>
 #include <sensor_msgs/JointState.h>
+#include <std_msgs/Empty.h>
 #include <std_srvs/Trigger.h>
 
 #include <b29_smc_auto_controller/auto_input_mux.h>
@@ -81,6 +82,10 @@ private:
   void dispatchAndPublish(const ros::Time& time, const AutoControlCommand& command);
   void sensorInputCallback(const AutoSensorInput::ConstPtr& msg);
   void debugOverrideCallback(const AutoDebugOverride::ConstPtr& msg);
+  void startDisconnectCallback(const std_msgs::Empty::ConstPtr& msg);
+  void startFlipCallback(const std_msgs::Empty::ConstPtr& msg);
+  void processStartDisconnectRequest(const AutoInputSnapshot& snapshot);
+  void processStartFlipRequest(const AutoInputSnapshot& snapshot);
   void plannerJointCommandCallback(const PlannerJointCommand::ConstPtr& msg);
   bool plannerReleaseCallback(std_srvs::Trigger::Request& request, std_srvs::Trigger::Response& response);
   bool completePlannerControlCallback(CompletePlannerControl::Request& request,
@@ -134,6 +139,7 @@ private:
   InputSource input_source_{InputSource::AutoStateInterface};
   bool debug_validation_enabled_{false};
   bool simulation_only_{false};
+  bool temporary_allow_start_without_grip_confirmed_{false};
 
   ObstacleCrossingRuntime crossing_runtime_{};
   DisconnectCableProcess disconnect_cable_process_{};
@@ -162,6 +168,8 @@ private:
   std::uint64_t debug_override_sequence_{0};
   ros::Subscriber sensor_input_sub_;
   ros::Subscriber debug_override_sub_;
+  ros::Subscriber start_disconnect_sub_;
+  ros::Subscriber start_flip_sub_;
   ros::Subscriber planner_joint_command_sub_;
   ros::Publisher state_trace_pub_;
   ros::Publisher planner_control_state_pub_;
@@ -175,6 +183,10 @@ private:
   AutoDebugOverride applied_debug_override_{};
   std::atomic<bool> software_emergency_stop_latched_{false};
   std::atomic<bool> manual_reset_requested_{false};
+  std::atomic<bool> start_disconnect_requested_{false};
+  std::atomic<bool> start_flip_requested_{false};
+  bool start_disconnect_event_pending_{false};
+  bool start_flip_event_pending_{false};
   PlannerControlCoordinator::DispatchTicket planner_dispatch_ticket_{};
   bool command_dispatch_attempted_{false};
   bool command_dispatch_succeeded_{false};

@@ -26,17 +26,15 @@ ObstacleCrossingRuntime::Actions ObstacleCrossingRuntime::update(const ros::Time
   else
   {
     obstacle_trigger_rising_edge_ =
-        (!previous_obstacle_crossing_trigger_ &&
-         inputs.obstacle_crossing_trigger) ||
+        (!previous_obstacle_crossing_trigger_ && inputs.obstacle_crossing_trigger) ||
         (inputs.obstacle_trigger_edge_sequences_valid &&
          inputs.obstacle_trigger_rising_edge_sequence !=
-            last_obstacle_trigger_rising_edge_sequence_);
+             last_obstacle_trigger_rising_edge_sequence_);
     obstacle_trigger_falling_edge_ =
-        (previous_obstacle_crossing_trigger_ &&
-         !inputs.obstacle_crossing_trigger) ||
+        (previous_obstacle_crossing_trigger_ && !inputs.obstacle_crossing_trigger) ||
         (inputs.obstacle_trigger_edge_sequences_valid &&
          inputs.obstacle_trigger_falling_edge_sequence !=
-            last_obstacle_trigger_falling_edge_sequence_);
+             last_obstacle_trigger_falling_edge_sequence_);
     previous_obstacle_crossing_trigger_ = inputs.obstacle_crossing_trigger;
     last_obstacle_trigger_rising_edge_sequence_ =
         inputs.obstacle_trigger_rising_edge_sequence;
@@ -51,17 +49,21 @@ ObstacleCrossingRuntime::Actions ObstacleCrossingRuntime::update(const ros::Time
 
   if (stage_ == ObstacleCrossingStage::Idle)
   {
-    if (inputs.traversing && obstacle_trigger_rising_edge_)
+    const bool lower_triggered_start =
+        inputs.traversing && obstacle_trigger_rising_edge_;
+    if (events.start_disconnect_requested || lower_triggered_start)
     {
       retry_counts_.reset();
       failed_operation_ = FailedOperation::None;
       last_failure_reason_.clear();
-      first_crossing_side_ = firstSideFromSignedWheelTravel(inputs.signed_wheel_travel);
+      first_crossing_side_ =
+          firstSideFromSignedWheelTravel(inputs.signed_wheel_travel);
       crossing_side_ = first_crossing_side_;
-      transition(ObstacleCrossingStage::CloseBothGrippers, time,
-                 "obstacle_trigger_rising_edge");
-      gripper_wait_start_time_ = time;
-      grip_confirmation_low_seen_ = !inputs.grip_confirmed;
+      grip_confirmation_low_seen_ = false;
+      enterOpenGripperBeforeGravityCompensation(
+          crossing_side_, time,
+          lower_triggered_start ? "obstacle_trigger_rising_edge"
+                                : "start_disconnect_requested");
     }
     refreshGravityCompensationLatch();
     return actions;
@@ -78,17 +80,10 @@ ObstacleCrossingRuntime::Actions ObstacleCrossingRuntime::update(const ros::Time
       }
       else if (gripWaitElapsed(time))
       {
-        ++retry_counts_.close_grippers;
-        if (retry_counts_.close_grippers >= config_.retry_limit)
-        {
-          last_failure_reason_ = "close_both_grippers_retry_limit_reached";
-          enterManualIntervention(FailedOperation::CloseBothGrippers, first_crossing_side_, time, actions,
-                                  "retry_limit_reached");
-        }
-        else
-        {
-          gripper_wait_start_time_ = time;
-        }
+        last_failure_reason_ = "close_both_grippers_confirmation_timeout";
+        enterManualIntervention(FailedOperation::CloseBothGrippers,
+                                first_crossing_side_, time, actions,
+                                "grip_confirmation_timeout_no_retry");
       }
       break;
     case ObstacleCrossingStage::OpenGripperBeforeGravityCompensation:
@@ -109,33 +104,25 @@ ObstacleCrossingRuntime::Actions ObstacleCrossingRuntime::update(const ros::Time
         {
           *retry_count = 0;
         }
-        transition(ObstacleCrossingStage::PlannerControl, time, "disconnect_completed");
+        transition(ObstacleCrossingStage::DisconnectDoneWaitFlip, time,
+                   "disconnect_completed_waiting_flip_start");
         actions.reset_disconnect_process = true;
-        actions.planner_action = PlannerAction::Start;
+        actions.disconnect_succeeded_wait_flip_entered = true;
       }
       else if (events.disconnect == DisconnectCableProcess::Outcome::Failed)
       {
-        int* retry_count = retryCounter(FailedOperation::DisconnectCable, crossing_side_);
-        if (retry_count == nullptr)
-        {
-          enterManualIntervention(FailedOperation::DisconnectCable, crossing_side_, time, actions,
-                                  "disconnect_invalid_side");
-        }
-        else
-        {
-          ++(*retry_count);
-          if (*retry_count >= config_.retry_limit)
-          {
-            last_failure_reason_ = std::string("disconnect_") + crossingSideReasonName(crossing_side_) +
-                                   "_retry_limit_reached";
-            enterManualIntervention(FailedOperation::DisconnectCable, crossing_side_, time, actions,
-                                    "retry_limit_reached");
-          }
-          else
-          {
-            actions.restart_disconnect_process = true;
-          }
-        }
+        last_failure_reason_ = std::string("disconnect_") + crossingSideReasonName(crossing_side_) +
+                               "_validation_failed_hold";
+        enterManualIntervention(FailedOperation::DisconnectCable, crossing_side_, time, actions,
+                                "disconnect_validation_failed_hold");
+        actions.disconnect_failed_hold_entered = true;
+      }
+      break;
+    case ObstacleCrossingStage::DisconnectDoneWaitFlip:
+      if (events.start_flip_requested)
+      {
+        transition(ObstacleCrossingStage::PlannerControl, time, "start_flip_requested");
+        actions.planner_action = PlannerAction::Start;
       }
       break;
     case ObstacleCrossingStage::PlannerControl:
@@ -161,6 +148,7 @@ ObstacleCrossingRuntime::Actions ObstacleCrossingRuntime::update(const ros::Time
       if (events.remote_control_completion_rising_edge)
       {
         transition(ObstacleCrossingStage::Regrip, time, "remote_control_completion_rising_edge");
+        actions.remote_control_completed_regrip_entered = true;
         gripper_wait_start_time_ = time;
         grip_confirmation_low_seen_ = !inputs.grip_confirmed;
       }
@@ -224,6 +212,10 @@ ObstacleCrossingRuntime::Actions ObstacleCrossingRuntime::update(const ros::Time
       }
       break;
     case ObstacleCrossingStage::ManualIntervention:
+      if (failed_operation_ == FailedOperation::DisconnectCable)
+      {
+        break;
+      }
       if (inputs.grip_confirmed)
       {
         const FailedOperation operation = failed_operation_;
@@ -400,6 +392,7 @@ void ObstacleCrossingRuntime::refreshGravityCompensationLatch()
   {
     case ObstacleCrossingStage::EnableGravityCompensation:
     case ObstacleCrossingStage::Disconnecting:
+    case ObstacleCrossingStage::DisconnectDoneWaitFlip:
     case ObstacleCrossingStage::PlannerControl:
     case ObstacleCrossingStage::RemoteControl:
     case ObstacleCrossingStage::Regrip:
@@ -514,7 +507,8 @@ CrossingSide ObstacleCrossingRuntime::oppositeSide(CrossingSide side)
   return CrossingSide::None;
 }
 
-CrossingSide ObstacleCrossingRuntime::firstSideFromSignedWheelTravel(double signed_wheel_travel)
+CrossingSide ObstacleCrossingRuntime::firstSideFromSignedWheelTravel(
+    double signed_wheel_travel)
 {
   if (signed_wheel_travel < 0.0)
   {

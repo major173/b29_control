@@ -42,7 +42,7 @@ private:
     std::string joint_states_topic{"/joint_states"};
     double publish_rate{50.0};
     double time_scale{1.0};
-    double max_output_delta{0.10};
+    double max_output_delta{0.05};
     JointVector start_tolerance{{0.08, 0.08, 0.08, 0.08}};
     JointVector path_tolerance{{0.50, 0.50, 0.50, 0.50}};
     JointVector max_total_displacement{{12.5663706144, 12.5663706144, 12.5663706144,
@@ -55,6 +55,12 @@ private:
     JointVector goal_velocity_tolerance{{0.05, 0.05, 0.05, 0.05}};
     bool require_goal_velocity{true};
     double settle_time{0.5};
+    bool large_flip_completion_enabled{true};
+    double large_flip_min_left_second_displacement{2.6179938779914944};
+    JointVector large_flip_position_tolerance{{0.10, 0.18, 0.12, 0.05}};
+    JointVector large_flip_velocity_tolerance{{0.02, 0.02, 0.02, 0.02}};
+    double large_flip_settle_time{1.0};
+    double large_flip_timeout{20.0};
     double joint_state_timeout{0.5};
     double planner_state_timeout{0.25};
     double command_ack_timeout{1.0};
@@ -113,10 +119,18 @@ private:
   bool validateMotionDirection(const JointVector& desired, const JointStateSnapshot& actual,
                                DirectionSafetyState& state, std::string& error) const;
   bool goalWithinTolerance(const JointVector& desired, const JointStateSnapshot& actual) const;
+  bool largeFlipCompletionApplicable(uint8_t crossing_side, const JointVector& initial_positions,
+                                     const JointVector& final_positions) const;
+  bool largeFlipWithinTolerance(const JointVector& initial_positions,
+                                const JointVector& final_positions, uint8_t crossing_side,
+                                const JointStateSnapshot& actual) const;
   void publishFeedback(const JointVector& desired, const JointStateSnapshot& actual);
-  bool waitForFinalSettle(uint32_t session_id, uint32_t final_sequence, const JointVector& final_positions,
-                          const ros::WallTime& action_deadline, DirectionSafetyState& direction_state,
-                          std::string& error);
+  bool waitForFinalSettle(uint32_t session_id, uint32_t final_sequence,
+                          const JointVector& initial_positions,
+                          const JointVector& final_positions, uint8_t crossing_side,
+                          const ros::WallTime& action_deadline,
+                          DirectionSafetyState& direction_state,
+                          bool& large_flip_completion_used, std::string& error);
   bool requestCompletion(uint32_t session_id, uint32_t final_sequence, std::string& error);
   bool waitForCompletionState(uint32_t session_id, const ros::WallTime& action_deadline,
                               std::string& error);

@@ -40,6 +40,10 @@ catkin_package(
   std_msgs
 )
 
+if(CATKIN_ENABLE_TESTING)
+  catkin_add_nosetests(test/test_dual_anchor_flip.py)
+endif()
+
 catkin_install_python(
   PROGRAMS
     scripts/gp11_moveit_anchor_runtime.py
@@ -50,6 +54,10 @@ catkin_install_python(
     scripts/gp11_real_reach_target.py
     scripts/gp11_b29_attach_bridge.py
     scripts/gp11_cartesian_goal_server.py
+    scripts/gp11_generate_anchored_urdf.py
+    scripts/gp11_moveit_scene_loader.py
+    scripts/gp11_single_flip.py
+    scripts/gp11_automatic_flip.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

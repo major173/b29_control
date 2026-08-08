@@ -46,6 +46,10 @@ bool B29SmcAutoController::init(hardware_interface::RobotHW* robot_hw, ros::Node
   planner_control_state_pub_ = controller_nh.advertise<PlannerControlState>("planner_control_state", 1);
   if (planner_control_coordinator_.isNormalMode())
   {
+    start_disconnect_sub_ = controller_nh.subscribe(
+        "start_disconnect", 1, &B29SmcAutoController::startDisconnectCallback, this);
+    start_flip_sub_ = controller_nh.subscribe(
+        "start_flip", 1, &B29SmcAutoController::startFlipCallback, this);
     planner_joint_command_sub_ = controller_nh.subscribe(
         "planner_joint_command", 1, &B29SmcAutoController::plannerJointCommandCallback, this);
     complete_planner_control_service_ = controller_nh.advertiseService(
@@ -94,6 +98,8 @@ void B29SmcAutoController::update(const ros::Time& time, const ros::Duration& pe
   refreshInputMux(copyCallbackInputs());
   const AutoInputSnapshot snapshot = buildInputSnapshot(time);
   robot_context_.setInputSnapshot(snapshot);
+  processStartDisconnectRequest(snapshot);
+  processStartFlipRequest(snapshot);
 
   robot_context_.tick(period);
 
@@ -171,6 +177,9 @@ bool B29SmcAutoController::loadParameters(ros::NodeHandle& controller_nh)
   controller_nh.param<bool>("use_auto_state", use_auto_state, use_auto_state);
   controller_nh.param<bool>("debug_validation/enabled", debug_validation_enabled_, debug_validation_enabled_);
   controller_nh.param<bool>("debug_validation/simulation_only", simulation_only_, simulation_only_);
+  controller_nh.param<bool>("temporary_allow_start_without_grip_confirmed",
+                            temporary_allow_start_without_grip_confirmed_,
+                            temporary_allow_start_without_grip_confirmed_);
   std::string planner_interface_mode_name{"normal"};
   controller_nh.param<std::string>("planner_interface/mode", planner_interface_mode_name,
                                    planner_interface_mode_name);
@@ -195,12 +204,6 @@ bool B29SmcAutoController::loadParameters(ros::NodeHandle& controller_nh)
   controller_nh.param<double>("obstacle_crossing/disconnect_cable_step_interval",
                               disconnect_config.step_interval,
                               disconnect_config.step_interval);
-  controller_nh.param<double>("obstacle_crossing/disconnect_cable_second_joint_success_threshold",
-                              disconnect_config.succeed_threshold,
-                              disconnect_config.succeed_threshold);
-  controller_nh.param<double>("obstacle_crossing/disconnect_cable_second_joint_check_delta",
-                              disconnect_config.step6_second_joint_delta,
-                              disconnect_config.step6_second_joint_delta);
   controller_nh.param<int>("obstacle_crossing/retry_limit", crossing_config.retry_limit,
                            crossing_config.retry_limit);
   controller_nh.param<double>("obstacle_crossing/disconnect_cable_first_joint_up_position",
@@ -209,9 +212,12 @@ bool B29SmcAutoController::loadParameters(ros::NodeHandle& controller_nh)
   controller_nh.param<double>("obstacle_crossing/disconnect_cable_first_joint_down_position",
                               disconnect_config.step5_first_joint_target,
                               disconnect_config.step5_first_joint_target);
-  controller_nh.param<double>("obstacle_crossing/disconnect_cable_second_joint_move_position",
-                              disconnect_config.step4_second_joint_target,
-                              disconnect_config.step4_second_joint_target);
+  controller_nh.param<double>("obstacle_crossing/disconnect_settle_velocity_threshold",
+                              disconnect_config.settle_velocity_threshold,
+                              disconnect_config.settle_velocity_threshold);
+  controller_nh.param<double>("obstacle_crossing/disconnect_settle_duration",
+                              disconnect_config.settle_duration,
+                              disconnect_config.settle_duration);
   controller_nh.param<double>("remote_control/max_increment_per_sample",
                               remote_control_config.max_increment_per_sample,
                               remote_control_config.max_increment_per_sample);
@@ -391,6 +397,122 @@ void B29SmcAutoController::debugOverrideCallback(const AutoDebugOverride::ConstP
   std::lock_guard<std::mutex> lock(input_mutex_);
   debug_override_ = *msg;
   ++debug_override_sequence_;
+}
+
+void B29SmcAutoController::startDisconnectCallback(const std_msgs::Empty::ConstPtr& msg)
+{
+  if (!msg)
+  {
+    return;
+  }
+  start_disconnect_requested_.store(true);
+}
+
+void B29SmcAutoController::startFlipCallback(const std_msgs::Empty::ConstPtr& msg)
+{
+  if (!msg)
+  {
+    return;
+  }
+  start_flip_requested_.store(true);
+}
+
+void B29SmcAutoController::processStartDisconnectRequest(const AutoInputSnapshot& snapshot)
+{
+  if (!start_disconnect_requested_.exchange(false))
+  {
+    return;
+  }
+
+  std::string rejection_reason;
+  const std::string outer_state = robot_context_.currentStateName();
+  if (crossing_runtime_.stage() != ObstacleCrossingStage::Idle)
+  {
+    rejection_reason = "start_disconnect_rejected_crossing_busy";
+  }
+  else if (outer_state != "Idle" && outer_state != "Traversing")
+  {
+    rejection_reason = "start_disconnect_rejected_outer_state_" + outer_state;
+  }
+  else if (snapshot.emergency_stop)
+  {
+    rejection_reason = "start_disconnect_rejected_emergency_stop";
+  }
+  else if (!snapshot.lower_alive)
+  {
+    rejection_reason = "start_disconnect_rejected_lower_not_alive";
+  }
+  else if (!snapshot.imu_ready)
+  {
+    rejection_reason = "start_disconnect_rejected_imu_not_ready";
+  }
+  else if (!snapshot.grip_confirmed && !temporary_allow_start_without_grip_confirmed_)
+  {
+    rejection_reason = "start_disconnect_rejected_grip_not_confirmed";
+  }
+  else if (snapshot.joint_fault || snapshot.grip_fault)
+  {
+    rejection_reason = "start_disconnect_rejected_hardware_fault";
+  }
+
+  if (!rejection_reason.empty())
+  {
+    crossing_runtime_.reportFailure(rejection_reason);
+    ROS_WARN_STREAM("Rejecting start_disconnect request: " << rejection_reason);
+    return;
+  }
+
+  if (!snapshot.grip_confirmed && temporary_allow_start_without_grip_confirmed_)
+  {
+    ROS_WARN("Accepting start_disconnect without grip_confirmed because the temporary startup bypass is enabled");
+  }
+
+  if (outer_state == "Idle")
+  {
+    robot_context_.requestAutoStart();
+  }
+  start_disconnect_event_pending_ = true;
+  ROS_INFO("Accepted start_disconnect request; crossing side will follow signed wheel travel.");
+}
+
+void B29SmcAutoController::processStartFlipRequest(const AutoInputSnapshot& snapshot)
+{
+  if (!start_flip_requested_.exchange(false))
+  {
+    return;
+  }
+
+  std::string rejection_reason;
+  if (crossing_runtime_.stage() != ObstacleCrossingStage::DisconnectDoneWaitFlip)
+  {
+    rejection_reason = "start_flip_rejected_not_waiting_after_disconnect";
+  }
+  else if (snapshot.emergency_stop)
+  {
+    rejection_reason = "start_flip_rejected_emergency_stop";
+  }
+  else if (!snapshot.lower_alive)
+  {
+    rejection_reason = "start_flip_rejected_lower_not_alive";
+  }
+  else if (!snapshot.imu_ready)
+  {
+    rejection_reason = "start_flip_rejected_imu_not_ready";
+  }
+  else if (snapshot.joint_fault || snapshot.grip_fault)
+  {
+    rejection_reason = "start_flip_rejected_hardware_fault";
+  }
+
+  if (!rejection_reason.empty())
+  {
+    crossing_runtime_.reportFailure(rejection_reason);
+    ROS_WARN_STREAM("Rejecting start_flip request: " << rejection_reason);
+    return;
+  }
+
+  start_flip_event_pending_ = true;
+  ROS_INFO("Accepted start_flip request; entering PlannerControl for one MoveIt flip.");
 }
 
 bool B29SmcAutoController::plannerReleaseCallback(std_srvs::Trigger::Request& /*request*/,
@@ -601,10 +723,6 @@ void B29SmcAutoController::applyRuntimeActions(const ObstacleCrossingRuntime::Ac
   {
     disconnect_cable_process_.reset(time, "crossing_runtime_reset");
   }
-  if (actions.restart_disconnect_process)
-  {
-    disconnect_cable_process_.restart(time, "disconnect_retry");
-  }
   if (actions.start_disconnect_process)
   {
     const CrossingSideProfile* profile = crossing_runtime_.currentProfile();
@@ -636,6 +754,27 @@ void B29SmcAutoController::applyRuntimeActions(const ObstacleCrossingRuntime::Ac
         last_input_snapshot_.remote_control_completion_rising_edge_sequence;
     remote_control_session_.start(currentPlannerReferencePositions(), input);
     remote_control_completion_rising_edge_ = false;
+    ROS_INFO_STREAM("MoveIt flip completed on side "
+                    << crossingSideReasonName(crossing_runtime_.crossingSide())
+                    << "; lower-level RemoteControl handoff is active");
+  }
+  if (actions.remote_control_completed_regrip_entered)
+  {
+    ROS_INFO_STREAM("Lower-level RemoteControl completion received on side "
+                    << crossingSideReasonName(crossing_runtime_.crossingSide())
+                    << "; commanding the open gripper to close");
+  }
+  if (actions.disconnect_failed_hold_entered)
+  {
+    ROS_ERROR_STREAM("Cable disconnect validation failed on side "
+                     << crossingSideReasonName(crossing_runtime_.crossingSide())
+                     << "; holding current joint positions with no automatic retry");
+  }
+  if (actions.disconnect_succeeded_wait_flip_entered)
+  {
+    ROS_INFO_STREAM("Cable disconnect succeeded on side "
+                    << crossingSideReasonName(crossing_runtime_.crossingSide())
+                    << "; holding position and waiting for the automatic start_flip trigger");
   }
 }
 
@@ -643,8 +782,7 @@ void B29SmcAutoController::updateObstacleCrossingRuntime(const ros::Time& time)
 {
   ObstacleCrossingRuntime::Inputs inputs;
   inputs.traversing = robot_context_.isTraversing();
-  inputs.obstacle_crossing_trigger =
-      last_input_snapshot_.obstacle_crossing_trigger;
+  inputs.obstacle_crossing_trigger = last_input_snapshot_.obstacle_crossing_trigger;
   inputs.obstacle_trigger_edge_sequences_valid =
       last_input_snapshot_.obstacle_trigger_edge_sequences_valid;
   inputs.obstacle_trigger_rising_edge_sequence =
@@ -655,51 +793,16 @@ void B29SmcAutoController::updateObstacleCrossingRuntime(const ros::Time& time)
   inputs.grip_confirmed = robot_context_.isGripConfirmed();
 
   ObstacleCrossingRuntime::Events events;
+  events.start_disconnect_requested = start_disconnect_event_pending_;
+  start_disconnect_event_pending_ = false;
+  events.start_flip_requested = start_flip_event_pending_;
+  start_flip_event_pending_ = false;
   events.disconnect = collectDisconnectOutcome();
   events.planner = collectPlannerOutcome(time);
   events.remote_control_completion_rising_edge = collectRemoteControlCompletion();
 
   const ObstacleCrossingRuntime::Actions actions = crossing_runtime_.update(time, inputs, events);
   applyRuntimeActions(actions, time);
-}
-
-void B29SmcAutoController::updateSignedWheelTravel()
-{
-  if (!robot_context_.isLowerAlive())
-  {
-    return;
-  }
-
-  for (std::size_t index = 0; index < wheel_joint_handles_.size(); ++index)
-  {
-    const double position = wheel_joint_handles_[index].getPosition();
-    if (!std::isfinite(position))
-    {
-      return;
-    }
-    wheel_travel_current_positions_[index] = position;
-  }
-
-  if (!wheel_travel_baseline_initialized_)
-  {
-    wheel_travel_baseline_positions_ = wheel_travel_current_positions_;
-    signed_wheel_travel_ = 0.0;
-    wheel_travel_baseline_initialized_ = true;
-    return;
-  }
-
-  const double left_travel =
-      wheel_travel_current_positions_[0] - wheel_travel_baseline_positions_[0];
-  const double right_travel =
-      wheel_travel_current_positions_[1] - wheel_travel_baseline_positions_[1];
-  signed_wheel_travel_ = (left_travel + right_travel) * 0.5;
-}
-
-void B29SmcAutoController::resetWheelTravelBaseline()
-{
-  wheel_travel_baseline_initialized_ = false;
-  signed_wheel_travel_ = 0.0;
-  updateSignedWheelTravel();
 }
 
 
@@ -759,12 +862,14 @@ void B29SmcAutoController::applyObstacleCrossingCommand(const ros::Time& time,
     {
       stopWheels(effective, "disconnect_" + side_name + "_active");
       DisconnectCableProcess::JointTargets feedback{};
+      DisconnectCableProcess::JointTargets velocities{};
       for (std::size_t index = 0; index < feedback.size(); ++index)
       {
         feedback[index] = joint_state_handles_[index].getPosition();
+        velocities[index] = joint_state_handles_[index].getVelocity();
       }
       const DisconnectCableProcess::Result result =
-          disconnect_cable_process_.update(time, effective.joint_targets, feedback);
+          disconnect_cable_process_.update(time, effective.joint_targets, feedback, velocities);
       if (!result.valid)
       {
         effective.freeze_joints = true;
@@ -776,6 +881,11 @@ void B29SmcAutoController::applyObstacleCrossingCommand(const ros::Time& time,
       effective.command_reason = result.command_reason;
       return;
     }
+    case ObstacleCrossingStage::DisconnectDoneWaitFlip:
+      stopWheels(effective, "disconnect_" + side_name + "_done_wait_flip");
+      setBothGrippers(effective, GripperState::Closed);
+      effective.joint_targets[gripper] = gripperTarget(GripperState::Open);
+      return;
     case ObstacleCrossingStage::PlannerControl:
       stopWheels(effective, "planner_" + side_name + "_wait");
       effective.joint_targets[gripper] = gripperTarget(GripperState::Open);
@@ -856,9 +966,15 @@ ControllerTraceState B29SmcAutoController::captureControllerTraceState(const ros
   state.disconnect_step = disconnect_state.step;
   state.disconnect_step_enter_time = disconnect_state.step_enter_time;
   state.disconnect_step_transition_reason = disconnect_state.transition_reason;
-  state.disconnect_check_displacement = disconnect_state.check_displacement;
-  state.to_check_joint_pos = disconnect_state.check_reference_position;
-  state.disconnect_cable_second_joint_success_threshold = disconnect_state.succeed_threshold;
+  state.disconnect_max_abs_pose_joint_velocity = disconnect_state.max_abs_pose_joint_velocity;
+  state.disconnect_settle_velocity_threshold = disconnect_state.settle_velocity_threshold;
+  state.disconnect_velocity_within_threshold = disconnect_state.velocity_within_threshold;
+  if (!disconnect_state.velocity_stable_since.isZero())
+  {
+    state.disconnect_velocity_stable_elapsed_sec =
+        std::max(0.0, (stamp - disconnect_state.velocity_stable_since).toSec());
+  }
+  state.disconnect_settle_duration = disconnect_state.settle_duration;
   state.failed_operation = crossing_state.failed_operation;
   state.retry_count = crossing_state.retry_count;
   state.close_grippers_retry_count = crossing_state.close_grippers_retry_count;
@@ -870,6 +986,17 @@ ControllerTraceState B29SmcAutoController::captureControllerTraceState(const ros
   state.gripper_wait_start_time = crossing_state.gripper_wait_start_time;
   state.wait_for_grip_respond_time = crossing_state.wait_for_grip_respond_time;
   state.last_failure_reason = crossing_state.last_failure_reason;
+  state.obstacle_crossing_trigger = crossing_state.obstacle_crossing_trigger;
+  state.obstacle_trigger_rising_edge = crossing_state.obstacle_trigger_rising_edge;
+  state.obstacle_trigger_falling_edge = crossing_state.obstacle_trigger_falling_edge;
+  state.obstacle_trigger_rising_edge_sequence = crossing_state.obstacle_trigger_rising_edge_sequence;
+  state.obstacle_trigger_falling_edge_sequence = crossing_state.obstacle_trigger_falling_edge_sequence;
+  state.left_wheel_travel_baseline_position = wheel_travel_baseline_positions_[0];
+  state.right_wheel_travel_baseline_position = wheel_travel_baseline_positions_[1];
+  state.left_wheel_travel_current_position = wheel_travel_current_positions_[0];
+  state.right_wheel_travel_current_position = wheel_travel_current_positions_[1];
+  state.signed_wheel_travel = signed_wheel_travel_;
+  state.wheel_travel_baseline_initialized = wheel_travel_baseline_initialized_;
   const PlannerControlCoordinator::TraceState planner_state =
       planner_control_coordinator_.traceState(stamp);
   state.planner_manual_release_enabled = planner_state.manual_release_enabled;
@@ -890,19 +1017,14 @@ ControllerTraceState B29SmcAutoController::captureControllerTraceState(const ros
   state.remote_control_sample_sequence = last_input_snapshot_.remote_control_sample_sequence;
   state.remote_control_complete = last_input_snapshot_.remote_control_complete;
   state.remote_control_completion_rising_edge = remote_control_completion_rising_edge_;
-  state.left_wheel_travel_baseline_position = wheel_travel_baseline_positions_[0];
-  state.right_wheel_travel_baseline_position = wheel_travel_baseline_positions_[1];
-  state.left_wheel_travel_current_position = wheel_travel_current_positions_[0];
-  state.right_wheel_travel_current_position = wheel_travel_current_positions_[1];
-  state.signed_wheel_travel = signed_wheel_travel_;
-  state.wheel_travel_baseline_initialized = wheel_travel_baseline_initialized_;
   state.command_dispatch_attempted = command_dispatch_attempted_;
   state.command_dispatch_succeeded = command_dispatch_succeeded_;
   state.debug_validation_enabled = debug_validation_enabled_;
   state.simulation_only = simulation_only_;
+  state.temporary_allow_start_without_grip_confirmed =
+      temporary_allow_start_without_grip_confirmed_;
   state.debug_override_active = debug_validation_enabled_ && applied_debug_override_.enabled;
-  state.debug_obstacle_crossing_trigger =
-      applied_debug_override_.obstacle_crossing_trigger;
+  state.debug_obstacle_crossing_trigger = applied_debug_override_.obstacle_crossing_trigger;
   state.software_emergency_stop_latched = software_emergency_stop_latched_.load();
   state.manual_reset_requested = last_input_snapshot_.manual_reset_requested;
   state.lower_alive = last_input_snapshot_.lower_alive;
@@ -911,27 +1033,45 @@ ControllerTraceState B29SmcAutoController::captureControllerTraceState(const ros
   state.grip_confirmed = last_input_snapshot_.grip_confirmed;
   state.joint_fault = last_input_snapshot_.joint_fault;
   state.grip_fault = last_input_snapshot_.grip_fault;
-  state.cruise_drive_request_raw =
-      last_input_snapshot_.cruise_drive_request_raw;
-  state.cruise_drive_request_valid =
-      last_input_snapshot_.cruise_drive_request_valid;
+  state.cruise_drive_request_raw = last_input_snapshot_.cruise_drive_request_raw;
+  state.cruise_drive_request_valid = last_input_snapshot_.cruise_drive_request_valid;
   state.auto_start = last_input_snapshot_.auto_start_requested;
   state.manual_reset = last_input_snapshot_.manual_reset_requested;
-  state.obstacle_crossing_trigger =
-      crossing_state.obstacle_crossing_trigger;
-  state.auto_start_rising_edge_sequence =
-      last_input_snapshot_.auto_start_rising_edge_sequence;
-  state.manual_reset_rising_edge_sequence =
-      last_input_snapshot_.manual_reset_rising_edge_sequence;
-  state.obstacle_trigger_rising_edge =
-      crossing_state.obstacle_trigger_rising_edge;
-  state.obstacle_trigger_falling_edge =
-      crossing_state.obstacle_trigger_falling_edge;
-  state.obstacle_trigger_rising_edge_sequence =
-      crossing_state.obstacle_trigger_rising_edge_sequence;
-  state.obstacle_trigger_falling_edge_sequence =
-      crossing_state.obstacle_trigger_falling_edge_sequence;
+  state.auto_start_rising_edge_sequence = last_input_snapshot_.auto_start_rising_edge_sequence;
+  state.manual_reset_rising_edge_sequence = last_input_snapshot_.manual_reset_rising_edge_sequence;
   return state;
+}
+
+void B29SmcAutoController::updateSignedWheelTravel()
+{
+  for (std::size_t index = 0; index < wheel_joint_handles_.size(); ++index)
+  {
+    const double position = wheel_joint_handles_[index].getPosition();
+    if (!std::isfinite(position))
+    {
+      return;
+    }
+    wheel_travel_current_positions_[index] = position;
+  }
+
+  if (!wheel_travel_baseline_initialized_)
+  {
+    wheel_travel_baseline_positions_ = wheel_travel_current_positions_;
+    signed_wheel_travel_ = 0.0;
+    wheel_travel_baseline_initialized_ = true;
+    return;
+  }
+
+  const double left_travel = wheel_travel_current_positions_[0] - wheel_travel_baseline_positions_[0];
+  const double right_travel = wheel_travel_current_positions_[1] - wheel_travel_baseline_positions_[1];
+  signed_wheel_travel_ = (left_travel + right_travel) * 0.5;
+}
+
+void B29SmcAutoController::resetWheelTravelBaseline()
+{
+  wheel_travel_baseline_initialized_ = false;
+  signed_wheel_travel_ = 0.0;
+  updateSignedWheelTravel();
 }
 
 void B29SmcAutoController::stopWheels(AutoControlCommand& effective, const std::string& reason) const
