@@ -4,7 +4,7 @@ rl_inference_node.py — GP11 Reach RL 推理节点（仿真/实机共享）
 
 【职责】
   - 订阅 /joint_states (sensor_msgs/JointState) 与 /gp11/rl/target_point_local
-  - 用 reach_policy 模块构建 32D 观测，调用 ONNX 推理得到 4D action
+  - 用 reach_policy 模块构建 28D 观测，按配置调用 ONNX 或 DLS
   - 应用 SafetyLimiter 限幅，发布 /gp11/rl/joint_targets (Float64MultiArray)
   - 同步发布观测 / 原始 action / 限幅前 target，便于离线对齐与回放
 
@@ -25,6 +25,7 @@ import argparse
 import os
 import sys
 import threading
+import time
 from pathlib import Path
 
 import numpy as np
@@ -42,6 +43,7 @@ from reach_policy import (  # noqa: E402
     SafetyLimiter,
     load_fk_model,
 )
+from dls_reach_controller import DLSReachController  # noqa: E402
 
 # ---- 导入训练侧正运动学（延迟到 __init__ 以避免 mujoco 依赖）---- #
 UrdfKinematicModel = None
@@ -72,9 +74,11 @@ class RLInferenceNode:
         self.rt = cfg.runtime
         self.topics = cfg.deploy.topics
 
+        self.mode = cfg.deploy.mode
+        self.platform = cfg.deploy.platform
         self.joint_mapper = JointMapper(self.rt)
         self.obs_builder = ObservationBuilder(self.rt)
-        self.runner = PolicyRunner(cfg)
+        self.runner = PolicyRunner(cfg) if self.mode == "onnx" else None
         self.safety = SafetyLimiter(cfg)
 
         self._lock = threading.Lock()
@@ -85,6 +89,14 @@ class RLInferenceNode:
         self._dq_filtered: np.ndarray = np.zeros(4, dtype=np.float32)
         self._dq_alpha: float = float(cfg.deploy.dq_alpha)
         self._prev_target_q: np.ndarray | None = None  # 用于检测突变
+        self._last_state_monotonic: float | None = None
+        self._target_generation = 0
+        self._last_output: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None = None
+        self._fault_reason: str | None = None
+        self._track_error_since: float | None = None
+        self._dq_violation_since: float | None = None
+        self._dls_stop = threading.Event()
+        self._dls_wakeup = threading.Event()
         # 训练里 goal_x_axis_in_ref 来自目标姿态，部署阶段先用 +X 轴占位，
         # 后续若需要支持姿态目标再扩展话题契约。
         self._target_x_axis: np.ndarray = np.array([1.0, 0.0, 0.0], dtype=np.float32)
@@ -121,7 +133,9 @@ class RLInferenceNode:
 
         rospy.loginfo("[rl_inference] anchor_side=%s active_dof=%s",
                       self.rt.anchor_side, self.rt.active_dof_names)
-        rospy.loginfo("[rl_inference] onnx=%s", self.runner.model_path)
+        rospy.loginfo("[rl_inference] mode=%s platform=%s", self.mode, self.platform)
+        if self.runner is not None:
+            rospy.loginfo("[rl_inference] onnx=%s", self.runner.model_path)
         rospy.loginfo("[rl_inference] safety: enable=%s vel<=%.3f step<=%.3f",
                       self.cfg.deploy.safety.enable,
                       self.cfg.deploy.safety.max_joint_vel,
@@ -140,8 +154,41 @@ class RLInferenceNode:
             rospy.loginfo("[rl_inference] FK loaded: anchor=%s obs_ref_x=%s",
                           self.rt.anchor_side, self._obs_ref_rot[0].tolist())
         else:
-            rospy.loginfo("[rl_inference] FK unavailable (b29_locomotion not found): "
-                          "tool/fk markers disabled, inference unaffected")
+            if self.mode == "dls":
+                raise RuntimeError("DLS mode requires the package FK model")
+            rospy.loginfo("[rl_inference] FK unavailable: tool/fk markers disabled")
+
+        self._dls = None
+        if self.mode == "dls":
+            dls_velocity_limits = self.rt.velocity_limits.copy()
+            if cfg.deploy.safety.enable:
+                dls_velocity_limits = np.minimum(
+                    dls_velocity_limits,
+                    np.full(4, cfg.deploy.safety.max_joint_vel, dtype=np.float32),
+                )
+            self._dls = DLSReachController(
+                kinematics=self._kinematics,
+                runtime=self.rt,
+                obs_ref_origin_root=self._obs_ref_origin,
+                obs_ref_rot_root=self._obs_ref_rot,
+                params=cfg.deploy.dls,
+                velocity_limits=dls_velocity_limits,
+            )
+            self._dls_worker = threading.Thread(
+                target=self._dls_loop, name="b29_dls_control", daemon=True
+            )
+            self._dls_publisher = threading.Thread(
+                target=self._dls_publish_loop, name="b29_dls_publish", daemon=True
+            )
+            self._dls_worker.start()
+            self._dls_publisher.start()
+            rospy.loginfo(
+                "[rl_inference] DLS control=%sHz publish=%sHz",
+                cfg.deploy.dls.control_rate_hz,
+                cfg.deploy.control_rate_hz,
+            )
+        if hasattr(rospy, "on_shutdown"):
+            rospy.on_shutdown(self._shutdown)
 
     # ---- callbacks ---- #
     def _on_target_point(self, msg) -> None:
@@ -150,6 +197,8 @@ class RLInferenceNode:
         with self._lock:
             prev = self._latest_target_pos
             self._latest_target_pos = np.asarray(msg.data[:3], dtype=np.float32)
+            self._target_generation += 1
+            self._dls_wakeup.set()
         if prev is None:
             self._rospy.loginfo(
                 "[rl_inference] target_point received: [%.3f, %.3f, %.3f]",
@@ -182,13 +231,183 @@ class RLInferenceNode:
             dq_filtered = self._dq_filtered.copy()
             self._latest_torque = torque
             target_pos = self._latest_target_pos
-            target_x_axis = self._target_x_axis
+            target_x_axis = self._target_x_axis.copy()
+            self._last_state_monotonic = time.monotonic()
 
         if target_pos is None:
             self._rospy.loginfo_throttle(2.0, "[rl_inference] waiting for target_point...")
             return
 
-        self._step(q, dq_filtered, torque, target_pos, target_x_axis)
+        if self.mode == "onnx":
+            self._step(q, dq_filtered, torque, target_pos, target_x_axis)
+        else:
+            self._update_watchdog(q, dq_filtered)
+
+    # ---- DLS 控制与发布 ---- #
+    def _dls_loop(self) -> None:
+        assert self._dls is not None
+        period = 1.0 / float(self.cfg.deploy.dls.control_rate_hz)
+        next_deadline = time.monotonic()
+        seen_generation = -1
+        while not self._dls_stop.is_set() and not self._rospy.is_shutdown():
+            self._dls_wakeup.wait(max(0.0, next_deadline - time.monotonic()))
+            self._dls_wakeup.clear()
+            now = time.monotonic()
+            if now < next_deadline:
+                continue
+            next_deadline = now + period
+
+            with self._lock:
+                q = None if self._latest_q is None else self._latest_q.copy()
+                dq = None if self._latest_dq is None else self._dq_filtered.copy()
+                torque = self._latest_torque.copy()
+                goal = None if self._latest_target_pos is None else self._latest_target_pos.copy()
+                generation = self._target_generation
+                fault = self._fault_reason
+            if q is None or dq is None or goal is None:
+                continue
+            if fault is not None:
+                continue
+
+            try:
+                if generation != seen_generation:
+                    self._dls.set_goal(
+                        goal,
+                        self._target_x_axis,
+                        q_start=q,
+                        known_reachable=True,
+                    )
+                    seen_generation = generation
+                raw_target = self._dls.compute(q, dq, goal, self._target_x_axis)
+                safe_target = self.safety.apply(raw_target, q)
+                self._dls.sync_applied_target(safe_target)
+            except Exception as exc:
+                self._enter_fault(f"DLS control failed: {exc}")
+                continue
+
+            action = (
+                2.0 * (raw_target - self.rt.hard_lower)
+                / (self.rt.hard_upper - self.rt.hard_lower)
+                - 1.0
+            ).astype(np.float32, copy=False)
+            obs = self.obs_builder.build(
+                q=q,
+                dq=dq,
+                last_action=action,
+                joint_torques=torque,
+                goal_pos_in_ref=goal,
+                goal_x_axis_in_ref=self._target_x_axis,
+            )
+            with self._lock:
+                self._last_output = (
+                    raw_target.copy(),
+                    safe_target.copy(),
+                    obs.copy(),
+                    action.copy(),
+                )
+
+            self._rospy.loginfo_throttle(
+                5.0,
+                "[rl_inference] DLS goal=[%.3f,%.3f,%.3f] q=[%.2f,%.2f,%.2f,%.2f] "
+                "target=[%.2f,%.2f,%.2f,%.2f]",
+                goal[0], goal[1], goal[2], q[0], q[1], q[2], q[3],
+                safe_target[0], safe_target[1], safe_target[2], safe_target[3],
+            )
+
+    def _dls_publish_loop(self) -> None:
+        period = 1.0 / float(self.cfg.deploy.control_rate_hz)
+        next_deadline = time.monotonic()
+        while not self._dls_stop.is_set() and not self._rospy.is_shutdown():
+            now = time.monotonic()
+            if now < next_deadline:
+                time.sleep(next_deadline - now)
+            next_deadline = time.monotonic() + period
+
+            with self._lock:
+                last_state = self._last_state_monotonic
+                output = self._last_output
+            if output is None:
+                continue
+            if (
+                self.platform == "hardware"
+                and last_state is not None
+                and time.monotonic() - last_state > self.cfg.deploy.watchdog.feedback_timeout_s
+            ):
+                self._enter_fault("joint_states feedback timeout")
+            self._publish_dls_output(output)
+
+    def _publish_dls_output(self, output) -> None:
+        raw_target, safe_target, obs, action = output
+        self.pub_joint_targets.publish(self._F64MA(data=safe_target.tolist()))
+        self.pub_joint_targets_raw.publish(self._F64MA(data=raw_target.tolist()))
+        self.pub_obs.publish(self._F64MA(data=obs.tolist()))
+        self.pub_action_raw.publish(self._F64MA(data=action.tolist()))
+        if self._kinematics is None:
+            return
+        try:
+            stamp = self._rospy.Time.now()
+            self._publish_fk_marker(
+                safe_target,
+                stamp,
+                self.pub_fk_marker,
+                marker_ns="dls_fk_target_safe",
+                marker_id=0,
+                color=(0.95, 0.50, 0.05, 0.90),
+                diameter=0.04,
+            )
+            self._publish_fk_marker(
+                raw_target,
+                stamp,
+                self.pub_fk_marker_raw,
+                marker_ns="dls_fk_target_raw",
+                marker_id=1,
+                color=(0.10, 0.55, 0.95, 0.90),
+                diameter=0.032,
+            )
+        except Exception as exc:
+            self._rospy.logwarn_throttle(5.0, "[rl_inference] DLS FK marker failed: %s", exc)
+
+    def _update_watchdog(self, q: np.ndarray, dq: np.ndarray) -> None:
+        if self.platform != "hardware":
+            return
+        with self._lock:
+            output = self._last_output
+        if output is None or self._fault_reason is not None:
+            return
+        safe_target = output[1]
+        now = time.monotonic()
+        track_bad = bool(
+            np.max(np.abs(safe_target - q)) > self.cfg.deploy.watchdog.track_error_rad
+        )
+        dq_bad = bool(np.max(np.abs(dq)) > self.cfg.deploy.watchdog.dq_limit_rad_s)
+        with self._lock:
+            if track_bad:
+                self._track_error_since = self._track_error_since or now
+            else:
+                self._track_error_since = None
+            if dq_bad:
+                self._dq_violation_since = self._dq_violation_since or now
+            else:
+                self._dq_violation_since = None
+            track_since = self._track_error_since
+            dq_since = self._dq_violation_since
+        if track_since is not None and now - track_since >= self.cfg.deploy.watchdog.track_error_persist_s:
+            self._enter_fault("joint target tracking error persisted")
+        elif dq_since is not None and now - dq_since >= self.cfg.deploy.watchdog.dq_persist_s:
+            self._enter_fault("joint velocity limit violation persisted")
+
+    def _enter_fault(self, reason: str) -> None:
+        with self._lock:
+            if self._fault_reason is not None:
+                return
+            self._fault_reason = str(reason)
+        self._rospy.logerr("[rl_inference] DLS FAULT: %s; holding last target", reason)
+
+    def _shutdown(self) -> None:
+        self._dls_stop.set()
+        self._dls_wakeup.set()
+        if self._dls is not None:
+            self._dls.close()
 
     # ---- 推理一步 ---- #
     def _step(
@@ -199,6 +418,7 @@ class RLInferenceNode:
         target_pos: np.ndarray,
         target_x_axis: np.ndarray,
     ) -> None:
+        assert self.runner is not None
         last_action = self.runner.last_action
         obs = self.obs_builder.build(
             q=q,
@@ -312,34 +532,38 @@ class RLInferenceNode:
 # 入口                                                                        #
 # --------------------------------------------------------------------------- #
 
-def _resolve_config_path(rospy) -> Path:
-    """优先从 ROS 参数 ~config 读取；否则用 --config 命令行；最后默认同包 config 目录。"""
+def _resolve_config_options(rospy) -> tuple[Path, str | None]:
+    """解析配置和显式平台参数，不根据运行环境自动猜测。"""
     # ROS 参数
     cfg_param = rospy.get_param("~config", "")
+    platform_param = rospy.get_param("~platform", "")
+    platform = str(platform_param).strip().lower() or None
     if cfg_param:
-        return Path(cfg_param).expanduser().resolve()
+        return Path(cfg_param).expanduser().resolve(), platform
 
     parser = argparse.ArgumentParser(allow_abbrev=False)
     parser.add_argument("--config", type=str, default="")
+    parser.add_argument("--platform", choices=("gazebo", "hardware"), default="")
     # 屏蔽 rosrun 注入的 __name:= / __log:= 等 remap 参数
     cli_args = [a for a in sys.argv[1:] if not a.startswith("__")]
     args, _ = parser.parse_known_args(cli_args)
+    platform = args.platform or platform
     if args.config:
-        return Path(args.config).expanduser().resolve()
+        return Path(args.config).expanduser().resolve(), platform
     # 默认：脚本同级目录向上找 config/reach_rl_config.yaml
     default = _THIS_DIR.parent / "config" / "reach_rl_config.yaml"
-    return default.resolve()
+    return default.resolve(), platform
 
 
 def main() -> int:
     rospy, _, _, _ = _import_ros()
     rospy.init_node("gp11_rl_inference", anonymous=False, disable_signals=False)
-    cfg_path = _resolve_config_path(rospy)
+    cfg_path, platform = _resolve_config_options(rospy)
     rospy.loginfo("[rl_inference] loading config: %s", cfg_path)
-    cfg = Config.load(cfg_path)
+    cfg = Config.load(cfg_path, platform=platform)
 
     node = RLInferenceNode(cfg)
-    rospy.loginfo("[rl_inference] ready, spinning at sensor rate.")
+    rospy.loginfo("[rl_inference] ready, mode=%s, platform=%s", cfg.deploy.mode, cfg.deploy.platform)
     rospy.spin()
     _ = node  # keep alive
     return 0

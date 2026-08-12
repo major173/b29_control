@@ -32,6 +32,10 @@ runtime:
   stiffness: [ 200.0, 200.0, 200.0, 200.0 ]
   damping: [ 60.0, 60.0, 60.0, 30.0 ]
 
+  # DLS 全局规划的工作范围（来自训练目标采样范围）
+  sample_lower: [ -0.95, -3.4906585, -0.95, -3.4906585 ]
+  sample_upper: [ 0.95,  3.4906585,  0.95,  3.4906585 ]
+
   # 观测/动作裁剪（来自 RUNTIME_CLIP_OBSERVATIONS / ACTIONS）
   clip_observations: 100.0
   clip_actions: 1.0
@@ -40,6 +44,11 @@ runtime:
   goal_refresh_interval_s: 5.0
 
 deploy:
+  # Reach 控制后端："dls"（当前部署默认）或 "onnx"（保留原网络路径）
+  mode: "dls"
+  # 显式选择安全参数组："gazebo" 或 "hardware"；不会自动猜测
+  platform: "gazebo"
+
   # ONNX 模型
   onnx_model_path: ""  # 留空时由节点自动查找同包 models/reach/stage0.onnx；或填绝对路径
 
@@ -52,15 +61,49 @@ deploy:
     target_point: "/gp11/rl/target_point_local"    # Float64MultiArray, 3D
     joint_targets: "/gp11/rl/joint_targets"         # Float64MultiArray, 4D（限幅后）
     joint_targets_raw: "/gp11/rl/joint_targets_raw"   # Float64MultiArray, 4D（限幅前，调试）
-    observation: "/gp11/rl/observation"           # Float64MultiArray, 32D（调试）
+    observation: "/gp11/rl/observation"           # Float64MultiArray, 28D（调试）
     action_raw: "/gp11/rl/action_raw"            # Float64MultiArray, 4D（调试）
 
-  # 安全限幅（部署在 RL 节点输出后；仿真阶段透明，实机阶段逐级放开）
-  safety:
-    enable: true
-    max_joint_vel: 4.0          # rad/s，与训练 velocity_limits 对齐；实机起步建议 0.05
-    target_step_clip: 1.00      # 单步 |Δq_target| 上限 (rad)；实机起步建议 0.02
-    deadman_required: false     # true=必须收到 /gp11/rl/deadman 心跳才发布
+  # 安全限幅参数组；旧版单个 safety 块仍可由加载器兼容
+  safety_profiles:
+    gazebo:
+      enable: true
+      max_joint_vel: 4.0
+      target_step_clip: 1.00    # |q_target-q_measured| 上限 (rad)
+      deadman_required: false
+    hardware:
+      enable: true
+      max_joint_vel: 0.10
+      target_step_clip: 0.50    # 实机首轮联调值，验证后逐级放开
+      deadman_required: false
+
+  # DLS 控制器。局部计算 25Hz，目标发布仍为 50Hz。
+  dls:
+    control_rate_hz: 25.0
+    position_gain: 4.0
+    orientation_gain: 1.5
+    orientation_weight: 0.08
+    damping: 0.08
+    jacobian_epsilon: 0.0001
+    max_position_error: 0.60
+    max_orientation_error: 1.0
+    joint_limit_margin: 0.05
+    limit_avoidance_distance: 0.05
+    limit_avoidance_gain: 0.04
+    max_target_lead_fraction: 0.80
+    joint_plan_gain: 2.0
+    joint_plan_blend_distance: 0.15
+    velocity_damping: 0.35
+    project_changed_goals: true
+    relative_axis_start_body: null
+
+  # DLS 实机故障监测。故障后冻结最后安全目标，需重启节点复位。
+  watchdog:
+    feedback_timeout_s: 0.10
+    track_error_rad: 0.20
+    track_error_persist_s: 0.20
+    dq_limit_rad_s: 2.0
+    dq_persist_s: 0.30
 
   # 观测预处理（Gazebo 速度有限差分噪声，需低通滤波）
   obs_filter:

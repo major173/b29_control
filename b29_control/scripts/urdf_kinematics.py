@@ -214,6 +214,26 @@ class UrdfKinematicModel:
         x_axis   = _normalize_vector(transforms[self.orientation_body][:3, 0])
         return midpoint, x_axis
 
+    def relative_x_axis(
+        self,
+        q: np.ndarray,
+        *,
+        reference_body: str,
+        axis_body: Optional[str] = None,
+    ) -> np.ndarray:
+        """返回 axis_body 的 x 轴在 reference_body 坐标系下的表达。"""
+        transforms = self._compute_link_transforms(q)
+        resolved_axis_body = self.orientation_body if axis_body is None else axis_body
+        missing = [
+            name for name in (reference_body, resolved_axis_body)
+            if name not in transforms
+        ]
+        if missing:
+            raise ValueError(f"URDF is missing relative-axis links: {missing}")
+        reference_rotation = transforms[reference_body][:3, :3]
+        axis_root = transforms[resolved_axis_body][:3, 0]
+        return _normalize_vector(reference_rotation.T @ axis_root)
+
     def nominal_link_transform(self, link_name: str) -> np.ndarray:
         transforms = self._compute_link_transforms(np.zeros(4, dtype=np.float32))
         if link_name not in transforms:

@@ -4,7 +4,7 @@ reach_policy.py — GP11 Reach 任务的策略运行时核心模块
 【职责】纯 Python，零 ROS 依赖：
   - 配置加载 (Config)
   - 关节顺序映射 (JointMapper)
-  - 32D 观测构建 (ObservationBuilder)
+  - 28D 观测构建 (ObservationBuilder)
   - Action → joint target 映射 (ActionMapper)
   - PD 力矩计算 (compute_pd_torques)
   - ONNX 推理封装 (PolicyRunner)
@@ -54,6 +54,8 @@ class RuntimeParams:
     effort_limits: np.ndarray
     stiffness: np.ndarray
     damping: np.ndarray
+    sample_lower: np.ndarray
+    sample_upper: np.ndarray
     clip_observations: float
     clip_actions: float
     goal_refresh_interval_s: float
@@ -85,11 +87,45 @@ class SafetyParams:
 
 
 @dataclass
+class WatchdogParams:
+    feedback_timeout_s: float
+    track_error_rad: float
+    track_error_persist_s: float
+    dq_limit_rad_s: float
+    dq_persist_s: float
+
+
+@dataclass
+class DLSParams:
+    control_rate_hz: float
+    position_gain: float
+    orientation_gain: float
+    orientation_weight: float
+    damping: float
+    jacobian_epsilon: float
+    max_position_error: float
+    max_orientation_error: float
+    joint_limit_margin: float
+    limit_avoidance_distance: float
+    limit_avoidance_gain: float
+    max_target_lead_fraction: float
+    joint_plan_gain: float
+    joint_plan_blend_distance: float
+    velocity_damping: float
+    project_changed_goals: bool
+    relative_axis_start_body: Optional[str]
+
+
+@dataclass
 class DeployParams:
+    mode: str
+    platform: str
     onnx_model_path: str
     control_rate_hz: float
     topics: Dict[str, str]
     safety: SafetyParams
+    watchdog: WatchdogParams
+    dls: DLSParams
     dq_alpha: float              # 速度低通滤波系数
     mujoco_runtime_dir: str
     mujoco_seed: int
@@ -103,7 +139,7 @@ class Config:
     source_path: Path
 
     @classmethod
-    def load(cls, path) -> "Config":
+    def load(cls, path, platform: Optional[str] = None) -> "Config":
         try:
             import yaml  # type: ignore
         except ImportError as exc:
@@ -123,6 +159,14 @@ class Config:
             effort_limits=np.asarray(rt_raw["effort_limits"], dtype=np.float32),
             stiffness=np.asarray(rt_raw["stiffness"], dtype=np.float32),
             damping=np.asarray(rt_raw["damping"], dtype=np.float32),
+            sample_lower=np.asarray(
+                rt_raw.get("sample_lower", [-0.95, -3.4906585, -0.95, -3.4906585]),
+                dtype=np.float32,
+            ),
+            sample_upper=np.asarray(
+                rt_raw.get("sample_upper", [0.95, 3.4906585, 0.95, 3.4906585]),
+                dtype=np.float32,
+            ),
             clip_observations=float(rt_raw["clip_observations"]),
             clip_actions=float(rt_raw["clip_actions"]),
             goal_refresh_interval_s=float(rt_raw["goal_refresh_interval_s"]),
@@ -130,15 +174,29 @@ class Config:
         if len(runtime.active_dof_names) != 4:
             raise ValueError("active_dof_names must have 4 entries")
         for name in ("hard_lower", "hard_upper", "velocity_limits",
-                     "effort_limits", "stiffness", "damping"):
+                     "effort_limits", "stiffness", "damping", "sample_lower",
+                     "sample_upper"):
             arr = getattr(runtime, name)
             if arr.shape != (4,):
                 raise ValueError(f"runtime.{name} must have shape (4,), got {arr.shape}")
 
         dp_raw = raw["deploy"]
-        sf_raw = dp_raw["safety"]
+        selected_platform = str(platform or dp_raw.get("platform", "gazebo")).strip().lower()
+        if selected_platform not in ("gazebo", "hardware"):
+            raise ValueError("deploy.platform must be 'gazebo' or 'hardware'")
+        safety_profiles = dp_raw.get("safety_profiles", {})
+        if safety_profiles:
+            if selected_platform not in safety_profiles:
+                raise ValueError(f"missing safety profile for {selected_platform}")
+            sf_raw = safety_profiles[selected_platform]
+        else:
+            sf_raw = dp_raw["safety"]
         mj_raw = dp_raw.get("mujoco", {})
+        dls_raw = dp_raw.get("dls", {})
+        watchdog_raw = dp_raw.get("watchdog", {})
         deploy = DeployParams(
+            mode=str(dp_raw.get("mode", "onnx")).strip().lower(),
+            platform=selected_platform,
             onnx_model_path=str(dp_raw["onnx_model_path"]),
             control_rate_hz=float(dp_raw["control_rate_hz"]),
             topics=dict(dp_raw["topics"]),
@@ -148,12 +206,40 @@ class Config:
                 target_step_clip=float(sf_raw["target_step_clip"]),
                 deadman_required=bool(sf_raw.get("deadman_required", False)),
             ),
+            watchdog=WatchdogParams(
+                feedback_timeout_s=float(watchdog_raw.get("feedback_timeout_s", 0.10)),
+                track_error_rad=float(watchdog_raw.get("track_error_rad", 0.20)),
+                track_error_persist_s=float(watchdog_raw.get("track_error_persist_s", 0.20)),
+                dq_limit_rad_s=float(watchdog_raw.get("dq_limit_rad_s", 2.0)),
+                dq_persist_s=float(watchdog_raw.get("dq_persist_s", 0.30)),
+            ),
+            dls=DLSParams(
+                control_rate_hz=float(dls_raw.get("control_rate_hz", 25.0)),
+                position_gain=float(dls_raw.get("position_gain", 4.0)),
+                orientation_gain=float(dls_raw.get("orientation_gain", 1.5)),
+                orientation_weight=float(dls_raw.get("orientation_weight", 0.08)),
+                damping=float(dls_raw.get("damping", 0.08)),
+                jacobian_epsilon=float(dls_raw.get("jacobian_epsilon", 1.0e-4)),
+                max_position_error=float(dls_raw.get("max_position_error", 0.60)),
+                max_orientation_error=float(dls_raw.get("max_orientation_error", 1.0)),
+                joint_limit_margin=float(dls_raw.get("joint_limit_margin", 0.05)),
+                limit_avoidance_distance=float(dls_raw.get("limit_avoidance_distance", 0.05)),
+                limit_avoidance_gain=float(dls_raw.get("limit_avoidance_gain", 0.04)),
+                max_target_lead_fraction=float(dls_raw.get("max_target_lead_fraction", 0.80)),
+                joint_plan_gain=float(dls_raw.get("joint_plan_gain", 2.0)),
+                joint_plan_blend_distance=float(dls_raw.get("joint_plan_blend_distance", 0.15)),
+                velocity_damping=float(dls_raw.get("velocity_damping", 0.35)),
+                project_changed_goals=bool(dls_raw.get("project_changed_goals", True)),
+                relative_axis_start_body=dls_raw.get("relative_axis_start_body"),
+            ),
             dq_alpha=float(dp_raw.get("obs_filter", {}).get("dq_alpha", 1.0)),
             mujoco_runtime_dir=str(mj_raw.get("runtime_dir",
                                               "sim2sim_mujoco/gp11_description/runtime")),
             mujoco_seed=int(mj_raw.get("seed", 0)),
             mujoco_publish_target_point=bool(mj_raw.get("publish_target_point", True)),
         )
+        if deploy.mode not in ("onnx", "dls"):
+            raise ValueError("deploy.mode must be 'onnx' or 'dls'")
         return cls(runtime=runtime, deploy=deploy, source_path=path.resolve())
 
 
@@ -206,7 +292,7 @@ class JointMapper:
 
 
 # --------------------------------------------------------------------------- #
-# 观测构建：32D                                                                 #
+# 观测构建：28D                                                                 #
 # --------------------------------------------------------------------------- #
 
 class ObservationBuilder:
@@ -362,7 +448,7 @@ class PolicyRunner:
         return np.asarray(outputs, dtype=np.float32).reshape(4)
 
     def step(self, obs: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """obs(32D) → (raw_action, action_clipped, target_q)，并更新 last_action。"""
+        """obs(28D) → (raw_action, action_clipped, target_q)，并更新 last_action。"""
         raw_action = self.infer(obs)
         action = self._mapper.clip(raw_action)
         target_q = self._mapper.to_target_q(action)
@@ -382,13 +468,18 @@ class SafetyLimiter:
       2) 步长钳位： |target - q_current| <= target_step_clip
 
     仿真阶段 max_joint_vel 与训练值对齐 (4.0)，target_step_clip 较松；
-    实机阶段从极小值起步 (0.05 rad/s, 0.02 rad)，验证后逐步放开。
+    实机阶段由 max_joint_vel 控制首轮速度，target_step_clip 作为更宽的目标跟踪范围。
     """
 
     def __init__(self, cfg: Config) -> None:
         self._sf = cfg.deploy.safety
         self._rt = cfg.runtime
-        self._dt = 1.0 / float(cfg.deploy.control_rate_hz)
+        update_rate_hz = (
+            cfg.deploy.dls.control_rate_hz
+            if cfg.deploy.mode == "dls"
+            else cfg.deploy.control_rate_hz
+        )
+        self._dt = 1.0 / float(update_rate_hz)
         self._last_target: Optional[np.ndarray] = None
 
     def reset(self, q_current: Optional[np.ndarray] = None) -> None:
@@ -411,11 +502,13 @@ class SafetyLimiter:
             target = np.clip(target, q_now - clip, q_now + clip)
 
         # 2) 速度限幅：|Δtarget|/dt <= max_joint_vel
-        if self._last_target is not None:
-            max_step = float(self._sf.max_joint_vel) * self._dt
-            target = np.clip(target,
-                             self._last_target - max_step,
-                             self._last_target + max_step)
+        # 首帧以实测关节位置为起点，避免首次目标绕过速度限制。
+        if self._last_target is None:
+            self._last_target = q_now.copy()
+        max_step = float(self._sf.max_joint_vel) * self._dt
+        target = np.clip(target,
+                         self._last_target - max_step,
+                         self._last_target + max_step)
 
         # 3) 硬限位
         target = np.clip(target, rt.hard_lower, rt.hard_upper)
@@ -462,13 +555,15 @@ def load_fk_model(anchor_side: str, urdf_dir: Optional[Path] = None):
     urdf_path = urdf_dir / _SIDE_URDF_NAMES[anchor_side]
     tool_left, tool_right = _SIDE_TOOL_BODIES[anchor_side]
     obs_ref_body = f"{anchor_side}_second_leg"
+    active_side = "right" if anchor_side == "left" else "left"
+    orientation_body = f"{active_side}_second_leg"
 
     try:
         km = _UrdfKinematicModel.from_urdf(
             urdf_path,
             tool_left_body=tool_left,
             tool_right_body=tool_right,
-            orientation_body=obs_ref_body,
+            orientation_body=orientation_body,
         )
         nom = km.nominal_link_transform(obs_ref_body)
         obs_ref_origin = nom[:3, 3].astype(np.float32)
@@ -486,6 +581,8 @@ __all__ = [
     "RuntimeParams",
     "DeployParams",
     "SafetyParams",
+    "WatchdogParams",
+    "DLSParams",
     "JointMapper",
     "ObservationBuilder",
     "ActionMapper",
