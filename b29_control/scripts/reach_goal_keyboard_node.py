@@ -2,7 +2,7 @@
 """
 reach_goal_keyboard_node.py
 
-订阅 /tf，发布 marker 可视化目标点（红）和当前末端中点（绿）。
+订阅 /joint_states，发布 marker 可视化目标点（红）和当前末端中点（绿）。
 启动时将 _goal_ref 初始化为当前末端在 obs_ref 坐标系下的位置，
 使策略接管时臂保持不动。
 """
@@ -12,7 +12,6 @@ from __future__ import annotations
 import numpy as np
 import rospy
 import sys
-import tf
 import threading
 import time
 from pathlib import Path
@@ -33,7 +32,6 @@ _ANCHOR_TO_LINKS = {
 
 ANCHOR_LINK = "left_second_leg"
 TOOL_LINK = "r_gripper_left_uprod"
-WORLD_FRAME = "world"
 OBS_REF_FRAME = ANCHOR_LINK
 STEP_DEFAULT = 0.02
 
@@ -52,15 +50,6 @@ def _write(text: str) -> None:
     sys.stdout.flush()
 
 
-def _quat_to_rot(q) -> np.ndarray:
-    x, y, z, w = q
-    return np.array([
-        [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
-        [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
-        [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
-    ], dtype=np.float32)
-
-
 class ReachGoalKeyboardNode:
     def __init__(self, kinematics=None, tool_left_body=None, tool_right_body=None,
                  active_joint_names=None,
@@ -70,7 +59,6 @@ class ReachGoalKeyboardNode:
         self._spin_thread = threading.Thread(target=rospy.spin, daemon=True)
         self._spin_thread.start()
 
-        self._tf = tf.TransformListener()
         self._lock = threading.RLock()
 
         self._goal_ref = np.zeros(3, dtype=np.float32)
@@ -106,20 +94,8 @@ class ReachGoalKeyboardNode:
         self._init_goal_from_tool()
 
     # ------------------------------------------------------------------ #
-    # TF helpers
+    # Joint state
     # ------------------------------------------------------------------ #
-
-    def _lookup(self, target: str, source: str):
-        """返回 (trans, R) 或 None。"""
-        try:
-            trans, q = self._tf.lookupTransform(target, source, rospy.Time(0))
-            return np.array(trans, dtype=np.float32), _quat_to_rot(q)
-        except tf.LookupException as e:
-            rospy.logwarn_throttle(5.0, f"TF lookup failed {source}: {e}")
-            return None
-        except Exception as e:
-            rospy.logwarn_throttle(5.0, f"TF error {source}: {e}")
-            return None
 
     def _on_joint_states(self, msg) -> None:
         if not self._active_joint_names:
@@ -132,10 +108,6 @@ class ReachGoalKeyboardNode:
                 self._latest_q = q
         except KeyError:
             pass
-
-    def _get_ref_pose(self):
-        """world → obs_ref (ANCHOR_LINK) 的位姿 (origin, R)。"""
-        return self._lookup(WORLD_FRAME, OBS_REF_FRAME)
 
     def _get_tool_pos_ref(self):
         """运动端在训练侧 obs_ref 坐标系下的位置，用 FK 计算（不依赖 TF）。
@@ -179,7 +151,7 @@ class ReachGoalKeyboardNode:
                 self._log(f"{_GRN}初始化目标 [{tool_ref[0]:+.3f},{tool_ref[1]:+.3f},{tool_ref[2]:+.3f}]{_RST}")
                 return
             time.sleep(0.1)
-        self._log(f"{_YLW}TF 超时，goal_ref 保持 [0,0,0]{_RST}")
+        self._log(f"{_YLW}FK 初始化超时，goal_ref 保持 [0,0,0]{_RST}")
         self._publish_goal()
 
     # ------------------------------------------------------------------ #
@@ -198,7 +170,7 @@ class ReachGoalKeyboardNode:
                 _sphere(0, goal_ref, (0.95, 0.15, 0.15, 0.85), OBS_REF_FRAME, stamp, 0.045)
             )
 
-            # 绿球：TF 查 left_second_leg → r_gripper_left_uprod
+            # 绿球：训练侧 FK 计算的当前末端位置
             if tool_ref is not None:
                 self._pub_tool_marker.publish(
                     _sphere(1, tool_ref, (0.15, 0.90, 0.20, 0.85), OBS_REF_FRAME, stamp, 0.030)
@@ -243,7 +215,7 @@ class ReachGoalKeyboardNode:
             logs = list(self._log_msgs)
             ready = self._initialized
 
-        tf_status = f"{_GRN}OK{_RST}" if tool_ref is not None else f"{_RED}等待 TF...{_RST}"
+        fk_status = f"{_GRN}OK{_RST}" if tool_ref is not None else f"{_RED}等待 FK...{_RST}"
 
         dist_str = "—"
         if tool_ref is not None:
@@ -259,7 +231,7 @@ class ReachGoalKeyboardNode:
             f"{_BOLD}{_CYN}|  GP11 Reach Goal Keyboard Control    |{_RST}",
             f"{_BOLD}{_CYN}+--------------------------------------+{_RST}",
             f"",
-            f"  TF ({OBS_REF_FRAME}) : {tf_status}   {init_flag}",
+            f"  FK ({OBS_REF_FRAME}) : {fk_status}   {init_flag}",
             f"  goal [obs_ref]: [{goal[0]:+.3f}  {goal[1]:+.3f}  {goal[2]:+.3f}]",
             f"  goal ↔ tool dist : {dist_str}",
             f"  step             : {_BOLD}{step:.3f} m{_RST}",
@@ -363,16 +335,13 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--anchor_side", choices=("left", "right"), default="left",
                         help="固定端：left=左臂固定右臂活动，right=右臂固定左臂活动")
-    parser.add_argument("--world_frame", default="world",
-                        help="TF 根坐标系，Gazebo 用 world，实物用 base_link")
     args, _ = parser.parse_known_args(
         [a for a in sys.argv[1:] if not a.startswith("__")]
     )
 
-    global ANCHOR_LINK, TOOL_LINK, WORLD_FRAME, OBS_REF_FRAME
+    global ANCHOR_LINK, TOOL_LINK, OBS_REF_FRAME
     ANCHOR_LINK, TOOL_LINK = _ANCHOR_TO_LINKS[args.anchor_side]
     OBS_REF_FRAME = ANCHOR_LINK
-    WORLD_FRAME = args.world_frame
 
     # 加载训练侧 FK 模型（包内预置 URDF，不依赖外部路径）
     _THIS_DIR = Path(__file__).resolve().parent
