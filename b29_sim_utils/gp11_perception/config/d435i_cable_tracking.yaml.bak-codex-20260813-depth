@@ -30,7 +30,7 @@ silver_prefilter_fallback_enabled: true
 silver_score_weight: 60.0
 silver_support_penalty_weight: 90.0
 min_depth_m: 0.10
-max_depth_m: 0.45
+max_depth_m: 1.5
 cable_depth_filter_enabled: false
 cable_depth_min_m: 0.10
 cable_depth_max_m: 0.3

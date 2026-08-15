@@ -34,7 +34,7 @@ def run_obstacle_cycle(client, obstacle_index, pass_count,
                 "the expected side {}"
             ).format(
                 obstacle_index,
-                expected_side or "selected from signed wheel travel",
+                expected_side or "selected from SMC cruise direction",
             )
             return 1, failure, first_crossing_side, final_crossing_side
         if first_crossing_side is None:
@@ -95,7 +95,7 @@ def main():
         return 1
     rospy.loginfo(
         "Automatic disconnect-to-flip integration is active for %d pass(es) "
-        "per obstacle; continuous_obstacles=%s; SMC wheel travel selects "
+        "per obstacle; continuous_obstacles=%s; SMC cruise direction selects "
         "each obstacle's first side",
         pass_count,
         continuous_obstacles,
@@ -150,7 +150,7 @@ def main():
         rospy.loginfo(
             "Obstacle %d cycle reset is complete; previous side selection "
             "has been discarded and the next obstacle will be selected from "
-            "new signed wheel travel",
+            "new SMC cruise direction",
             obstacle_index,
         )
         obstacle_index += 1

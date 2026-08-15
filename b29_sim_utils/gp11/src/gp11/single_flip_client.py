@@ -18,6 +18,7 @@ DEFAULT_TARGET_FRAME = "world"
 DEFAULT_TARGET_X = 0.0060528
 DEFAULT_TARGET_Y = -0.00000272
 DEFAULT_TARGET_Z = -0.7399961
+DEFAULT_REVERSE_TARGET_X = 0.1700000
 DEFAULT_REVERSE_TARGET_Z = 0.7399961
 REACH_JOINTS = (
     "left_first_leg_joint",
@@ -48,7 +49,7 @@ TARGET_PROFILE_BY_FIRST_CROSSING_SIDE = {
 
 
 def target_profile_for_first_crossing_side(first_crossing_side):
-    """Return the commissioned travel profile selected by SMC wheel travel."""
+    """Return the commissioned travel profile selected by the SMC direction code."""
     try:
         return TARGET_PROFILE_BY_FIRST_CROSSING_SIDE[first_crossing_side]
     except KeyError:
@@ -111,7 +112,7 @@ class SingleFlipClient(object):
             "~reverse_target_frame", self._target_frame
         )
         self._reverse_target_x = float(rospy.get_param(
-            "~reverse_target_x", self._target_x
+            "~reverse_target_x", DEFAULT_REVERSE_TARGET_X
         ))
         self._reverse_target_y = float(rospy.get_param(
             "~reverse_target_y", self._target_y

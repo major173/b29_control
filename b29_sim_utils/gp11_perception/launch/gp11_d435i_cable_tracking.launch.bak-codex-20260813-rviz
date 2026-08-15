@@ -4,7 +4,7 @@
   <arg name="serial_no" default=""/>
   <arg name="output_frame" default=""/>
   <arg name="publish_target_to_moveit" default="false"/>
-  <arg name="launch_rviz" default="false"/>
+  <arg name="launch_rviz" default="true"/>
   <arg name="rviz_fixed_frame" default="camera_link"/>
   <arg name="rviz_config" default="$(find gp11_perception)/rviz/d435i_cable_tracking.rviz"/>
 

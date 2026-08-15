@@ -57,7 +57,16 @@ ObstacleCrossingRuntime::Actions ObstacleCrossingRuntime::update(const ros::Time
       failed_operation_ = FailedOperation::None;
       last_failure_reason_.clear();
       first_crossing_side_ =
-          firstSideFromSignedWheelTravel(inputs.signed_wheel_travel);
+          firstSideFromCruiseDriveRequest(inputs.last_nonzero_cruise_drive_request);
+      if (first_crossing_side_ == CrossingSide::None)
+      {
+        // A Stop frame is expected immediately before disconnect.  If no
+        // non-zero direction has ever been observed, remain idle and wait for
+        // a real direction; do not infer a side from encoders or start any
+        // crossing action.
+        refreshGravityCompensationLatch();
+        return actions;
+      }
       crossing_side_ = first_crossing_side_;
       grip_confirmation_low_seen_ = false;
       enterOpenGripperBeforeGravityCompensation(
@@ -171,7 +180,7 @@ ObstacleCrossingRuntime::Actions ObstacleCrossingRuntime::update(const ros::Time
           enterCompleteWaitObstacleClear(time, "both_sides_completed", actions);
         }
       }
-      else if (gripWaitElapsed(time))
+      else if (regripWaitElapsed(time))
       {
         int* retry_count = retryCounter(FailedOperation::Regrip, crossing_side_);
         if (retry_count == nullptr)
@@ -319,7 +328,9 @@ ObstacleCrossingRuntime::TraceState ObstacleCrossingRuntime::traceState() const
   state.right_regrip_retry_count = static_cast<std::uint32_t>(retry_counts_.regrip[1]);
   state.retry_limit = static_cast<std::uint32_t>(config_.retry_limit);
   state.gripper_wait_start_time = gripper_wait_start_time_;
-  state.wait_for_grip_respond_time = config_.wait_for_grip_respond_time;
+  state.wait_for_grip_respond_time =
+      stage_ == ObstacleCrossingStage::Regrip ?
+      config_.regrip_confirmation_timeout : config_.wait_for_grip_respond_time;
   state.last_failure_reason = last_failure_reason_;
   state.obstacle_crossing_trigger = previous_obstacle_crossing_trigger_;
   state.obstacle_trigger_rising_edge = obstacle_trigger_rising_edge_;
@@ -437,6 +448,11 @@ bool ObstacleCrossingRuntime::gripWaitElapsed(const ros::Time& time) const
   return (time - gripper_wait_start_time_) >= ros::Duration(config_.wait_for_grip_respond_time);
 }
 
+bool ObstacleCrossingRuntime::regripWaitElapsed(const ros::Time& time) const
+{
+  return (time - gripper_wait_start_time_) >= ros::Duration(config_.regrip_confirmation_timeout);
+}
+
 int* ObstacleCrossingRuntime::retryCounter(FailedOperation operation, CrossingSide side)
 {
   const auto* runtime = static_cast<const ObstacleCrossingRuntime*>(this);
@@ -507,14 +523,22 @@ CrossingSide ObstacleCrossingRuntime::oppositeSide(CrossingSide side)
   return CrossingSide::None;
 }
 
-CrossingSide ObstacleCrossingRuntime::firstSideFromSignedWheelTravel(
-    double signed_wheel_travel)
+CrossingSide ObstacleCrossingRuntime::firstSideFromCruiseDriveRequest(
+    CruiseDriveRequest request)
 {
-  if (signed_wheel_travel < 0.0)
+  // The commissioned profiles are tied to the lower-level travel command:
+  // Forward selects the Left/free-side pass; Reverse mirrors that to Right.
+  // Stop and Invalid carry no direction and are handled by the caller as a
+  // no-op.
+  if (request == CruiseDriveRequest::Forward)
+  {
+    return CrossingSide::Left;
+  }
+  if (request == CruiseDriveRequest::Reverse)
   {
     return CrossingSide::Right;
   }
-  return CrossingSide::Left;
+  return CrossingSide::None;
 }
 
 const char* ObstacleCrossingRuntime::failedOperationReasonName(FailedOperation operation)

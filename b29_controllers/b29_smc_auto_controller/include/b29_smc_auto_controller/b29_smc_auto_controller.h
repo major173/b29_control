@@ -150,6 +150,7 @@ private:
   std::array<double, kWheelJointCount> wheel_travel_current_positions_{};
   double signed_wheel_travel_{0.0};
   bool wheel_travel_baseline_initialized_{false};
+  CruiseDriveRequest last_nonzero_cruise_drive_request_{CruiseDriveRequest::Stop};
 
   std::array<hardware_interface::JointStateHandle, kPositionJointCount> joint_state_handles_{};
   CommandDispatcher::PositionJointHandles position_joint_handles_{};

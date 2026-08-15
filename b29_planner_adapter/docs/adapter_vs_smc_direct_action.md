@@ -1,5 +1,7 @@
 # B29 Planner Adapter 与 SMC 直接实现 FollowJointTrajectory 对比报告
 
+> 状态：架构评估文档，当前未实施。生产代码仍采用独立 Planner Adapter -> SMC PlannerControl 的逐点 ACK 方案。不要把本文“建议迁移”的内容当作现状，也不要在没有专项设计和实机回归时直接照此重构。
+
 ## 1. 文档目的
 
 本文用于评审 B29 的 MoveIt 轨迹执行架构，比较以下两种方案：

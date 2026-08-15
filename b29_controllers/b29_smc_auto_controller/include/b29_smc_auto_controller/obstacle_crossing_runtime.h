@@ -18,6 +18,7 @@ public:
   struct Config
   {
     double wait_for_grip_respond_time{12.0};
+    double regrip_confirmation_timeout{20.0};
     int retry_limit{2};
   };
 
@@ -44,7 +45,9 @@ public:
     bool obstacle_trigger_edge_sequences_valid{false};
     std::uint64_t obstacle_trigger_rising_edge_sequence{0};
     std::uint64_t obstacle_trigger_falling_edge_sequence{0};
-    double signed_wheel_travel{0.0};
+    // Direction remembered from the latest non-zero lower-level cruise command.
+    // A Stop frame carries no direction and must not overwrite this value.
+    CruiseDriveRequest last_nonzero_cruise_drive_request{CruiseDriveRequest::Stop};
     bool grip_confirmed{false};
     bool safety_blocked{false};
   };
@@ -130,11 +133,12 @@ private:
   void refreshGravityCompensationLatch();
   bool consumeGripConfirmation(bool grip_confirmed);
   bool gripWaitElapsed(const ros::Time& time) const;
+  bool regripWaitElapsed(const ros::Time& time) const;
   int* retryCounter(FailedOperation operation, CrossingSide side);
   const int* retryCounter(FailedOperation operation, CrossingSide side) const;
   FailedOperation failedOperationForStage() const;
   static CrossingSide oppositeSide(CrossingSide side);
-  static CrossingSide firstSideFromSignedWheelTravel(double signed_wheel_travel);
+  static CrossingSide firstSideFromCruiseDriveRequest(CruiseDriveRequest request);
   static const char* failedOperationReasonName(FailedOperation operation);
 
   Config config_{};

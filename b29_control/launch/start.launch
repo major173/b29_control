@@ -90,7 +90,7 @@
          <param name="target_y" value="-0.00000272"/>
          <param name="target_z" value="-0.7399961"/>
          <param name="reverse_target_frame" value="world"/>
-         <param name="reverse_target_x" value="0.0060528"/>
+         <param name="reverse_target_x" value="0.1700000"/>
          <param name="reverse_target_y" value="-0.00000272"/>
          <param name="reverse_target_z" value="0.7399961"/>
          <param name="post_disconnect_stability_timeout" value="20.0"/>

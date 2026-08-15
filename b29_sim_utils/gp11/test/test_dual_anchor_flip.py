@@ -32,6 +32,7 @@ from gp11.cartesian_goal_core import (  # noqa: E402
     unwrap_direction_goal,
 )
 from gp11.single_flip_client import (  # noqa: E402
+    DEFAULT_REVERSE_TARGET_X,
     DEFAULT_REVERSE_TARGET_Z,
     DEFAULT_TARGET_Z,
     SingleFlipClient,
@@ -299,6 +300,7 @@ class DualAnchorFlipTest(unittest.TestCase):
             DEFAULT_REVERSE_TARGET_Z,
             -DEFAULT_TARGET_Z,
         )
+        self.assertAlmostEqual(DEFAULT_REVERSE_TARGET_X, 0.1700000)
 
         client = FakeFlipClient(("Left", "Right"))
         result = run_obstacle_cycle(client, 1, 2, 150.0, 5.0)

@@ -198,6 +198,9 @@ bool B29SmcAutoController::loadParameters(ros::NodeHandle& controller_nh)
   controller_nh.param<double>("obstacle_crossing/wait_for_grip_respond_time",
                               crossing_config.wait_for_grip_respond_time,
                               crossing_config.wait_for_grip_respond_time);
+  controller_nh.param<double>("obstacle_crossing/regrip_confirmation_timeout",
+                              crossing_config.regrip_confirmation_timeout,
+                              crossing_config.regrip_confirmation_timeout);
   controller_nh.param<double>("obstacle_crossing/disconnect_cable_step_duration",
                               disconnect_config.step_duration,
                               disconnect_config.step_duration);
@@ -357,6 +360,15 @@ AutoInputSnapshot B29SmcAutoController::buildInputSnapshot(const ros::Time& time
   AutoInputSnapshot snapshot = input_mux_.buildSnapshot();
   snapshot.emergency_stop = snapshot.emergency_stop || software_emergency_stop_latched_.load();
   snapshot.manual_reset_requested = snapshot.manual_reset_requested || manual_reset_requested_.exchange(false);
+  // The robot is expected to stop before crossing.  Keep the last actual
+  // travel direction while Stop (0) is reported, so the crossing side is not
+  // lost at the disconnect trigger. Invalid values likewise do not overwrite
+  // a valid direction.
+  if (snapshot.cruise_drive_request == CruiseDriveRequest::Forward ||
+      snapshot.cruise_drive_request == CruiseDriveRequest::Reverse)
+  {
+    last_nonzero_cruise_drive_request_ = snapshot.cruise_drive_request;
+  }
   last_input_snapshot_ = snapshot;
   return snapshot;
 }
@@ -789,7 +801,7 @@ void B29SmcAutoController::updateObstacleCrossingRuntime(const ros::Time& time)
       last_input_snapshot_.obstacle_trigger_rising_edge_sequence;
   inputs.obstacle_trigger_falling_edge_sequence =
       last_input_snapshot_.obstacle_trigger_falling_edge_sequence;
-  inputs.signed_wheel_travel = signed_wheel_travel_;
+  inputs.last_nonzero_cruise_drive_request = last_nonzero_cruise_drive_request_;
   inputs.grip_confirmed = robot_context_.isGripConfirmed();
 
   ObstacleCrossingRuntime::Events events;

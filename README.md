@@ -6,23 +6,29 @@
 
 - `b29_control`：硬件接口、控制帧与反馈帧协议、主启动入口。
 - `b29_controllers/b29_smc_auto_controller`：RobotFSM、障碍物翻越 FSM、遥控阶段与命令仲裁。
-- `b29_planner_adapter`：MoveIt ExecuteTrajectory 与 SMC PlannerControl 的适配。
+- `b29_planner_adapter`：MoveIt `FollowJointTrajectory` 与 SMC PlannerControl 的适配。
 - `b29_tools/rqt_b29_smc_console`：控制状态与越障调试界面。
 - `b29_sim_utils`：MoveIt、感知及相关辅助工具。
 
 ## 文档入口
 
+- [工程总交接手册（下一会话必须先读）](B29_AUTOMATION_HANDOFF.md)
 - [越障流程说明](b29_controllers/b29_smc_auto_controller/OBSTACLE_CROSSING_WORKFLOW.md)
 - [SMC 控制器说明](b29_controllers/b29_smc_auto_controller/README.md)
 - [Planner Adapter 说明](b29_planner_adapter/README.md)
+- [GP11 MoveIt 说明](b29_sim_utils/gp11/README.md)
+- [rqt 控制台说明](b29_tools/rqt_b29_smc_console/README.md)
 - [越障调试验证](b29_control/docs/b29_smc_obstacle_crossing_debug_validation.md)
 
-构建使用 catkin：
+构建使用 `catkin build`
 
-```bash
-cd ~/桌面/B29_ws
-catkin build
-```
+真机主入口为 `b29_control/launch/start.launch`。该 launch 默认使用 `normal` 模式，连接串口、加载
+SMC、Planner Adapter、GP11 MoveIt 和双遍自动翻越节点；运行前必须阅读交接手册中的安全检查。
+当前仓库不提供 B29 Gazebo 启动入口。
+
+文档维护规则：总状态、分支、实机结论、硬性不变量、参数基线和踩坑只在
+`B29_AUTOMATION_HANDOFF.md` 汇总维护；各包 README 只解释本包实现。若局部文档与总交接冲突，
+先以当前代码和总交接为准，再修正文档，不要按旧文档回退代码。
 
 ## 通信协议
 
@@ -172,6 +178,7 @@ Block 8 (Byte 91-103): **电机 8** 的 ID, Pos, Vel, Tor
 - `2`：Reverse，左右轮速度目标使用固定负值 `-0.10`。
 - 具体速度目标数值大小在上位机修改。
 - 其他值无效，上位机保持轮子停止并输出告警。
+- 上位机记住最近一次非零请求用于越障首侧判断：Forward 先 Left，Reverse 先 Right；停车帧不会覆盖该方向。
 - 只有外层状态为 `Traversing`，且越障阶段为 `Idle` 或
   `CompleteWaitObstacleClear` 时，轮速才允许非零。
 
@@ -203,7 +210,7 @@ Block 8 (Byte 91-103): **电机 8** 的 ID, Pos, Vel, Tor
 | `第 6 位` | `左夹爪电机`      |
 | `第 7 位` | `右夹爪电机`      |
 
-**夹爪初始化状态位**
+**夹爪夹紧确认状态位**
 
 - 此状态位用以判断两个夹爪是否皆夹紧线缆， `0` 表示任意一个夹爪没有夹紧线缆  `1` 表示两个夹爪都夹紧线缆
 
@@ -295,7 +302,7 @@ void slave_send_packet(void){
         index += 4u;
     }
 
-    /* 遥控增量与上位机 ROS 关节坐标同单位、同方向 */
+    /* 遥控增量与上位机 ROS 关节坐标同单位、同顺序；方向由上位机配置映射 */
     for (uint8_t i = 0; i < 4u; i++) {
         memcpy(&tx_buf[index], remote_joint_increment[i].u8_temp, 4u);
         index += 4u;
