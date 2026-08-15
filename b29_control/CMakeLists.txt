@@ -181,6 +181,13 @@ catkin_install_python(PROGRAMS
         scripts/gazebo_rl_bridge_node.py
         scripts/reach_goal_keyboard_node.py
         scripts/update_gp11_urdf.py
+        DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+
+# Python helper modules are imported by the nodes and are not rosrun entry points.
+install(FILES
+        scripts/dls_reach_controller.py
+        scripts/reach_policy.py
         scripts/urdf_kinematics.py
         DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

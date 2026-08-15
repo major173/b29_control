@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-gazebo_rl_bridge_node.py — Gazebo 执行端（mujoco_sim_node 的替换点）
+gazebo_rl_bridge_node.py — Gazebo / 实机共用 position controller 桥
 
 订阅 /gp11/rl/joint_targets (Float64MultiArray, 4D)，
 按 active_dof_names 顺序分拆并转发到 4 个 position_controller command topic。
@@ -11,8 +11,8 @@ gazebo_rl_bridge_node.py — Gazebo 执行端（mujoco_sim_node 的替换点）
   [2] right_first_leg_joint
   [3] right_second_leg_joint
 
-替换逻辑（sim→real）：
-  本节点被实机执行器节点替换后，rl_inference_node 零改动。
+Gazebo 与实机均使用同一组 ros_control position controller command 话题，
+因此两种部署都需要本桥接节点。
 """
 
 from __future__ import annotations
