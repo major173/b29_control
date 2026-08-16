@@ -127,9 +127,10 @@ void RobotContext::tick50Hz()
   {
     auto_start_requested_ = false;
 
-    if (input_.manual_reset_requested)
+    if (manual_reset_requested_)
     {
       fsm_.evManualReset();
+      manual_reset_requested_ = false;
       return;
     }
 
@@ -164,7 +165,16 @@ void RobotContext::setInputSnapshot(const b29_smc_auto_controller::AutoInputSnap
     auto_start_requested_ = true;
   }
 
+  const bool allow_manual_reset_latch =
+      started_ && (fsm_.getState().getId() == RobotFSM::SafeStop.getId());
+  if (allow_manual_reset_latch && input.manual_reset_requested &&
+      !last_input_manual_reset_requested_)
+  {
+    manual_reset_requested_ = true;
+  }
+
   last_input_auto_start_requested_ = input.auto_start_requested;
+  last_input_manual_reset_requested_ = input.manual_reset_requested;
   input_ = input;
 }
 
@@ -257,8 +267,23 @@ bool RobotContext::isObstacleDetected() const
 
 void RobotContext::setCruiseCommand()
 {
-  setDriveMode(robot_fsm::DriveMode::Forward);
-  setTargetSpeed(getCruiseSpeed());
+  double target_speed = 0.0;
+  switch (input_.cruise_drive_request)
+  {
+    case 1u:
+      target_speed = getCruiseSpeed();
+      break;
+    case 2u:
+      target_speed = -getCruiseSpeed();
+      break;
+    case 0u:
+    default:
+      break;
+  }
+
+  setDriveMode(target_speed == 0.0 ? robot_fsm::DriveMode::Stop
+                                   : robot_fsm::DriveMode::Forward);
+  setTargetSpeed(target_speed);
   command_.freeze_joints = false;
   setCommandReason("cruise_command");
 }

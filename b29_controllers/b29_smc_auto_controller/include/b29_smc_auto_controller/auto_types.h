@@ -114,6 +114,8 @@ struct AutoInputSnapshot
   bool post_check_passed{false};
   bool post_check_failed{false};
   bool auto_run_pause{false};
+  uint8_t cruise_drive_request{0};
+  bool obstacle_crossing_trigger{false};
 };
 
 struct AutoControlCommand

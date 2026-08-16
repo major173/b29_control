@@ -11,6 +11,9 @@
 <launch>
     <arg name="use_sim_time" default="true"/>
     <arg name="anchor_side"  default="left"/>   <!-- left/right/base: 固定左端/右端/base_link -->
+    <arg name="anchor_roll"  default="0.0"/>   <!-- 固定端相对世界系的 roll，rad -->
+    <arg name="anchor_pitch" default="0.0"/>   <!-- 固定端相对世界系的 pitch，rad -->
+    <arg name="anchor_yaw"   default="0.0"/>   <!-- 固定端相对世界系的 yaw，rad -->
     <arg name="rviz"         default="false"/>
 
     <param name="use_sim_time" value="$(arg use_sim_time)"/>
@@ -31,22 +34,23 @@
 
     <node name="spawn_urdf" pkg="gazebo_ros" type="spawn_model"
           args="-x 0.0 -y 0.0 -z 1.0
-              -R 0.0 -P 0.0 -Y 0.0
+              -R $(arg anchor_roll) -P $(arg anchor_pitch) -Y $(arg anchor_yaw)
               -param robot_description -urdf -model b29"/>
 
     <rosparam file="$(find b29_control)/config/controller.yaml" command="load"/>
     <rosparam file="$(find b29_control)/config/reach_rl_controllers.yaml" command="load"/>
 
-    <node name="controller_manager" pkg="controller_manager" type="controller_manager"
+    <node name="controller_spawner"
+          pkg="controller_manager"
+          type="spawner"
           output="screen"
-          args="load
-          b29_controller/joint_state_controller
-          b29_controller/robot_state_controller
-          b29_controller/left_first_leg_joint_position_controller
-          b29_controller/left_second_leg_joint_position_controller
-          b29_controller/right_first_leg_joint_position_controller
-          b29_controller/right_second_leg_joint_position_controller
-        "/>
+          args="b29_controller/joint_state_controller
+                b29_controller/robot_state_controller
+                b29_controller/imu_sensor_controller
+                b29_controller/left_first_leg_joint_position_controller
+                b29_controller/left_second_leg_joint_position_controller
+                b29_controller/right_first_leg_joint_position_controller
+                b29_controller/right_second_leg_joint_position_controller"/>
 
     <!-- robot_state_publisher: 将 /joint_states 转换为 /tf，RViz 渲染 mesh 必须 -->
     <node name="robot_state_publisher" pkg="robot_state_publisher"
@@ -60,6 +64,9 @@
           type="anchor_world_tf_publisher.py" output="screen">
         <param name="anchor_link"  value="$(eval 'base_link' if arg('anchor_side') == 'base' else arg('anchor_side') + '_second_leg')"/>
         <param name="anchor_side"  value="$(arg anchor_side)"/>
+        <param name="anchor_roll"  value="$(arg anchor_roll)"/>
+        <param name="anchor_pitch" value="$(arg anchor_pitch)"/>
+        <param name="anchor_yaw"   value="$(arg anchor_yaw)"/>
         <param name="rate"         value="50.0"/>
     </node>
 

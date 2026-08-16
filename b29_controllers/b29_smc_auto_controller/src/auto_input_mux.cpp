@@ -91,6 +91,10 @@ AutoInputSnapshot AutoInputMux::buildSnapshot() const
     snapshot.post_check_passed = auto_state_.post_check_passed;
     snapshot.post_check_failed = auto_state_.post_check_failed;
     snapshot.auto_run_pause = false;
+    snapshot.cruise_drive_request = auto_state_.cruise_drive_request;
+    snapshot.auto_start_requested = auto_state_.auto_start_requested;
+    snapshot.manual_reset_requested = auto_state_.manual_reset_requested;
+    snapshot.obstacle_crossing_trigger = auto_state_.obstacle_crossing_trigger;
     snapshot.stamp = auto_state_.header.stamp;
   }
 

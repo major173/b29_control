@@ -101,6 +101,8 @@ private:
   bool started_{false};
   bool auto_start_requested_{false};
   bool last_input_auto_start_requested_{false};
+  bool manual_reset_requested_{false};
+  bool last_input_manual_reset_requested_{false};
   bool reconnect_timer_active_{false};
   std::uint32_t reconnect_timer_ticks_{0};
   bool auto_init_timer_active_{false};

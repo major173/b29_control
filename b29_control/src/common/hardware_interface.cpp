@@ -4,6 +4,8 @@
 
 #include "steering_engine/common/hardware_interface.h"
 
+#include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstring>
 
@@ -40,6 +42,10 @@ bool StRobotHW::init(ros::NodeHandle &root_nh, ros::NodeHandle &robot_hw_nh) {
   // Initialize transmission
   if (!setupTransmission(root_nh)) {
     ROS_ERROR("Error occurred while setting up transmission");
+    return false;
+  }
+  if (!loadGravityCompensation(root_nh)) {
+    ROS_ERROR("Failed to initialize gravity compensation");
     return false;
   }
   //  Initialize joint limit if (!setupJointLimit(root_nh)) {
@@ -125,14 +131,13 @@ void StRobotHW::read(const ros::Time &time, const ros::Duration &period) {
 }
 
 void StRobotHW::write(const ros::Time &time, const ros::Duration &period) {
+  updateGravityCompensation(time, period);
+
   if (!serial_.isOpen()) {
     tryReconnectSerial(time);
     return;
   }
   
-  static std::array<uint8_t, k_data_length_> last_send_data{};
-  static uint8_t last_gravity_compensation_mode = 0;
-  static bool has_last_send = false;
   std::array<uint8_t, k_data_length_> data{};
 
   if (jnt_to_act_position_interface_) {
@@ -186,6 +191,14 @@ void StRobotHW::write(const ros::Time &time, const ros::Duration &period) {
       sanitizeCommand("right second leg angle", cmd_[joint_angle_indices[3]],
                       positionFallback(joint_angle_indices[3])),
   };
+  std::array<double, k_torque_ff_count_> joint_torque_feedforward{};
+  const bool torque_ff_valid =
+      gravity_transmit_enabled_ && gravity_feedforward_valid_;
+  if (torque_ff_valid) {
+    for (std::size_t i = 0; i < joint_torque_feedforward.size(); ++i) {
+      joint_torque_feedforward[i] = tau_gravity_[i];
+    }
+  }
 
   uint16_t index = 0;
   auto packFloat = [&data, &index](float value) {
@@ -205,21 +218,15 @@ void StRobotHW::write(const ros::Time &time, const ros::Duration &period) {
     packFloat(static_cast<float>(joint_angle_target));
   }
 
-  if (!has_last_send ||
-      memcmp(data.data(), last_send_data.data(), data.size()) != 0 ||
-      gravity_compensation_mode_ != last_gravity_compensation_mode) {
-    pack(tx_buffer_, control_code_, data.data());
-    tx_len_ = sizeof(tx_buffer_);
-    try {
-      serial_.write(tx_buffer_, tx_len_);
-    }
-    catch (const serial::IOException& e) {
-      handleSerialIoError("Serial write() failed", e);
-      return;
-    }
-    memcpy(last_send_data.data(), data.data(), data.size());
-    last_gravity_compensation_mode = gravity_compensation_mode_;
-    has_last_send = true;
+  pack(tx_buffer_, data.data(), joint_torque_feedforward,
+       torque_ff_valid);
+  tx_len_ = sizeof(tx_buffer_);
+  try {
+    serial_.write(tx_buffer_, tx_len_);
+  }
+  catch (const serial::IOException& e) {
+    handleSerialIoError("Serial write() failed", e);
+    return;
   }
 
   clearTxBuffer();
@@ -368,11 +375,11 @@ void StRobotHW::setInterface() {
   const ActuatorSpec actuator_specs[] = {
       {"left_first_leg_motor", kLeftFirstLeg, false},
       {"left_second_leg_motor", kLeftSecondLeg, false},
-      {"left_rod_motor", kLeftRod, false},
+      {"l_gripper_left_drive_motor", kLeftRod, false},
       {"left_friction_wheel_motor", kLeftFrictionWheel, true},
       {"right_first_leg_motor", kRightFirstLeg, false},
       {"right_second_leg_motor", kRightSecondLeg, false},
-      {"right_rod_motor", kRightRod, false},
+      {"r_gripper_left_drive_motor", kRightRod, false},
       {"right_friction_wheel_motor", kRightFrictionWheel, true},
   };
 
@@ -425,6 +432,10 @@ bool StRobotHW::loadProtocolConfig(ros::NodeHandle &root_nh) {
   }
   gravity_compensation_mode_ =
       static_cast<uint8_t>(gravity_compensation_mode);
+  if (gravity_compensation_mode_ != 0u) {
+    ROS_WARN("V2 control frames always send legacy gravity mode 0; "
+             "host tau_ff is used instead");
+  }
 
   XmlRpc::XmlRpcValue id_map;
   if (!root_nh.getParam("/steering_engine_hw/protocol/id_map", id_map)) {
@@ -439,11 +450,11 @@ bool StRobotHW::loadProtocolConfig(ros::NodeHandle &root_nh) {
   joint_to_actuator_.clear();
   joint_to_actuator_["left_first_leg_joint"] = kLeftFirstLeg;
   joint_to_actuator_["left_second_leg_joint"] = kLeftSecondLeg;
-  joint_to_actuator_["left_rod_joint"] = kLeftRod;
+  joint_to_actuator_["l_gripper_left_drive_joint"] = kLeftRod;
   joint_to_actuator_["left_friction_wheel_joint"] = kLeftFrictionWheel;
   joint_to_actuator_["right_first_leg_joint"] = kRightFirstLeg;
   joint_to_actuator_["right_second_leg_joint"] = kRightSecondLeg;
-  joint_to_actuator_["right_rod_joint"] = kRightRod;
+  joint_to_actuator_["r_gripper_left_drive_joint"] = kRightRod;
   joint_to_actuator_["right_friction_wheel_joint"] = kRightFrictionWheel;
 
   for (const auto &pair : joint_to_actuator_) {
@@ -542,6 +553,91 @@ bool StRobotHW::loadProtocolConfig(ros::NodeHandle &root_nh) {
   return true;
 }
 
+bool StRobotHW::loadGravityCompensation(ros::NodeHandle &root_nh) {
+  const std::string param_ns = "/steering_engine_hw/gravity_compensation";
+  if (!gravity_compensator_.init(*urdf_model_, root_nh, param_ns)) {
+    return false;
+  }
+  if (!gravity_compensator_.enabled()) {
+    return true;
+  }
+
+  root_nh.param(param_ns + "/transmit_enabled",
+                gravity_transmit_enabled_, gravity_transmit_enabled_);
+  XmlRpc::XmlRpcValue torque_scales;
+  if (root_nh.getParam(param_ns + "/torque_scales", torque_scales)) {
+    if (torque_scales.getType() != XmlRpc::XmlRpcValue::TypeArray ||
+        torque_scales.size() !=
+            static_cast<int>(gravity_torque_scales_.size())) {
+      ROS_ERROR_STREAM(param_ns << "/torque_scales must contain four numbers");
+      return false;
+    }
+    for (int i = 0; i < torque_scales.size(); ++i) {
+      double scale = 0.0;
+      if (torque_scales[i].getType() == XmlRpc::XmlRpcValue::TypeDouble) {
+        scale = static_cast<double>(torque_scales[i]);
+      } else if (torque_scales[i].getType() ==
+                 XmlRpc::XmlRpcValue::TypeInt) {
+        scale = static_cast<int>(torque_scales[i]);
+      } else {
+        ROS_ERROR_STREAM(param_ns << "/torque_scales[" << i
+                                  << "] must be numeric");
+        return false;
+      }
+      if (!std::isfinite(scale)) {
+        ROS_ERROR_STREAM(param_ns << "/torque_scales[" << i
+                                  << "] must be finite");
+        return false;
+      }
+      gravity_torque_scales_[i] = scale;
+    }
+  }
+
+  std::string initial_support_side = "LEFT";
+  root_nh.param(param_ns + "/support_side", initial_support_side,
+                initial_support_side);
+  std::transform(initial_support_side.begin(), initial_support_side.end(),
+                 initial_support_side.begin(), [](unsigned char value) {
+                   return static_cast<char>(std::toupper(value));
+                 });
+  if (initial_support_side == "LEFT") {
+    support_side_.store(static_cast<std::uint8_t>(SupportSide::LEFT));
+  } else if (initial_support_side == "RIGHT") {
+    support_side_.store(static_cast<std::uint8_t>(SupportSide::RIGHT));
+  } else {
+    ROS_ERROR_STREAM(param_ns << "/support_side must be LEFT or RIGHT");
+    return false;
+  }
+
+  root_nh.param(param_ns + "/torque_slew_rate",
+                gravity_torque_slew_rate_, gravity_torque_slew_rate_);
+  root_nh.param(param_ns + "/publish_rate",
+                gravity_publish_rate_, gravity_publish_rate_);
+  if (!std::isfinite(gravity_torque_slew_rate_) ||
+      gravity_torque_slew_rate_ <= 0.0 ||
+      !std::isfinite(gravity_publish_rate_) || gravity_publish_rate_ <= 0.0) {
+    ROS_ERROR("Gravity torque_slew_rate and publish_rate must be finite and positive");
+    return false;
+  }
+
+  std::string support_side_topic = "/support_side";
+  std::string torque_topic = "/gravity_compensation/torque_ff";
+  root_nh.param(param_ns + "/support_side_topic", support_side_topic,
+                support_side_topic);
+  root_nh.param(param_ns + "/torque_topic", torque_topic, torque_topic);
+  support_side_sub_ = root_nh.subscribe(support_side_topic, 1,
+                                       &StRobotHW::supportSideCallback, this);
+  gravity_torque_pub_ =
+      root_nh.advertise<std_msgs::Float64MultiArray>(torque_topic, 1);
+
+  ROS_INFO("Gravity feedforward support=%s, transmit=%s, input=%s, output=%s",
+           initial_support_side.c_str(),
+           gravity_transmit_enabled_ ? "enabled" : "disabled",
+           support_side_topic.c_str(),
+           torque_topic.c_str());
+  return true;
+}
+
 void StRobotHW::jointSpeedTargetCallback(
     const std_msgs::Float64::ConstPtr &msg) {
   if (!msg) {
@@ -557,6 +653,119 @@ void StRobotHW::clawSpeedTargetCallback(
   }
   claw_speed_target_[0] = msg->data[0];
   claw_speed_target_[1] = msg->data[1];
+}
+
+void StRobotHW::supportSideCallback(const std_msgs::String::ConstPtr &msg) {
+  if (!msg) {
+    return;
+  }
+
+  std::string side = msg->data;
+  std::transform(side.begin(), side.end(), side.begin(),
+                 [](unsigned char value) {
+                   return static_cast<char>(std::toupper(value));
+                 });
+  if (side == "LEFT") {
+    support_side_.store(static_cast<std::uint8_t>(SupportSide::LEFT));
+  } else if (side == "RIGHT") {
+    support_side_.store(static_cast<std::uint8_t>(SupportSide::RIGHT));
+  } else {
+    ROS_WARN_STREAM_THROTTLE(1.0, "Ignoring invalid support side: " << msg->data);
+  }
+}
+
+void StRobotHW::updateGravityCompensation(const ros::Time &time,
+                                          const ros::Duration &period) {
+  gravity_feedforward_valid_ = false;
+  if (!gravity_compensator_.enabled()) {
+    tau_gravity_.fill(0.0);
+    return;
+  }
+
+  constexpr double kFeedbackTimeoutSec = 0.2;
+  if (last_rx_time_.isZero() ||
+      (time - last_rx_time_).toSec() > kFeedbackTimeoutSec) {
+    tau_gravity_.fill(0.0);
+    return;
+  }
+
+  GravityCompensator::JointVector q_actual;
+  const auto &joint_names = gravity_compensator_.jointNames();
+  for (std::size_t i = 0; i < joint_names.size(); ++i) {
+    const auto handle = joint_states_segment_.find(joint_names[i]);
+    if (handle == joint_states_segment_.end()) {
+      ROS_ERROR_STREAM_THROTTLE(
+          1.0, "Gravity compensation has no joint-state handle for "
+                   << joint_names[i]);
+      tau_gravity_.fill(0.0);
+      return;
+    }
+    q_actual[i] = handle->second.getPosition();
+    if (!std::isfinite(q_actual[i])) {
+      ROS_ERROR_STREAM_THROTTLE(
+          1.0, "Gravity compensation received non-finite position for "
+                   << joint_names[i]);
+      tau_gravity_.fill(0.0);
+      return;
+    }
+  }
+
+  const SupportSide support =
+      support_side_.load() == static_cast<std::uint8_t>(SupportSide::RIGHT)
+          ? SupportSide::RIGHT
+          : SupportSide::LEFT;
+
+  // The lower controller reports an IMU online/ready bit in every feedback
+  // frame. Only use the fused quaternion when both that bit and the local
+  // quaternion sanity checks pass; otherwise keep the original
+  // support-frame-is-vertical gravity model.
+  const bool imu_usable = imu_orientation_valid_ && auto_state_data_.imu_ready;
+  GravityCompensator::JointVector raw_torque;
+  if (imu_usable) {
+    const Eigen::Quaterniond base_imu_orientation(
+        imu_orientation_[3], imu_orientation_[0], imu_orientation_[1],
+        imu_orientation_[2]);
+    const Eigen::Quaterniond support_world_orientation =
+        gravity_compensator_.supportOrientationInWorld(
+            q_actual, support, base_imu_orientation);
+    raw_torque = gravity_compensator_.compute(q_actual, support,
+                                              support_world_orientation);
+  } else {
+    raw_torque = gravity_compensator_.compute(q_actual, support);
+  }
+  ROS_INFO_THROTTLE(5.0,
+                    "[gravity] imu_used=%s imu_online=%s quaternion_valid=%s",
+                    imu_usable ? "true" : "false",
+                    auto_state_data_.imu_ready ? "true" : "false",
+                    imu_orientation_valid_ ? "true" : "false");
+  const double max_step = gravity_torque_slew_rate_ *
+                          std::max(0.0, period.toSec());
+  for (std::size_t i = 0; i < tau_gravity_.size(); ++i) {
+    const double scaled_torque = raw_torque[i] * gravity_torque_scales_[i];
+    if (!std::isfinite(raw_torque[i]) || !std::isfinite(scaled_torque)) {
+      ROS_ERROR_THROTTLE(1.0, "Gravity compensation produced non-finite torque");
+      tau_gravity_.fill(0.0);
+      return;
+    }
+    const double delta = scaled_torque - tau_gravity_[i];
+    tau_gravity_[i] += std::max(-max_step, std::min(max_step, delta));
+  }
+  gravity_feedforward_valid_ = true;
+
+  if (last_gravity_publish_time_.isZero() ||
+      (time - last_gravity_publish_time_).toSec() >=
+          1.0 / gravity_publish_rate_) {
+    std_msgs::Float64MultiArray torque_message;
+    torque_message.layout.dim.resize(1);
+    torque_message.layout.dim[0].label =
+        "left_first_leg_joint,left_second_leg_joint,"
+        "right_first_leg_joint,right_second_leg_joint";
+    torque_message.layout.dim[0].size = tau_gravity_.size();
+    torque_message.layout.dim[0].stride = tau_gravity_.size();
+    torque_message.data.assign(tau_gravity_.begin(), tau_gravity_.end());
+    gravity_torque_pub_.publish(torque_message);
+    last_gravity_publish_time_ = time;
+  }
 }
 
 void StRobotHW::setKDLSegment() {
@@ -596,8 +805,9 @@ void StRobotHW::addChildren(const KDL::SegmentMap::const_iterator segment) {
   }
 }
 
-void StRobotHW::pack(unsigned char *tx_buffer, unsigned char ctrl,
-                     unsigned char *data) {
+void StRobotHW::pack(unsigned char *tx_buffer, const unsigned char *data,
+                     const std::array<double, 4> &torque_ff,
+                     bool torque_ff_valid) {
   memset(tx_buffer, 0, k_frame_length_);
   auto *frame = reinterpret_cast<SerialFrame *>(tx_buffer);
 
@@ -606,17 +816,32 @@ void StRobotHW::pack(unsigned char *tx_buffer, unsigned char ctrl,
     frame->header_[i] = header[i];
   }
   // set control
-  frame->ctrl_ = ctrl;
+  frame->ctrl_ = tx_control_code_;
   // set data length
-  frame->length_ = k_data_length_;
+  frame->length_ = k_payload_length_;
   // set data
   memcpy(frame->data_, data, k_data_length_);
-  // This byte is outside the declared 44-byte payload but covered by CRC.
-  frame->gravity_compensation_mode_ = gravity_compensation_mode_;
+  // V2 host torque feedforward replaces the legacy lower-controller model.
+  frame->legacy_gravity_compensation_mode_ = 0u;
+
+  std::array<float, k_torque_ff_count_> packed_torque{};
+  bool valid_group = torque_ff_valid;
+  for (std::size_t i = 0; i < packed_torque.size(); ++i) {
+    packed_torque[i] = static_cast<float>(torque_ff[i]);
+    if (!std::isfinite(torque_ff[i]) || !std::isfinite(packed_torque[i])) {
+      valid_group = false;
+    }
+  }
+  frame->torque_flags_ = valid_group ? 0x01u : 0x00u;
+  if (valid_group) {
+    for (std::size_t i = 0; i < packed_torque.size(); ++i) {
+      std::memcpy(frame->torque_ff_ + i * sizeof(float),
+                  &packed_torque[i], sizeof(float));
+    }
+  }
   // set crc
   frame->crc_ = getCrc8(tx_buffer, k_header_length_ + k_ctrl_length_ +
-                                       k_length_ + k_data_length_ +
-                                       k_gravity_compensation_length_);
+                                       k_length_ + k_payload_length_);
   // set ender
   for (int i = 0; i < 2; i++) {
     frame->ender_[i] = ender[i];
@@ -636,7 +861,7 @@ void StRobotHW::unpack(std::vector<uint8_t> rx_buffer,const ros::Time &time) {
   }
 
   const uint8_t ctrl = rx_buffer[k_header_length_];
-  if (ctrl != control_code_) {
+  if (ctrl != feedback_control_code_) {
     ROS_WARN_THROTTLE(10, "Received message ctrl %u is unexpected", ctrl);
     return;
   }
@@ -720,6 +945,8 @@ void StRobotHW::unpack(std::vector<uint8_t> rx_buffer,const ros::Time &time) {
   }
 
   const uint8_t remote_control_stage_complete = rx_buffer[index++];
+  const uint8_t cruise_drive_request = rx_buffer[index++];
+  const uint8_t auto_control_signals = rx_buffer[index++];
   const uint8_t motor_health = rx_buffer[index++];
   const uint8_t grip_confirmed = rx_buffer[index++];
   const uint8_t imu_ready = rx_buffer[index++];
@@ -727,6 +954,19 @@ void StRobotHW::unpack(std::vector<uint8_t> rx_buffer,const ros::Time &time) {
   if (index != payload_start + k_feedback_payload_length_) {
     ROS_WARN_THROTTLE(10, "Received payload was not consumed completely");
     return;
+  }
+
+  uint8_t valid_cruise_drive_request = cruise_drive_request;
+  if (cruise_drive_request > 2u) {
+    ROS_WARN_THROTTLE(1.0,
+                      "Invalid cruise drive request %u; keeping wheels stopped",
+                      cruise_drive_request);
+    valid_cruise_drive_request = 0u;
+  }
+  if ((auto_control_signals & 0xf8u) != 0u) {
+    ROS_WARN_THROTTLE(1.0,
+                      "Reserved auto control signal bits must be zero: 0x%02x",
+                      auto_control_signals);
   }
 
   bool joint_fault = false;
@@ -764,6 +1004,13 @@ void StRobotHW::unpack(std::vector<uint8_t> rx_buffer,const ros::Time &time) {
   auto_state_data_.remote_joint_increment = remote_joint_increment;
   auto_state_data_.remote_control_stage_complete =
       remote_control_stage_complete != 0;
+  auto_state_data_.cruise_drive_request = valid_cruise_drive_request;
+  auto_state_data_.auto_start_requested =
+      (auto_control_signals & (1u << 0)) != 0u;
+  auto_state_data_.manual_reset_requested =
+      (auto_control_signals & (1u << 1)) != 0u;
+  auto_state_data_.obstacle_crossing_trigger =
+      (auto_control_signals & (1u << 2)) != 0u;
   auto_state_data_.joint_fault = joint_fault;
   auto_state_data_.grip_fault = grip_fault;
   auto_state_data_.grip_confirmed = grip_confirmed != 0;
@@ -811,7 +1058,7 @@ void StRobotHW::processRxBuffer(const ros::Time& time) {
 
     const uint8_t ctrl = rx_buffer_[k_header_length_];
     const uint8_t length = rx_buffer_[k_header_length_ + k_ctrl_length_];
-    if (ctrl != control_code_ ||
+    if (ctrl != feedback_control_code_ ||
         static_cast<size_t>(length) != k_feedback_payload_length_) {
       rx_buffer_.erase(rx_buffer_.begin());
       continue;
@@ -856,28 +1103,43 @@ void StRobotHW::updateImuState(double acc_x, double acc_y, double acc_z,
   imu_angular_velocity_[1] = gyro_y;
   imu_angular_velocity_[2] = gyro_z;
 
-  tf2::Quaternion q(qx, qy, qz, qw);
+  if (!std::isfinite(qw) || !std::isfinite(qx) || !std::isfinite(qy) ||
+      !std::isfinite(qz)) {
+    imu_orientation_valid_ = false;
+    ROS_WARN_THROTTLE(1.0,
+                      "Received non-finite IMU quaternion; gravity falls back "
+                      "to support-frame-vertical model");
+    return;
+  }
 
+  tf2::Quaternion q(qx, qy, qz, qw);
   const double norm2 = q.length2();
   if (!std::isfinite(norm2) || norm2 < 1e-12) {
-    ROS_WARN_THROTTLE(1.0, "Received invalid IMU quaternion, fallback to RPY");
+    imu_orientation_valid_ = false;
+    ROS_WARN_THROTTLE(1.0,
+                      "Received near-zero IMU quaternion norm; gravity falls "
+                      "back to support-frame-vertical model");
+    return;
   }
 
   q.normalize();
 
-  // Maintain quaternion sign continuity to avoid q / -q jitter
-  const double dot = q.x() * imu_orientation_[0] +
-                     q.y() * imu_orientation_[1] +
-                     q.z() * imu_orientation_[2] +
-                     q.w() * imu_orientation_[3];
-  if (dot < 0.0) {
-    q = tf2::Quaternion(-q.x(), -q.y(), -q.z(), -q.w());
+  // Maintain quaternion sign continuity to avoid q / -q jitter.
+  if (imu_orientation_valid_) {
+    const double dot = q.x() * imu_orientation_[0] +
+                       q.y() * imu_orientation_[1] +
+                       q.z() * imu_orientation_[2] +
+                       q.w() * imu_orientation_[3];
+    if (dot < 0.0) {
+      q = tf2::Quaternion(-q.x(), -q.y(), -q.z(), -q.w());
+    }
   }
 
   imu_orientation_[0] = q.x();
   imu_orientation_[1] = q.y();
   imu_orientation_[2] = q.z();
   imu_orientation_[3] = q.w();
+  imu_orientation_valid_ = true;
 }
 
 bool StRobotHW::initAutoStateData(AutoStateData &data) {
@@ -888,6 +1150,10 @@ bool StRobotHW::initAutoStateData(AutoStateData &data) {
   data.grip_fault = false;
   data.remote_joint_increment.fill(0.0);
   data.remote_control_stage_complete = false;
+  data.cruise_drive_request = 0u;
+  data.auto_start_requested = false;
+  data.manual_reset_requested = false;
+  data.obstacle_crossing_trigger = false;
   return true;
 }
 

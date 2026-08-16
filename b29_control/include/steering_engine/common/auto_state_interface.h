@@ -1,8 +1,11 @@
 #pragma once
 
+#include <array>
+#include <cstdint>
 #include <string>
 #include <hardware_interface/hardware_interface.h>
 #include <hardware_interface/internal/hardware_resource_manager.h>
+#include <std_msgs/Header.h>
 
 namespace steering_engine_hw{
 
@@ -24,6 +27,10 @@ struct AutoStateData
     bool grip_fault{false};
     std::array<double, 4> remote_joint_increment{};
     bool remote_control_stage_complete{false};
+    uint8_t cruise_drive_request{0};
+    bool auto_start_requested{false};
+    bool manual_reset_requested{false};
+    bool obstacle_crossing_trigger{false};
 
     bool obstacle_detected{false};
     ObstacleType obstacle_type{ObstacleType::OBSTACLE_UNKNOWN};

@@ -22,7 +22,10 @@ int main(int argc, char **argv) {
   }
   ros::Rate loop_rate(control_loop_rate_hz);
   ros::NodeHandle nh_hw("~");
-  hardware.init(nh, nh_hw);
+  if (!hardware.init(nh, nh_hw)) {
+    ROS_ERROR("Failed to initialize B29 hardware");
+    return 1;
+  }
 
   // Setup a separate thread that will be used to service ROS callbacks.
   ros::AsyncSpinner spinner(1);
