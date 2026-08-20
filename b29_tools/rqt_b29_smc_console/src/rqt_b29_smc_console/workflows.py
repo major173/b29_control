@@ -14,10 +14,12 @@ BASE_READY_SENSOR_PAYLOAD = {
     'grip_confirmed': True,
     'joint_fault': False,
     'grip_fault': False,
-    'obstacle_detected': False,
+    'cruise_drive_request': 0,
+    'auto_start': False,
+    'manual_reset': False,
+    'obstacle_crossing_trigger': False,
     'obstacle_type': AutoSensorInput.OBSTACLE_UNKNOWN,
     'classification_stable': False,
-    'range_to_obstacle': 0.0,
     'at_crossing_position': False,
     'post_check_passed': False,
     'post_check_failed': False,
@@ -36,10 +38,12 @@ def build_default_workflows():
                     'grip_confirmed': False,
                     'joint_fault': False,
                     'grip_fault': False,
-                    'obstacle_detected': False,
+                    'cruise_drive_request': 0,
+                    'auto_start': False,
+                    'manual_reset': False,
+                    'obstacle_crossing_trigger': False,
                     'obstacle_type': AutoSensorInput.OBSTACLE_UNKNOWN,
                     'classification_stable': False,
-                    'range_to_obstacle': 0.0,
                     'at_crossing_position': False,
                     'post_check_passed': False,
                     'post_check_failed': False,
@@ -74,13 +78,6 @@ def build_default_workflows():
                 action='pulse',
                 description='request auto start',
                 payload={'field': 'auto_start_requested', 'value': True},
-                expected_state='AutoInit',
-                timeout_sec=1.0,
-            ),
-            WorkflowStep(
-                action='sensor',
-                description='confirm traversing after auto init',
-                payload=dict(BASE_READY_SENSOR_PAYLOAD),
                 expected_state='Traversing',
                 timeout_sec=2.0,
             ),
@@ -140,6 +137,8 @@ class WorkflowRunner:
         elif step.action == 'clear':
             field_name, _value = self._resolve_field_payload(step.payload, default_value=None)
             self._topic_facade.clear_override(field_name)
+        elif step.action == 'service':
+            self._call_service(step.payload)
         else:
             raise ValueError(f'Unsupported workflow action: {step.action}')
 
@@ -166,3 +165,19 @@ class WorkflowRunner:
         if 'field_name' in payload:
             return payload['field_name'], payload.get('value', default_value)
         raise ValueError('Workflow step payload must include field or field_name')
+
+    def _call_service(self, payload):
+        if not isinstance(payload, Mapping) or 'name' not in payload:
+            raise ValueError('Service workflow payload must include name')
+        services = {
+            'planner_release': self._topic_facade.call_planner_release,
+            'software_emergency_stop': self._topic_facade.call_software_emergency_stop,
+            'manual_reset': self._topic_facade.call_manual_reset,
+        }
+        try:
+            callback = services[payload['name']]
+        except KeyError as exc:
+            raise ValueError(f'Unsupported workflow service: {payload["name"]}') from exc
+        response = callback()
+        if hasattr(response, 'success') and not response.success:
+            raise RuntimeError(getattr(response, 'message', 'service rejected request'))

@@ -18,7 +18,7 @@ digraph RobotFSM {
             [label="{AutoInit|Entry/\l&nbsp;&nbsp;&nbsp;startInitSequence;\lExit/\l&nbsp;&nbsp;&nbsp;clearInitFlags;\l|evAutoStart/\levTick/\l}"];
 
         "RobotFSM::Traversing"
-            [label="{Traversing|Entry/\l&nbsp;&nbsp;&nbsp;setCruiseCommand;\l|evAutoStart/\levTick\l\[ctxt.isObstacleDetected()\]/\levTick\l\[ctxt.isObstacleNotDetected()\]/\l&nbsp;&nbsp;&nbsp;setCruiseCommand;\l}"];
+            [label="{Traversing|Entry/\l&nbsp;&nbsp;&nbsp;setCruiseCommand;\l|evAutoStart/\levTick/\l&nbsp;&nbsp;&nbsp;setCruiseCommand;\l}"];
 
         "RobotFSM::CommsLoss"
             [label="{CommsLoss|Entry/\l&nbsp;&nbsp;&nbsp;startReconnectTimer;\l&nbsp;&nbsp;&nbsp;alertCommsLoss;\lExit/\l&nbsp;&nbsp;&nbsp;stopReconnectTimer;\l|evAutoStart/\levTick/\levCommsLost/\l}"];

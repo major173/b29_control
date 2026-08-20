@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>b29_planner_adapter</name>
+  <version>0.1.0</version>
+  <description>Validated FollowJointTrajectory adapter for the B29 SMC PlannerControl interface.</description>
+  <maintainer email="yi@todo.todo">yi</maintainer>
+  <license>BSD-3-Clause</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <depend>actionlib</depend>
+  <depend>b29_smc_auto_controller</depend>
+  <depend>control_msgs</depend>
+  <depend>roscpp</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_srvs</depend>
+  <depend>trajectory_msgs</depend>
+  <test_depend>gtest</test_depend>
+
+  <export/>
+</package>

@@ -1,0 +1,28 @@
+planner_configs:
+  RRTConnectkConfigDefault:
+    type: geometric::RRTConnect
+    range: 0.0
+
+left_arm:
+  planner_configs:
+    - RRTConnectkConfigDefault
+  projection_evaluator: joints(left_first_leg_joint,left_second_leg_joint)
+  longest_valid_segment_fraction: 0.005
+
+right_arm:
+  planner_configs:
+    - RRTConnectkConfigDefault
+  projection_evaluator: joints(right_first_leg_joint,right_second_leg_joint)
+  longest_valid_segment_fraction: 0.005
+
+dual_arm:
+  planner_configs:
+    - RRTConnectkConfigDefault
+  projection_evaluator: joints(left_first_leg_joint,left_second_leg_joint)
+  longest_valid_segment_fraction: 0.005
+
+reach_arm:
+  planner_configs:
+    - RRTConnectkConfigDefault
+  projection_evaluator: joints(right_first_leg_joint,right_second_leg_joint,left_first_leg_joint,left_second_leg_joint)
+  longest_valid_segment_fraction: 0.005

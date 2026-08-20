@@ -192,8 +192,19 @@ void StRobotHW::write(const ros::Time &time, const ros::Duration &period) {
                       positionFallback(joint_angle_indices[3])),
   };
   std::array<double, k_torque_ff_count_> joint_torque_feedforward{};
+  const uint8_t requested_gravity_mode =
+      auto_state_data_.gravity_compensation_mode;
+  if (gravity_controller_mode_enabled_) {
+    // The named leg is the moving leg, so the opposite side is the support.
+    if (requested_gravity_mode == 1u) {
+      support_side_.store(static_cast<std::uint8_t>(SupportSide::RIGHT));
+    } else if (requested_gravity_mode == 2u) {
+      support_side_.store(static_cast<std::uint8_t>(SupportSide::LEFT));
+    }
+  }
   const bool torque_ff_valid =
-      gravity_transmit_enabled_ && gravity_feedforward_valid_;
+      gravity_transmit_enabled_ && gravity_feedforward_valid_ &&
+      (!gravity_controller_mode_enabled_ || requested_gravity_mode != 0u);
   if (torque_ff_valid) {
     for (std::size_t i = 0; i < joint_torque_feedforward.size(); ++i) {
       joint_torque_feedforward[i] = tau_gravity_[i];
@@ -419,6 +430,11 @@ void StRobotHW::setInterface() {
   AutoStateHandle auto_handle("auto_state", &auto_state_data_);
   auto_state_interface_.registerHandle(auto_handle);
   registerInterface(&auto_state_interface_);
+
+  RemoteControlHandle remote_control_handle("remote_control",
+                                             &remote_control_data_);
+  remote_control_interface_.registerHandle(remote_control_handle);
+  registerInterface(&remote_control_interface_);
 }
 
 bool StRobotHW::loadProtocolConfig(ros::NodeHandle &root_nh) {
@@ -564,6 +580,9 @@ bool StRobotHW::loadGravityCompensation(ros::NodeHandle &root_nh) {
 
   root_nh.param(param_ns + "/transmit_enabled",
                 gravity_transmit_enabled_, gravity_transmit_enabled_);
+  root_nh.param(param_ns + "/controller_mode_enabled",
+                gravity_controller_mode_enabled_,
+                gravity_controller_mode_enabled_);
   XmlRpc::XmlRpcValue torque_scales;
   if (root_nh.getParam(param_ns + "/torque_scales", torque_scales)) {
     if (torque_scales.getType() != XmlRpc::XmlRpcValue::TypeArray ||
@@ -940,8 +959,11 @@ void StRobotHW::unpack(std::vector<uint8_t> rx_buffer,const ros::Time &time) {
   const double qy = static_cast<double>(unpackFloat(index));
   const double qz = static_cast<double>(unpackFloat(index));
 
+  bool remote_control_increments_valid = true;
   for (double &increment : remote_joint_increment) {
     increment = static_cast<double>(unpackFloat(index));
+    remote_control_increments_valid =
+        remote_control_increments_valid && std::isfinite(increment);
   }
 
   const uint8_t remote_control_stage_complete = rx_buffer[index++];
@@ -956,12 +978,11 @@ void StRobotHW::unpack(std::vector<uint8_t> rx_buffer,const ros::Time &time) {
     return;
   }
 
-  uint8_t valid_cruise_drive_request = cruise_drive_request;
+  const bool cruise_drive_request_valid = cruise_drive_request <= 2u;
   if (cruise_drive_request > 2u) {
     ROS_WARN_THROTTLE(1.0,
                       "Invalid cruise drive request %u; keeping wheels stopped",
                       cruise_drive_request);
-    valid_cruise_drive_request = 0u;
   }
   if ((auto_control_signals & 0xf8u) != 0u) {
     ROS_WARN_THROTTLE(1.0,
@@ -1001,16 +1022,49 @@ void StRobotHW::unpack(std::vector<uint8_t> rx_buffer,const ros::Time &time) {
   updateImuState(acc_x, acc_y, acc_z,
                  gyro_x, gyro_y, gyro_z,
                  qw, qx, qy, qz);
-  auto_state_data_.remote_joint_increment = remote_joint_increment;
-  auto_state_data_.remote_control_stage_complete =
-      remote_control_stage_complete != 0;
-  auto_state_data_.cruise_drive_request = valid_cruise_drive_request;
-  auto_state_data_.auto_start_requested =
-      (auto_control_signals & (1u << 0)) != 0u;
-  auto_state_data_.manual_reset_requested =
-      (auto_control_signals & (1u << 1)) != 0u;
-  auto_state_data_.obstacle_crossing_trigger =
+
+  const bool remote_control_complete = remote_control_stage_complete == 1u;
+  remote_control_data_.header.stamp = time;
+  remote_control_data_.joint_increments =
+      remote_control_increments_valid
+          ? remote_joint_increment
+          : std::array<double, k_feedback_remote_joint_count_>{};
+  remote_control_data_.stage_complete = remote_control_complete;
+  remote_control_data_.increments_valid = remote_control_increments_valid;
+  ++remote_control_data_.sample_sequence;
+  if (!previous_remote_control_complete_ && remote_control_complete) {
+    ++remote_control_data_.completion_rising_edge_sequence;
+  }
+  previous_remote_control_complete_ = remote_control_complete;
+  if (!remote_control_increments_valid) {
+    ROS_WARN_THROTTLE(1.0,
+                      "Ignoring non-finite remote control joint increment");
+  }
+
+  const bool auto_start = (auto_control_signals & (1u << 0)) != 0u;
+  const bool manual_reset = (auto_control_signals & (1u << 1)) != 0u;
+  const bool obstacle_crossing_trigger =
       (auto_control_signals & (1u << 2)) != 0u;
+  auto_state_data_.cruise_drive_request_raw = cruise_drive_request;
+  auto_state_data_.cruise_drive_request_valid = cruise_drive_request_valid;
+  auto_state_data_.auto_start = auto_start;
+  auto_state_data_.manual_reset = manual_reset;
+  auto_state_data_.obstacle_crossing_trigger = obstacle_crossing_trigger;
+  if (!previous_auto_start_ && auto_start) {
+    ++auto_state_data_.auto_start_rising_edge_sequence;
+  }
+  if (!previous_manual_reset_ && manual_reset) {
+    ++auto_state_data_.manual_reset_rising_edge_sequence;
+  }
+  if (!previous_obstacle_crossing_trigger_ && obstacle_crossing_trigger) {
+    ++auto_state_data_.obstacle_trigger_rising_edge_sequence;
+  }
+  if (previous_obstacle_crossing_trigger_ && !obstacle_crossing_trigger) {
+    ++auto_state_data_.obstacle_trigger_falling_edge_sequence;
+  }
+  previous_auto_start_ = auto_start;
+  previous_manual_reset_ = manual_reset;
+  previous_obstacle_crossing_trigger_ = obstacle_crossing_trigger;
   auto_state_data_.joint_fault = joint_fault;
   auto_state_data_.grip_fault = grip_fault;
   auto_state_data_.grip_confirmed = grip_confirmed != 0;
@@ -1148,12 +1202,16 @@ bool StRobotHW::initAutoStateData(AutoStateData &data) {
   data.grip_confirmed = false;
   data.joint_fault = false;
   data.grip_fault = false;
-  data.remote_joint_increment.fill(0.0);
-  data.remote_control_stage_complete = false;
-  data.cruise_drive_request = 0u;
-  data.auto_start_requested = false;
-  data.manual_reset_requested = false;
+  data.cruise_drive_request_raw = 0u;
+  data.cruise_drive_request_valid = true;
+  data.auto_start = false;
+  data.manual_reset = false;
   data.obstacle_crossing_trigger = false;
+  data.auto_start_rising_edge_sequence = 0;
+  data.manual_reset_rising_edge_sequence = 0;
+  data.obstacle_trigger_rising_edge_sequence = 0;
+  data.obstacle_trigger_falling_edge_sequence = 0;
+  data.gravity_compensation_mode = 0u;
   return true;
 }
 

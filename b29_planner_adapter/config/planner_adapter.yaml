@@ -1,0 +1,108 @@
+# 上层MoveIt运动规划下发轨迹标准Action服务名称
+action_name: /gp11_moveit/reach_arm_controller/follow_joint_trajectory
+
+# 整机全局关节实时位置/速度反馈话题
+joint_states_topic: /joint_states
+
+# 指令下发频率，单位Hz（赫兹）
+publish_rate: 50.0
+
+# 轨迹速度缩放系数，无单位；1.0=规划原始速度，<1减速，>1加速
+time_scale: 1.0
+
+# 适配器单条指令允许单关节最大位置变化量，单位rad（弧度）
+# 上层提前限速，避免指令被下层判定REJECT_DELTA_EXCEEDED拒绝
+max_output_delta: 0.05
+
+# ===================== 4轴关节属性配置 =====================
+# FollowJointTrajectory 必须直接使用固定顺序：左一、左二、右一、右二。
+joint_mapping:
+  # 左第一主关节
+  left_first:
+    continuous: false # 无单位，布尔值；false=有限转角关节，不能无限旋转
+    min_position: -12.566370614359172 # 最小转角，单位rad（-4π）
+    max_position: 12.566370614359172  # 最大转角，单位rad（4π）
+
+  # 左第二旋转关节（连续旋转）
+  left_second:
+    continuous: true # 无单位，布尔值；true=360°无限连续旋转
+
+  # 右第一主关节
+  right_first:
+    continuous: false
+    min_position: -12.566370614359172 # 最小转角，单位rad
+    max_position: 12.566370614359172  # 最大转角，单位rad
+
+  # 右第二旋转关节（连续旋转）
+  right_second:
+    continuous: true
+
+# ===================== 运动公差配置（固定顺序：左一、左二、右一、右二） =====================
+tolerances:
+  # start：轨迹起点与当前实际关节允许最大偏差，单位rad
+  start: [0.08, 0.08, 0.08, 0.08]
+
+  # path：运动途中单轴允许最大跟踪误差，单位rad；超差立即终止轨迹
+  path: [0.50, 0.50, 0.50, 0.50]
+
+  # goal_position：到达终点后允许的位置残余误差，单位rad
+  goal_position: [0.02, 0.02, 0.02, 0.02]
+
+  # goal_velocity：到达终点后允许残余关节转速，单位rad/s（弧度每秒）
+  goal_velocity: [0.05, 0.05, 0.05, 0.05]
+
+# 是否校验终点残余速度；无单位布尔值，true=位置+速度同时达标才算到位
+require_goal_velocity: true
+
+# 终点稳定保持时长，单位s（秒）；持续满足公差0.5s才判定运动完成
+settle_time: 0.5
+
+# ===================== 指定大翻越的备用完成判断 =====================
+# 严格终点公差仍优先。两遍锁定侧second都必须逆时针正向大翻越。
+large_flip_completion:
+  enabled: true
+  # 字段名为兼容保留：Right遍检查left_second，Left遍检查right_second，均正向至少150度。
+  min_left_second_displacement: 2.6179938779914944
+  # Right遍宽终点位置范围，顺序：左一、左二、右一、右二，单位rad；Left遍按角色镜像。
+  position_tolerance: [0.15, 0.23, 0.17, 0.05]
+  # 四关节均接近静止才允许交权，单位rad/s。
+  velocity_tolerance: [0.02, 0.02, 0.02, 0.02]
+  # 宽条件必须连续保持1秒。
+  settle_time: 1.0
+  # 最后一条轨迹发完后最多等待20秒；超时保持不动并报错，不交权。
+  timeout: 20.0
+
+# ===================== 全链路超时配置（单位统一为s 秒） =====================
+timeouts:
+  # joint_state：关节反馈话题最长无数据等待时间，超过判定硬件失联
+  joint_state: 0.5
+  # planner_state：下层控制器状态话题超时阈值，无状态判定会话断开
+  planner_state: 0.25
+  # command_ack：单条指令下发后等待下层确认序列号的最大等待时间
+  command_ack: 1.0
+  # action：整条轨迹允许最大总执行时长，超时强制中止运动
+  action: 100.0
+  # completion_service：单次调用完成服务的请求超时
+  completion_service: 1.0
+  # completion_transition：发完成请求后，等待控制器切换完成状态的最长时间
+  completion_transition: 2.0
+  # emergency_stop_service：调用软件急停服务的最长等待时间
+  emergency_stop_service: 0.5
+
+# ===================== 执行安全配置 =====================
+safety:
+  # 相对轨迹开始时真实姿态的单关节最大总位移，单位rad
+  max_total_displacement: [12.5663706144, 12.5663706144, 12.5663706144, 12.5663706144]
+  # 仅当目标误差超过该值时启用反向运动检测，单位rad
+  direction_target_threshold: [0.436332313, 0.436332313, 0.436332313, 0.436332313]
+  # 单帧反馈变化超过该值才计为有效反向运动，单位rad
+  direction_feedback_threshold: [0.003490659, 0.003490659, 0.003490659, 0.003490659]
+  # 连续检测到反向运动达到该次数后触发中止
+  direction_mismatch_samples: 15
+
+# ===================== 会话完成服务重试配置 =====================
+completion:
+  # retry_count：服务调用失败最大重试次数，无单位整型
+  retry_count: 3
+  # retry_interval：两次重试之间间隔时长，单位s（秒）
+  retry_interval: 0.2

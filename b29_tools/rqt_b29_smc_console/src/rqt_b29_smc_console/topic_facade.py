@@ -20,9 +20,14 @@ except ImportError:  # pragma: no cover - allows local smoke imports without ROS
         def Subscriber(*_args, **_kwargs):
             raise RuntimeError('rospy.Subscriber is unavailable in this environment')
 
+        @staticmethod
+        def ServiceProxy(*_args, **_kwargs):
+            raise RuntimeError('rospy.ServiceProxy is unavailable in this environment')
+
     rospy = _FallbackRospy()
 
 from b29_smc_auto_controller.msg import AutoDebugOverride, AutoSensorInput, AutoStateTrace
+from std_srvs.srv import Trigger
 
 from .field_registry import build_debug_override_registry, build_sensor_input_registry, get_field_descriptor
 from .models import MessageKind
@@ -87,6 +92,10 @@ class OverrideComposer:
         self._latched_values[field_name] = value
         return compose_override_message(self._latched_values)
 
+    def latch_many(self, values: Dict[str, object]) -> AutoDebugOverride:
+        self._latched_values.update(values)
+        return compose_override_message(self._latched_values)
+
     def clear(self, field_name: str) -> AutoDebugOverride:
         self._latched_values.pop(field_name, None)
         return compose_override_message(self._latched_values)
@@ -107,14 +116,16 @@ class TopicFacade:
         trace_callback: Optional[Callable[[AutoStateTrace], None]] = None,
         publisher_factory: Callable = None,
         subscriber_factory: Callable = None,
+        service_proxy_factory: Callable = None,
         release_scheduler: Callable[[float, Callable[[], None]], object] = None,
-        pulse_hold_sec: float = 0.05,
+        pulse_hold_sec: float = 0.20,
     ):
         self._namespace = namespace
         self._composer = OverrideComposer()
         self._trace_callback = trace_callback or (lambda _message: None)
         self._publisher_factory = publisher_factory or rospy.Publisher
         self._subscriber_factory = subscriber_factory or rospy.Subscriber
+        self._service_proxy_factory = service_proxy_factory or rospy.ServiceProxy
         self._release_scheduler = release_scheduler or self._default_release_scheduler
         self._pulse_hold_sec = float(pulse_hold_sec)
         self._pending_release_handles = []
@@ -132,6 +143,15 @@ class TopicFacade:
             _namespace_topic(namespace, 'state_trace'),
             AutoStateTrace,
             self._trace_callback,
+        )
+        self._planner_release_service = self._service_proxy_factory(
+            _namespace_topic(namespace, 'planner_release'), Trigger
+        )
+        self._software_emergency_stop_service = self._service_proxy_factory(
+            _namespace_topic(namespace, 'software_emergency_stop'), Trigger
+        )
+        self._manual_reset_service = self._service_proxy_factory(
+            _namespace_topic(namespace, 'manual_reset'), Trigger
         )
 
     @staticmethod
@@ -167,6 +187,15 @@ class TopicFacade:
         self._override_publisher.publish(message)
         return message
 
+    def publish_obstacle_trigger_override(self, triggered: bool) -> AutoDebugOverride:
+        message = self._composer.latch_many(
+            {
+                'obstacle_crossing_trigger': bool(triggered),
+            }
+        )
+        self._override_publisher.publish(message)
+        return message
+
     def clear_override(self, field_name: str) -> AutoDebugOverride:
         message = self._composer.clear(field_name)
         self._override_publisher.publish(message)
@@ -177,3 +206,12 @@ class TopicFacade:
         self._override_publisher.publish(pressed)
         self._schedule_release_publish(released)
         return pressed, released
+
+    def call_planner_release(self):
+        return self._planner_release_service()
+
+    def call_software_emergency_stop(self):
+        return self._software_emergency_stop_service()
+
+    def call_manual_reset(self):
+        return self._manual_reset_service()

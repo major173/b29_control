@@ -1,6 +1,5 @@
 #pragma once
 
-#include <array>
 #include <cstdint>
 #include <string>
 #include <hardware_interface/hardware_interface.h>
@@ -21,40 +20,52 @@ struct AutoStateData
     std_msgs::Header header;
 
     bool lower_alive{false};
-    bool imu_ready{false};
     bool grip_confirmed{false};
     bool joint_fault{false};
     bool grip_fault{false};
-    std::array<double, 4> remote_joint_increment{};
-    bool remote_control_stage_complete{false};
-    uint8_t cruise_drive_request{0};
-    bool auto_start_requested{false};
-    bool manual_reset_requested{false};
-    bool obstacle_crossing_trigger{false};
+    bool imu_ready{false};
 
-    bool obstacle_detected{false};
     ObstacleType obstacle_type{ObstacleType::OBSTACLE_UNKNOWN};
     bool classification_stable{false};
-    double range_to_obstacle{0.0};
-    
+
     bool at_crossing_position{false};
     bool post_check_passed{false};
     bool post_check_failed{false};
+
+    uint8_t cruise_drive_request_raw{0};
+    bool cruise_drive_request_valid{true};
+    bool auto_start{false};
+    bool manual_reset{false};
+    bool obstacle_crossing_trigger{false};
+    std::uint64_t auto_start_rising_edge_sequence{0};
+    std::uint64_t manual_reset_rising_edge_sequence{0};
+    std::uint64_t obstacle_trigger_rising_edge_sequence{0};
+    std::uint64_t obstacle_trigger_falling_edge_sequence{0};
+
+    uint8_t gravity_compensation_mode{0};
 };
 
 class AutoStateHandle
 {
 public:
     AutoStateHandle() = default;
-    AutoStateHandle(const std::string& name, const AutoStateData* data)
+    AutoStateHandle(const std::string& name, AutoStateData* data)
         : name_(name), data_(data) {}
 
     std::string getName() const { return name_; }
     const AutoStateData& getData() const { return *data_; }
+    bool valid() const { return data_ != nullptr; }
+    void setGravityCompensationMode(uint8_t mode) const
+    {
+        if (data_)
+        {
+            data_->gravity_compensation_mode = mode;
+        }
+    }
 
 private:
     std::string name_;
-    const AutoStateData* data_{nullptr};
+    AutoStateData* data_{nullptr};
 };
 
 class AutoStateInterface : public hardware_interface::HardwareResourceManager<AutoStateHandle>

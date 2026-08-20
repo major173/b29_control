@@ -44,6 +44,7 @@
 // SMC
 #include "steering_engine/common/auto_state_interface.h"
 #include "steering_engine/common/gravity_compensator.h"
+#include "steering_engine/common/remote_control_interface.h"
 
 namespace steering_engine_hw {
 
@@ -208,9 +209,15 @@ private:
 
   // interface for auto
   AutoStateInterface auto_state_interface_;
+  RemoteControlInterface remote_control_interface_;
 
   // data for auto
   AutoStateData auto_state_data_{};
+  RemoteControlData remote_control_data_{};
+  bool previous_remote_control_complete_{false};
+  bool previous_auto_start_{false};
+  bool previous_manual_reset_{false};
+  bool previous_obstacle_crossing_trigger_{false};
   ros::Time last_rx_time_{};
 
   // transmission of the robot
@@ -316,6 +323,7 @@ private:
   std::array<double, GravityCompensator::kJointCount> tau_gravity_{{0.0, 0.0, 0.0, 0.0}};
   std::array<double, GravityCompensator::kJointCount> gravity_torque_scales_{{1.0, 1.0, 1.0, 1.0}};
   bool gravity_transmit_enabled_{false};
+  bool gravity_controller_mode_enabled_{false};
   bool gravity_feedforward_valid_{false};
   double gravity_torque_slew_rate_{20.0};
   double gravity_publish_rate_{50.0};

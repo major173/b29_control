@@ -13,6 +13,7 @@ find_package(catkin REQUIRED COMPONENTS
         sensor_msgs
         smclib
         std_msgs
+        std_srvs
         b29_control)
 
 set(SMC_VENDOR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/smc")
@@ -36,7 +37,14 @@ add_message_files(
         FILES
         AutoSensorInput.msg
         AutoDebugOverride.msg
-        AutoStateTrace.msg)
+        AutoStateTrace.msg
+        PlannerControlState.msg
+        PlannerJointCommand.msg)
+
+add_service_files(
+        DIRECTORY srv
+        FILES
+        CompletePlannerControl.srv)
 
 generate_messages(
         DEPENDENCIES
@@ -54,7 +62,8 @@ catkin_package(
         roscpp
         sensor_msgs
         smclib
-        std_msgs)
+        std_msgs
+        std_srvs)
 
 include_directories(
         include
@@ -67,10 +76,50 @@ add_library(${PROJECT_NAME}
         src/b29_smc_auto_controller.cpp
         src/auto_input_mux.cpp
         src/command_dispatcher.cpp
+        src/controller_trace_builder.cpp
+        src/disconnect_cable_process.cpp
+        src/obstacle_crossing_runtime.cpp
+        src/planner_control_coordinator.cpp
+        src/planner_session.cpp
+        src/remote_control_session.cpp
         src/robot_context.cpp
         gen/src/RobotFSM_sm.cpp)
 add_dependencies(${PROJECT_NAME} ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 target_link_libraries(${PROJECT_NAME} ${catkin_LIBRARIES})
+
+if(CATKIN_ENABLE_TESTING)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/test_planner_session.cpp")
+        catkin_add_gtest(test_planner_session test/test_planner_session.cpp)
+        if(TARGET test_planner_session)
+            add_dependencies(test_planner_session ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+            target_link_libraries(test_planner_session ${PROJECT_NAME} ${catkin_LIBRARIES})
+        endif()
+    endif()
+
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/test_remote_control_session.cpp")
+        catkin_add_gtest(test_remote_control_session test/test_remote_control_session.cpp)
+        if(TARGET test_remote_control_session)
+            add_dependencies(test_remote_control_session ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+            target_link_libraries(test_remote_control_session ${PROJECT_NAME} ${catkin_LIBRARIES})
+        endif()
+    endif()
+
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/test_obstacle_crossing_runtime.cpp")
+        catkin_add_gtest(test_obstacle_crossing_runtime test/test_obstacle_crossing_runtime.cpp)
+        if(TARGET test_obstacle_crossing_runtime)
+            add_dependencies(test_obstacle_crossing_runtime ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+            target_link_libraries(test_obstacle_crossing_runtime ${PROJECT_NAME} ${catkin_LIBRARIES})
+        endif()
+    endif()
+
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/test_disconnect_cable_process.cpp")
+        catkin_add_gtest(test_disconnect_cable_process test/test_disconnect_cable_process.cpp)
+        if(TARGET test_disconnect_cable_process)
+            add_dependencies(test_disconnect_cable_process ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+            target_link_libraries(test_disconnect_cable_process ${PROJECT_NAME} ${catkin_LIBRARIES})
+        endif()
+    endif()
+endif()
 
 install(
         TARGETS ${PROJECT_NAME}
@@ -83,10 +132,6 @@ install(
         include/${PROJECT_NAME}/
         DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
         FILES_MATCHING PATTERN "*.h")
-
-install(
-        DIRECTORY config/
-        DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/config)
 
 install(
         DIRECTORY scenarios/
@@ -106,5 +151,6 @@ install(
         DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION})
 
 catkin_install_python(PROGRAMS
+        scripts/disconnect_blackbox.py
         scripts/replay_scenario.py
         DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})

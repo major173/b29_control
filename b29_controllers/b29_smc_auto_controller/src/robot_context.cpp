@@ -7,37 +7,10 @@
 
 namespace
 {
-constexpr double kCruiseSpeedMps = 0.10;
-constexpr double kApproachSpeedMps = 0.03;
-constexpr std::uint32_t kReconnectTimeoutTicks = 250;
-constexpr std::uint32_t kAutoInitTimeoutTicks = 100;
+constexpr double kCruiseSpeedMagnitudeMps = 0.10;
+constexpr double kReconnectTimeoutSec = 5.0;
+constexpr double kAutoInitTimeoutSec = 2.0;
 }
-
-namespace b29_smc_auto_controller
-{
-void applyCommandToTrace(const AutoControlCommand& command, AutoStateTrace& trace)
-{
-  trace.command_reason = command.command_reason;
-  trace.stop_all = command.stop_all;
-  trace.freeze_joints = command.freeze_joints;
-  trace.left_wheel_speed = command.left_wheel_speed;
-  trace.right_wheel_speed = command.right_wheel_speed;
-
-  switch (command.crossing_strategy)
-  {
-    case CrossingStrategy::LineClamp:
-      trace.crossing_strategy = AutoStateTrace::CROSSING_LINE_CLAMP;
-      break;
-    case CrossingStrategy::Damper:
-      trace.crossing_strategy = AutoStateTrace::CROSSING_DAMPER;
-      break;
-    case CrossingStrategy::None:
-    default:
-      trace.crossing_strategy = AutoStateTrace::CROSSING_NONE;
-      break;
-  }
-}
-}  // namespace b29_smc_auto_controller
 
 RobotContext::RobotContext() : fsm_(*this)
 {
@@ -52,16 +25,22 @@ void RobotContext::start()
 
   started_ = true;
   fsm_.enterStartState();
+  setIdleSoftHoldCommand("idle_initial_soft_hold");
 }
 
-void RobotContext::tick50Hz()
+void RobotContext::tick(const ros::Duration& period)
 {
   if (!started_)
   {
     start();
   }
 
-  const int current_state_id = fsm_.getState().getId();
+  ros::Duration elapsed;
+  if (period.toSec() > 0.0)
+  {
+    elapsed = period;
+  }
+  const int current_state_id = currentStateId();
 
   if (input_.emergency_stop || hasSafetyFault())
   {
@@ -82,8 +61,8 @@ void RobotContext::tick50Hz()
 
     if (reconnect_timer_active_)
     {
-      ++reconnect_timer_ticks_;
-      if (reconnect_timer_ticks_ >= kReconnectTimeoutTicks)
+      reconnect_timer_elapsed_ += elapsed;
+      if (reconnect_timer_elapsed_.toSec() >= kReconnectTimeoutSec)
       {
         fsm_.evReconnectTimeout();
         return;
@@ -104,8 +83,8 @@ void RobotContext::tick50Hz()
 
     if (auto_init_timer_active_)
     {
-      ++auto_init_timer_ticks_;
-      if (auto_init_timer_ticks_ >= kAutoInitTimeoutTicks)
+      auto_init_timer_elapsed_ += elapsed;
+      if (auto_init_timer_elapsed_.toSec() >= kAutoInitTimeoutSec)
       {
         fsm_.evInitFailed();
         return;
@@ -127,10 +106,9 @@ void RobotContext::tick50Hz()
   {
     auto_start_requested_ = false;
 
-    if (manual_reset_requested_)
+    if (input_.manual_reset_requested)
     {
       fsm_.evManualReset();
-      manual_reset_requested_ = false;
       return;
     }
 
@@ -141,7 +119,7 @@ void RobotContext::tick50Hz()
   if (current_state_id == RobotFSM::Idle.getId() && auto_start_requested_)
   {
     fsm_.evAutoStart();
-    auto_start_requested_ = (fsm_.getState().getId() == RobotFSM::Idle.getId());
+    auto_start_requested_ = (currentStateId() == RobotFSM::Idle.getId());
     return;
   }
 
@@ -157,25 +135,44 @@ void RobotContext::tick50Hz()
 
 void RobotContext::setInputSnapshot(const b29_smc_auto_controller::AutoInputSnapshot& input)
 {
-  const bool allow_auto_start_latch =
-      !started_ || (fsm_.getState().getId() == RobotFSM::Idle.getId());
+  if (!input_edges_initialized_)
+  {
+    input_edges_initialized_ = true;
+    last_input_auto_start_requested_ = input.auto_start_requested;
+    last_input_manual_reset_requested_ = input.manual_reset_requested;
+    last_auto_start_rising_edge_sequence_ = input.auto_start_rising_edge_sequence;
+    last_manual_reset_rising_edge_sequence_ = input.manual_reset_rising_edge_sequence;
+    input_ = input;
+    input_.manual_reset_requested = false;
+    return;
+  }
 
-  if (allow_auto_start_latch && input.auto_start_requested && !last_input_auto_start_requested_)
+  const bool auto_start_level_rising =
+      input.auto_start_requested && !last_input_auto_start_requested_;
+  const bool auto_start_sequence_changed =
+      input.auto_start_edge_sequence_valid &&
+      input.auto_start_rising_edge_sequence != last_auto_start_rising_edge_sequence_;
+  const bool manual_reset_level_rising =
+      input.manual_reset_requested && !last_input_manual_reset_requested_;
+  const bool manual_reset_sequence_changed =
+      input.manual_reset_edge_sequence_valid &&
+      input.manual_reset_rising_edge_sequence != last_manual_reset_rising_edge_sequence_;
+  const bool allow_auto_start_latch =
+      !started_ || (currentStateId() == RobotFSM::Idle.getId());
+
+  if (allow_auto_start_latch &&
+      (auto_start_level_rising || auto_start_sequence_changed))
   {
     auto_start_requested_ = true;
   }
 
-  const bool allow_manual_reset_latch =
-      started_ && (fsm_.getState().getId() == RobotFSM::SafeStop.getId());
-  if (allow_manual_reset_latch && input.manual_reset_requested &&
-      !last_input_manual_reset_requested_)
-  {
-    manual_reset_requested_ = true;
-  }
-
   last_input_auto_start_requested_ = input.auto_start_requested;
   last_input_manual_reset_requested_ = input.manual_reset_requested;
+  last_auto_start_rising_edge_sequence_ = input.auto_start_rising_edge_sequence;
+  last_manual_reset_rising_edge_sequence_ = input.manual_reset_rising_edge_sequence;
   input_ = input;
+  input_.manual_reset_requested =
+      manual_reset_level_rising || manual_reset_sequence_changed;
 }
 
 void RobotContext::requestAutoStart()
@@ -210,34 +207,31 @@ std::string RobotContext::currentStateName() const
   return state_name.substr(pos + 2);
 }
 
-b29_smc_auto_controller::AutoStateTrace RobotContext::buildTraceMessage(const ros::Time& stamp) const
+b29_smc_auto_controller::RobotContextTraceState RobotContext::traceState() const
 {
-  b29_smc_auto_controller::AutoStateTrace trace;
-  trace.header.stamp = stamp;
-  trace.current_state = currentStateName();
-  trace.output_mode = b29_smc_auto_controller::toString(trace_output_mode_);
-  b29_smc_auto_controller::applyCommandToTrace(command_, trace);
+  b29_smc_auto_controller::RobotContextTraceState state;
+  state.current_state = currentStateName();
+  state.output_mode = b29_smc_auto_controller::toString(trace_output_mode_);
+  state.last_transition = last_transition_;
+  state.last_error = last_error_;
+  state.last_alert = last_alert_;
+  state.base_command = command_;
+  return state;
+}
 
-  if (!last_transition_.empty())
-  {
-    trace.transition_reason = last_transition_;
-    const std::size_t arrow_pos = last_transition_.find("->");
-    if (arrow_pos != std::string::npos)
-    {
-      trace.previous_state = last_transition_.substr(0, arrow_pos);
-    }
-  }
+bool RobotContext::isSafeStop() const
+{
+  return currentStateId() == RobotFSM::SafeStop.getId();
+}
 
-  if (!last_error_.empty())
-  {
-    trace.last_event = last_error_;
-  }
-  else if (!last_alert_.empty())
-  {
-    trace.last_event = last_alert_;
-  }
+bool RobotContext::isCommsLoss() const
+{
+  return currentStateId() == RobotFSM::CommsLoss.getId();
+}
 
-  return trace;
+bool RobotContext::isTraversing() const
+{
+  return currentStateId() == RobotFSM::Traversing.getId();
 }
 
 bool RobotContext::isLowerAlive() const
@@ -260,40 +254,32 @@ bool RobotContext::isGripConfirmed() const
   return input_.grip_confirmed;
 }
 
-bool RobotContext::isObstacleDetected() const
-{
-  return input_.obstacle_detected;
-}
-
 void RobotContext::setCruiseCommand()
 {
-  double target_speed = 0.0;
+  command_.freeze_joints = false;
   switch (input_.cruise_drive_request)
   {
-    case 1u:
-      target_speed = getCruiseSpeed();
-      break;
-    case 2u:
-      target_speed = -getCruiseSpeed();
-      break;
-    case 0u:
-    default:
-      break;
+    case b29_smc_auto_controller::CruiseDriveRequest::Forward:
+      setDriveMode(robot_fsm::DriveMode::Forward);
+      setTargetSpeed(kCruiseSpeedMagnitudeMps);
+      setCommandReason("cruise_forward_request");
+      return;
+    case b29_smc_auto_controller::CruiseDriveRequest::Reverse:
+      setDriveMode(robot_fsm::DriveMode::Reverse);
+      setTargetSpeed(-kCruiseSpeedMagnitudeMps);
+      setCommandReason("cruise_reverse_request");
+      return;
+    case b29_smc_auto_controller::CruiseDriveRequest::Stop:
+      stopAllMotors();
+      command_.freeze_joints = false;
+      setCommandReason("cruise_stop_request");
+      return;
+    case b29_smc_auto_controller::CruiseDriveRequest::Invalid:
+      stopAllMotors();
+      command_.freeze_joints = false;
+      setCommandReason("invalid_cruise_drive_request");
+      return;
   }
-
-  setDriveMode(target_speed == 0.0 ? robot_fsm::DriveMode::Stop
-                                   : robot_fsm::DriveMode::Forward);
-  setTargetSpeed(target_speed);
-  command_.freeze_joints = false;
-  setCommandReason("cruise_command");
-}
-
-void RobotContext::setApproachCommand()
-{
-  setDriveMode(robot_fsm::DriveMode::Forward);
-  setTargetSpeed(getApproachSpeed());
-  command_.freeze_joints = false;
-  setCommandReason("approach_command");
 }
 
 void RobotContext::setSafeStopCommand(const std::string& reason)
@@ -320,28 +306,28 @@ void RobotContext::startInitSequence()
   command_.stop_all = false;
   command_.freeze_joints = false;
   auto_init_timer_active_ = true;
-  auto_init_timer_ticks_ = 0;
+  auto_init_timer_elapsed_ = ros::Duration{};
   setCommandReason("auto_init_started");
 }
 
 void RobotContext::clearInitFlags()
 {
   auto_init_timer_active_ = false;
-  auto_init_timer_ticks_ = 0;
+  auto_init_timer_elapsed_ = ros::Duration{};
   setCommandReason("auto_init_flags_cleared");
 }
 
 void RobotContext::startReconnectTimer()
 {
   reconnect_timer_active_ = true;
-  reconnect_timer_ticks_ = 0;
+  reconnect_timer_elapsed_ = ros::Duration{};
   setCommandReason("reconnect_timer_started");
 }
 
 void RobotContext::stopReconnectTimer()
 {
   reconnect_timer_active_ = false;
-  reconnect_timer_ticks_ = 0;
+  reconnect_timer_elapsed_ = ros::Duration{};
   setCommandReason("reconnect_timer_stopped");
 }
 
@@ -392,7 +378,9 @@ void RobotContext::resetFaultFlags()
 
 bool RobotContext::canStartAuto() const
 {
-  return isLowerAlive() && isImuReady() && isPostureReady() && isGripConfirmed();
+  // Cable suspension naturally produces roll/pitch oscillation before the
+  // disconnect sequence. Keep posture_ready as telemetry, not an entry gate.
+  return isLowerAlive() && isImuReady();
 }
 
 bool RobotContext::isReadyToTraverse() const
@@ -400,14 +388,9 @@ bool RobotContext::isReadyToTraverse() const
   return canStartAuto();
 }
 
-bool RobotContext::isObstacleNotDetected() const
-{
-  return !isObstacleDetected();
-}
-
 bool RobotContext::hasSafetyFault() const
 {
-  return input_.joint_fault || input_.grip_fault || !input_.imu_ready;;
+  return input_.joint_fault || input_.grip_fault || !input_.imu_ready;
 }
 
 std::string RobotContext::safetyStopReason(std::string_view fallback) const
@@ -473,7 +456,7 @@ void RobotContext::reportAutoRunPause()
 {
   last_error_.clear();
   last_alert_ = "auto_run_pause";
-  setSafeStopCommand("auto_run_pause");
+  setIdleSoftHoldCommand("auto_run_pause_soft_hold");
   logTransition("Traversing->Idle");
 }
 
@@ -521,14 +504,13 @@ void RobotContext::logSafeStopToIdle()
   logTransition("SafeStop->Idle");
 }
 
-double RobotContext::getCruiseSpeed() const
+int RobotContext::currentStateId() const
 {
-  return kCruiseSpeedMps;
-}
-
-double RobotContext::getApproachSpeed() const
-{
-  return kApproachSpeedMps;
+  if (!started_)
+  {
+    return -1;
+  }
+  return const_cast<RobotFSMContext&>(fsm_).getState().getId();
 }
 
 void RobotContext::stopAllMotors()
@@ -556,6 +538,13 @@ void RobotContext::setDriveMode(robot_fsm::DriveMode mode)
   command_.drive_mode = toAutoDriveMode(mode);
 }
 
+void RobotContext::setIdleSoftHoldCommand(std::string_view reason)
+{
+  stopAllMotors();
+  command_.freeze_joints = false;
+  setCommandReason(reason);
+}
+
 void RobotContext::setCommandReason(std::string_view reason)
 {
   command_.command_reason = std::string(reason);
@@ -567,6 +556,8 @@ b29_smc_auto_controller::DriveMode RobotContext::toAutoDriveMode(robot_fsm::Driv
   {
     case robot_fsm::DriveMode::Forward:
       return b29_smc_auto_controller::DriveMode::Forward;
+    case robot_fsm::DriveMode::Reverse:
+      return b29_smc_auto_controller::DriveMode::Reverse;
     case robot_fsm::DriveMode::Stop:
     default:
       return b29_smc_auto_controller::DriveMode::Stop;

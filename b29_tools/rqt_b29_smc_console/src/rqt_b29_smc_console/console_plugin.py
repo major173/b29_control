@@ -34,8 +34,12 @@ try:
         QLabel,
         QListWidgetItem,
         QLineEdit,
+        QMessageBox,
         QPushButton,
+        QScrollArea,
         QStackedWidget,
+        QTabWidget,
+        QVBoxLayout,
         QWidget,
     )
 except ImportError:  # pragma: no cover - fallback for non-catkin smoke tests
@@ -52,8 +56,12 @@ except ImportError:  # pragma: no cover - fallback for non-catkin smoke tests
         QLabel,
         QListWidgetItem,
         QLineEdit,
+        QMessageBox,
         QPushButton,
+        QScrollArea,
         QStackedWidget,
+        QTabWidget,
+        QVBoxLayout,
         QWidget,
     )
 
@@ -80,6 +88,54 @@ _TRACE_HIGHLIGHTS = {
     'SafeStop': QColor('#fde8e8'),
     'CommsLoss': QColor('#fff4cc'),
 }
+_VALIDATION_TRACE_GROUPS = (
+    ('Overview', (
+        'current_state', 'transition_reason', 'base_command_reason', 'output_mode',
+        'debug_validation_enabled', 'simulation_only',
+    )),
+    ('Crossing', (
+        'obstacle_crossing_active', 'obstacle_crossing_stage', 'obstacle_crossing_side',
+        'first_crossing_side', 'obstacle_crossing_stage_elapsed_sec',
+        'obstacle_crossing_transition_reason', 'disconnect_step', 'disconnect_step_elapsed_sec',
+        'disconnect_step_transition_reason', 'disconnect_step_expected_condition',
+        'disconnect_max_abs_pose_joint_velocity', 'disconnect_settle_velocity_threshold',
+        'disconnect_velocity_within_threshold', 'disconnect_velocity_stable_elapsed_sec',
+        'disconnect_settle_duration',
+        'current_side_gripper', 'current_side_gripper_target', 'failed_action',
+        'manual_intervention_active', 'manual_intervention_reason', 'last_failure_reason',
+        'close_grippers_retry_count', 'left_disconnect_retry_count', 'right_disconnect_retry_count',
+        'left_regrip_retry_count', 'right_regrip_retry_count',
+        'retry_limit',
+        'waiting_for_grip_confirmed', 'grip_wait_elapsed_sec', 'grip_wait_timed_out',
+        'planner_control_active', 'planner_manual_release_enabled', 'planner_release_received',
+        'planner_control_wait_elapsed_sec', 'planner_point_available', 'planner_point_fresh',
+        'planner_override_applied',
+        'remote_control_active', 'remote_control_raw_increments',
+        'remote_control_applied_increments', 'remote_control_joint_targets',
+        'remote_control_increments_valid', 'remote_control_sample_sequence',
+        'remote_control_complete', 'remote_control_completion_rising_edge',
+        'signed_wheel_travel', 'wheel_travel_baseline_initialized',
+        'left_wheel_travel_baseline_position', 'right_wheel_travel_baseline_position',
+        'left_wheel_travel_current_position', 'right_wheel_travel_current_position',
+    )),
+    ('Command & Safety', (
+        'command_reason', 'drive_mode', 'stop_all', 'freeze_joints', 'gravity_compensation_mode',
+        'left_wheel_speed', 'right_wheel_speed', 'joint_targets',
+        'left_gripper_target', 'right_gripper_target', 'crossing_strategy',
+        'command_dispatch_attempted', 'command_dispatch_succeeded',
+        'software_emergency_stop_latched',
+    )),
+    ('Inputs', (
+        'debug_override_active', 'debug_obstacle_crossing_trigger',
+        'manual_reset_requested', 'lower_alive', 'imu_ready', 'posture_ready',
+        'grip_confirmed', 'joint_fault', 'grip_fault',
+        'cruise_drive_request_raw', 'cruise_drive_request', 'cruise_drive_request_valid',
+        'auto_start', 'manual_reset', 'obstacle_crossing_trigger',
+        'auto_start_rising_edge_sequence', 'manual_reset_rising_edge_sequence',
+        'obstacle_trigger_rising_edge', 'obstacle_trigger_falling_edge',
+        'obstacle_trigger_rising_edge_sequence', 'obstacle_trigger_falling_edge_sequence',
+    )),
+)
 _GROUP_TRANSLATIONS = {
     _LANGUAGE_EN: {
         '启动/复位': 'Start',
@@ -128,7 +184,7 @@ _TEXTS = {
         'sensor_inputs_title': 'Sensor Input',
         'preset_base_ready': 'Base Ready',
         'preset_comms_loss': 'Comms Loss',
-        'preset_obstacle': 'Obstacle Detected',
+        'preset_obstacle': 'Crossing Trigger',
         'preset_clear': 'Clear All',
         'publish_sensor_input': 'Publish Sensor Input',
         'override_title': 'Override Composer',
@@ -385,7 +441,7 @@ def _comms_loss_preset(sensor_registry):
     return payload
 
 
-def _obstacle_detected_preset(sensor_registry, base_ready_sensor_payload):
+def _obstacle_triggered_preset(sensor_registry, base_ready_sensor_payload):
     payload = dict(base_ready_sensor_payload or _fallback_sensor_preset(sensor_registry))
     obstacle_type_descriptor = _lookup_descriptor(sensor_registry, 'obstacle_type')
     obstacle_value = 1
@@ -396,10 +452,9 @@ def _obstacle_detected_preset(sensor_registry, base_ready_sensor_payload):
             obstacle_value = obstacle_type_descriptor.default_value
     payload.update(
         {
-            'obstacle_detected': True,
+            'obstacle_crossing_trigger': True,
             'obstacle_type': obstacle_value,
             'classification_stable': True,
-            'range_to_obstacle': 0.35,
         }
     )
     return payload
@@ -431,6 +486,18 @@ class _NullTopicFacade(object):
     def pulse_override(self, field_name, value=True):
         return field_name, value
 
+    def publish_obstacle_trigger_override(self, triggered):
+        return triggered
+
+    def call_planner_release(self):
+        raise RuntimeError('planner_release service is unavailable in offline mode')
+
+    def call_software_emergency_stop(self):
+        raise RuntimeError('software_emergency_stop service is unavailable in offline mode')
+
+    def call_manual_reset(self):
+        raise RuntimeError('manual_reset service is unavailable in offline mode')
+
 
 class _NullWorkflowRunner(object):
     def run(self, workflow_name):
@@ -456,6 +523,10 @@ class B29SmcConsolePlugin(Plugin):
         loadUi(_resolve_ui_file(), self._widget)
         self._widget.setObjectName('B29SmcConsoleWidget')
         self._widget.setWindowTitle('B29 SMC Console')
+        self._scroll_area = QScrollArea()
+        self._scroll_area.setObjectName('b29SmcConsoleScrollArea')
+        self._scroll_area.setWidgetResizable(True)
+        self._scroll_area.setWidget(self._widget)
 
         self._language = _LANGUAGE_EN
         self._runtime_note = ''
@@ -481,10 +552,13 @@ class B29SmcConsolePlugin(Plugin):
         self._sensor_labels = {}
         self._sensor_groups = {}
         self._override_descriptor_map = _build_field_map(self._override_registry)
+        self._validation_value_labels = {}
+        self._last_trace_message = None
         self._trace_signal_proxy = _TraceSignalProxy()
         self._trace_signal_proxy.received.connect(self._apply_trace_message)
 
         self._bind_static_widgets()
+        self._build_validation_dashboard()
         self._build_sensor_inputs()
         self._configure_override_controls()
         self._configure_workflow_controls()
@@ -515,7 +589,7 @@ class B29SmcConsolePlugin(Plugin):
 
         add_widget = getattr(context, 'add_widget', None)
         if callable(add_widget):
-            add_widget(self._widget)
+            add_widget(self._scroll_area)
 
     def _bind_static_widgets(self):
         self.languageLabel = self._widget.findChild(QLabel, 'languageLabel')
@@ -573,6 +647,69 @@ class B29SmcConsolePlugin(Plugin):
             self.languageComboBox.addItem(text, value)
         self.languageComboBox.blockSignals(False)
         self.languageComboBox.currentIndexChanged.connect(self._handle_language_change)
+
+    def _build_validation_dashboard(self):
+        self.validationTabs = QTabWidget()
+        self.validationTabs.setObjectName('validationTabs')
+        self.validationTabs.setMinimumHeight(260)
+        self.validationTabs.setMaximumHeight(360)
+        for tab_name, field_names in _VALIDATION_TRACE_GROUPS:
+            tab_contents = QWidget()
+            layout = QGridLayout(tab_contents)
+            layout.setHorizontalSpacing(12)
+            layout.setVerticalSpacing(4)
+            for row, field_name in enumerate(field_names):
+                layout.addWidget(QLabel(field_name), row, 0)
+                value_label = QLabel('-')
+                value_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+                value_label.setWordWrap(True)
+                layout.addWidget(value_label, row, 1)
+                self._validation_value_labels[field_name] = value_label
+            layout.setColumnStretch(1, 1)
+            tab_scroll_area = QScrollArea()
+            tab_scroll_area.setWidgetResizable(True)
+            tab_scroll_area.setWidget(tab_contents)
+            self.validationTabs.addTab(tab_scroll_area, tab_name)
+
+        actions_tab = QWidget()
+        actions_layout = QVBoxLayout(actions_tab)
+        warning = QLabel('Debug validation controls: these actions can change robot motion.')
+        warning.setStyleSheet('font-weight: 700; color: #9b1c1c;')
+        actions_layout.addWidget(warning)
+        action_grid = QGridLayout()
+        self.emergencyStopButton = QPushButton('EMERGENCY STOP')
+        self.emergencyStopButton.setStyleSheet('background: #b91c1c; border-color: #7f1d1d; font-weight: 700;')
+        self.manualResetButton = QPushButton('Manual Reset')
+        self.plannerReleaseButton = QPushButton('Planner Release')
+        self.autoStartButton = QPushButton('Auto Start')
+        self.pauseButton = QPushButton('Pause')
+        self.commsLossButton = QPushButton('Comms Loss')
+        self.obstacleCrossingTriggerCheckBox = QCheckBox('Obstacle Crossing Trigger')
+        self.publishObstacleTriggerButton = QPushButton('Publish Trigger Level')
+        self.clearObstacleTriggerButton = QPushButton('Clear Trigger')
+        action_grid.addWidget(self.emergencyStopButton, 0, 0)
+        action_grid.addWidget(self.manualResetButton, 0, 1)
+        action_grid.addWidget(self.plannerReleaseButton, 0, 2)
+        action_grid.addWidget(self.autoStartButton, 1, 0)
+        action_grid.addWidget(self.pauseButton, 1, 1)
+        action_grid.addWidget(self.commsLossButton, 1, 2)
+        action_grid.addWidget(self.obstacleCrossingTriggerCheckBox, 2, 0)
+        action_grid.addWidget(self.publishObstacleTriggerButton, 2, 2)
+        action_grid.addWidget(self.clearObstacleTriggerButton, 3, 2)
+        actions_layout.addLayout(action_grid)
+        actions_layout.addStretch(1)
+        self.validationTabs.addTab(actions_tab, 'Actions')
+        self._widget.layout().insertWidget(1, self.validationTabs)
+
+        self.emergencyStopButton.clicked.connect(self._request_software_emergency_stop)
+        self.manualResetButton.clicked.connect(self._request_manual_reset)
+        self.plannerReleaseButton.clicked.connect(self._request_planner_release)
+        self.autoStartButton.clicked.connect(lambda: self._send_validation_override('auto_start_requested', True, pulse=True))
+        self.pauseButton.clicked.connect(lambda: self._send_validation_override('auto_run_pause', True, pulse=True))
+        self.commsLossButton.clicked.connect(lambda: self._send_validation_override('lower_alive', False))
+        self.publishObstacleTriggerButton.clicked.connect(self._publish_obstacle_trigger_override)
+        self.clearObstacleTriggerButton.clicked.connect(self._clear_obstacle_trigger_override)
+        self.plannerReleaseButton.setEnabled(False)
 
     def _build_sensor_inputs(self):
         grouped_descriptors = {}
@@ -633,7 +770,7 @@ class B29SmcConsolePlugin(Plugin):
         )
         self.presetCommsLossButton.clicked.connect(lambda: self._apply_sensor_preset(_comms_loss_preset(self._sensor_registry)))
         self.presetObstacleButton.clicked.connect(
-            lambda: self._apply_sensor_preset(_obstacle_detected_preset(self._sensor_registry, self._base_ready_sensor_payload))
+            lambda: self._apply_sensor_preset(_obstacle_triggered_preset(self._sensor_registry, self._base_ready_sensor_payload))
         )
         self.presetClearButton.clicked.connect(lambda: self._apply_sensor_preset(_fallback_sensor_preset(self._sensor_registry)))
         self.publishSensorInputButton.clicked.connect(self._publish_sensor_input)
@@ -832,6 +969,51 @@ class B29SmcConsolePlugin(Plugin):
         except Exception as exc:
             self._set_workflow_status('sensor_failed', message=str(exc))
 
+    def _send_validation_override(self, field_name, value, pulse=False):
+        try:
+            if pulse:
+                self._topic_facade.pulse_override(field_name, value)
+            else:
+                self._topic_facade.latch_override(field_name, value)
+        except Exception as exc:
+            self._set_workflow_status('failed', message=str(exc))
+
+    def _publish_obstacle_trigger_override(self):
+        try:
+            self._topic_facade.publish_obstacle_trigger_override(
+                self.obstacleCrossingTriggerCheckBox.isChecked(),
+            )
+        except Exception as exc:
+            self._set_workflow_status('failed', message=str(exc))
+
+    def _clear_obstacle_trigger_override(self):
+        self.obstacleCrossingTriggerCheckBox.setChecked(False)
+        self._publish_obstacle_trigger_override()
+
+    def _request_software_emergency_stop(self):
+        self._call_validation_service('software_emergency_stop', self._topic_facade.call_software_emergency_stop)
+
+    def _request_manual_reset(self):
+        if QMessageBox.question(self._widget, 'Manual Reset', 'Request controller manual reset?') != QMessageBox.Yes:
+            return
+        self._call_validation_service('manual_reset', self._topic_facade.call_manual_reset)
+
+    def _request_planner_release(self):
+        if QMessageBox.question(self._widget, 'Planner Release', 'Release the current PlannerControl stage?') != QMessageBox.Yes:
+            return
+        self._call_validation_service('planner_release', self._topic_facade.call_planner_release)
+
+    def _call_validation_service(self, name, callback):
+        try:
+            response = callback()
+        except Exception as exc:
+            self._set_workflow_status('failed', name=name, message=str(exc))
+            return
+        if hasattr(response, 'success') and not response.success:
+            self._set_workflow_status('failed', name=name, message=getattr(response, 'message', 'request rejected'))
+            return
+        self._set_workflow_status('succeeded', name=name)
+
     def _configure_override_value_widget(self, descriptor):
         current_value = self._override_active_values.get(descriptor.name, descriptor.default_value)
         if descriptor.value_type == FieldValueType.BOOL:
@@ -979,11 +1161,30 @@ class B29SmcConsolePlugin(Plugin):
         self._trace_signal_proxy.received.emit(message)
 
     def _apply_trace_message(self, message):
+        self._last_trace_message = message
+        self._refresh_validation_dashboard(message)
         entry = self._trace_model.update(message)
         self._refresh_overview(entry)
         if self._trace_paused:
             return
         self._apply_trace_update()
+
+    def _refresh_validation_dashboard(self, message):
+        for field_name, label in self._validation_value_labels.items():
+            label.setText(self._format_validation_value(getattr(message, field_name, None)))
+        planner_release_enabled = bool(getattr(message, 'planner_manual_release_enabled', False))
+        planner_control_active = bool(getattr(message, 'planner_control_active', False))
+        self.plannerReleaseButton.setEnabled(planner_release_enabled and planner_control_active)
+
+    @staticmethod
+    def _format_validation_value(value):
+        if value is None:
+            return '-'
+        if isinstance(value, float):
+            return '{:.6f}'.format(value)
+        if isinstance(value, (list, tuple)):
+            return '[' + ', '.join('{:.6f}'.format(item) if isinstance(item, float) else str(item) for item in value) + ']'
+        return str(value)
 
     def _refresh_trace_history(self):
         self.traceListWidget.clear()

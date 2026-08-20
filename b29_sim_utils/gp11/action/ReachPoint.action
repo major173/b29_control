@@ -1,0 +1,49 @@
+geometry_msgs/PointStamped target
+bool execute
+float64 position_tolerance
+# Non-empty only for the second phase: execute the exact cached, audited plan.
+string approved_plan_id
+# Commissioned obstacle-cycle target profile: default_forward or reverse.
+string target_profile
+---
+uint8 WAITING_STATE=0
+uint8 TRANSFORMING_TARGET=1
+uint8 CHECKING_IK=2
+uint8 PLANNING=3
+uint8 AUDITING_TRAJECTORY=4
+uint8 WAITING_PLANNER_SESSION=5
+uint8 EXECUTING=6
+uint8 WAITING_SESSION_REARM=7
+uint8 SUCCEEDED=8
+uint8 REJECTED=9
+uint8 PREEMPTED=10
+uint8 FAILED=11
+
+bool success
+uint8 final_stage
+int32 moveit_error_code
+string message
+geometry_msgs/PoseStamped target_in_world
+sensor_msgs/JointState planned_goal_joint_state
+bool large_flip_override_expected
+string accepted_anchor_side
+string accepted_tip_link
+# Returned by plan-only and echoed by execute-plan.
+string plan_id
+---
+uint8 WAITING_STATE=0
+uint8 TRANSFORMING_TARGET=1
+uint8 CHECKING_IK=2
+uint8 PLANNING=3
+uint8 AUDITING_TRAJECTORY=4
+uint8 WAITING_PLANNER_SESSION=5
+uint8 EXECUTING=6
+uint8 WAITING_SESSION_REARM=7
+uint8 SUCCEEDED=8
+uint8 REJECTED=9
+uint8 PREEMPTED=10
+uint8 FAILED=11
+
+uint8 stage
+string stage_name
+string message

@@ -31,7 +31,7 @@ public:
   bool isConfigured() const;
   void setOutputMode(OutputMode mode);
   OutputMode outputMode() const;
-  void dispatch(const AutoControlCommand& command);
+  bool dispatch(const AutoControlCommand& command);
 
 private:
   PositionJointHandles position_joint_handles_{};

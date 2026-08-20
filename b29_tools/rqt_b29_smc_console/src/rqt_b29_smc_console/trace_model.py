@@ -11,6 +11,13 @@ _KEY_FIELDS = (
     'transition_reason',
     'command_reason',
     'output_mode',
+    'gravity_compensation_mode',
+    'obstacle_crossing_stage',
+    'obstacle_crossing_side',
+    'disconnect_step',
+    'planner_control_active',
+    'remote_control_active',
+    'software_emergency_stop_latched',
 )
 
 
@@ -31,6 +38,13 @@ class TraceModel:
             transition_reason=getattr(message, 'transition_reason', '') or '',
             command_reason=getattr(message, 'command_reason', '') or '',
             output_mode=getattr(message, 'output_mode', '') or '',
+            gravity_compensation_mode=int(getattr(message, 'gravity_compensation_mode', 0)),
+            obstacle_crossing_stage=getattr(message, 'obstacle_crossing_stage', '') or '',
+            obstacle_crossing_side=getattr(message, 'obstacle_crossing_side', '') or '',
+            disconnect_step=getattr(message, 'disconnect_step', '') or '',
+            planner_control_active=bool(getattr(message, 'planner_control_active', False)),
+            remote_control_active=bool(getattr(message, 'remote_control_active', False)),
+            software_emergency_stop_latched=bool(getattr(message, 'software_emergency_stop_latched', False)),
         )
         stamp_sec = self._message_time_sec(message)
         self._latest = entry

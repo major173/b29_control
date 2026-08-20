@@ -103,13 +103,6 @@ Traversing
         }
 
     evTick
-        [ctxt.isObstacleDetected()]
-        nil
-        {
-        }
-
-    evTick
-        [ctxt.isObstacleNotDetected()]
         nil
         {
             setCruiseCommand();

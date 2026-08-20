@@ -54,6 +54,12 @@ void AutoInputMux::setAutoState(const steering_engine_hw::AutoStateData& auto_st
   has_auto_state_ = true;
 }
 
+void AutoInputMux::setRemoteControl(const steering_engine_hw::RemoteControlData& remote_control)
+{
+  remote_control_ = remote_control;
+  has_remote_control_ = true;
+}
+
 AutoInputSnapshot AutoInputMux::buildSnapshot() const
 {
   AutoInputSnapshot snapshot;
@@ -65,10 +71,16 @@ AutoInputSnapshot AutoInputMux::buildSnapshot() const
     snapshot.grip_confirmed = sensor_input_.grip_confirmed;
     snapshot.joint_fault = sensor_input_.joint_fault;
     snapshot.grip_fault = sensor_input_.grip_fault;
-    snapshot.obstacle_detected = sensor_input_.obstacle_detected;
+    snapshot.cruise_drive_request_raw = sensor_input_.cruise_drive_request;
+    snapshot.cruise_drive_request =
+        toCruiseDriveRequest(snapshot.cruise_drive_request_raw);
+    snapshot.cruise_drive_request_valid =
+        snapshot.cruise_drive_request != CruiseDriveRequest::Invalid;
+    snapshot.auto_start_requested = sensor_input_.auto_start;
+    snapshot.manual_reset_requested = sensor_input_.manual_reset;
+    snapshot.obstacle_crossing_trigger = sensor_input_.obstacle_crossing_trigger;
     snapshot.obstacle_type = toObstacleType(sensor_input_.obstacle_type);
     snapshot.classification_stable = sensor_input_.classification_stable;
-    snapshot.range_to_obstacle = sensor_input_.range_to_obstacle;
     snapshot.at_crossing_position = sensor_input_.at_crossing_position;
     snapshot.post_check_passed = sensor_input_.post_check_passed;
     snapshot.post_check_failed = sensor_input_.post_check_failed;
@@ -83,27 +95,55 @@ AutoInputSnapshot AutoInputMux::buildSnapshot() const
     snapshot.grip_confirmed = auto_state_.grip_confirmed;
     snapshot.joint_fault = auto_state_.joint_fault;
     snapshot.grip_fault = auto_state_.grip_fault;
-    snapshot.obstacle_detected = auto_state_.obstacle_detected;
+    snapshot.cruise_drive_request_raw = auto_state_.cruise_drive_request_raw;
+    snapshot.cruise_drive_request =
+        toCruiseDriveRequest(snapshot.cruise_drive_request_raw);
+    snapshot.cruise_drive_request_valid =
+        auto_state_.cruise_drive_request_valid &&
+        snapshot.cruise_drive_request != CruiseDriveRequest::Invalid;
+    snapshot.auto_start_requested = auto_state_.auto_start;
+    snapshot.manual_reset_requested = auto_state_.manual_reset;
+    snapshot.obstacle_crossing_trigger = auto_state_.obstacle_crossing_trigger;
+    snapshot.auto_start_rising_edge_sequence =
+        auto_state_.auto_start_rising_edge_sequence;
+    snapshot.manual_reset_rising_edge_sequence =
+        auto_state_.manual_reset_rising_edge_sequence;
+    snapshot.obstacle_trigger_rising_edge_sequence =
+        auto_state_.obstacle_trigger_rising_edge_sequence;
+    snapshot.obstacle_trigger_falling_edge_sequence =
+        auto_state_.obstacle_trigger_falling_edge_sequence;
+    snapshot.auto_start_edge_sequence_valid = true;
+    snapshot.manual_reset_edge_sequence_valid = true;
+    snapshot.obstacle_trigger_edge_sequences_valid = true;
     snapshot.obstacle_type = toObstacleType(static_cast<uint8_t>(auto_state_.obstacle_type));
     snapshot.classification_stable = auto_state_.classification_stable;
-    snapshot.range_to_obstacle = auto_state_.range_to_obstacle;
     snapshot.at_crossing_position = auto_state_.at_crossing_position;
     snapshot.post_check_passed = auto_state_.post_check_passed;
     snapshot.post_check_failed = auto_state_.post_check_failed;
     snapshot.auto_run_pause = false;
-    snapshot.cruise_drive_request = auto_state_.cruise_drive_request;
-    snapshot.auto_start_requested = auto_state_.auto_start_requested;
-    snapshot.manual_reset_requested = auto_state_.manual_reset_requested;
-    snapshot.obstacle_crossing_trigger = auto_state_.obstacle_crossing_trigger;
     snapshot.stamp = auto_state_.header.stamp;
   }
 
   if (has_control_request_)
   {
-    snapshot.auto_start_requested = control_request_.auto_start_requested;
-    snapshot.manual_reset_requested = control_request_.manual_reset_requested;
-    snapshot.emergency_stop = control_request_.emergency_stop;
+    snapshot.auto_start_requested =
+        snapshot.auto_start_requested || control_request_.auto_start_requested;
+    snapshot.manual_reset_requested =
+        snapshot.manual_reset_requested || control_request_.manual_reset_requested;
+    snapshot.emergency_stop =
+        snapshot.emergency_stop || control_request_.emergency_stop;
     snapshot.stamp = latestStamp(snapshot.stamp, control_request_.stamp);
+  }
+
+  if (has_remote_control_)
+  {
+    snapshot.remote_control_joint_increments = remote_control_.joint_increments;
+    snapshot.remote_control_complete = remote_control_.stage_complete;
+    snapshot.remote_control_increments_valid = remote_control_.increments_valid;
+    snapshot.remote_control_sample_sequence = remote_control_.sample_sequence;
+    snapshot.remote_control_completion_rising_edge_sequence =
+        remote_control_.completion_rising_edge_sequence;
+    snapshot.stamp = latestStamp(snapshot.stamp, remote_control_.header.stamp);
   }
 
   if (has_joint_state_)
@@ -111,15 +151,11 @@ AutoInputSnapshot AutoInputMux::buildSnapshot() const
     snapshot.stamp = latestStamp(snapshot.stamp, joint_state_.header.stamp);
   }
 
-  const bool base_imu_ready = has_base_imu_ && isBaseImuReady();
   if (has_base_imu_)
   {
     snapshot.posture_ready = isPostureWithinThreshold();
     snapshot.stamp = latestStamp(snapshot.stamp, base_imu_.header.stamp);
   }
-  snapshot.imu_ready = (has_auto_state_ || has_sensor_input_)
-                           ? snapshot.imu_ready && base_imu_ready
-                           : base_imu_ready;
 
   applyDebugOverride(snapshot);
   return snapshot;
@@ -145,61 +181,6 @@ bool AutoInputMux::isPostureWithinThreshold() const
   const double pitch = std::asin(clampUnit(sinp));
 
   return std::abs(roll) <= config_.max_abs_roll_rad && std::abs(pitch) <= config_.max_abs_pitch_rad;
-}
-
-bool AutoInputMux::isBaseImuReady() const
-{
-  bool is_base_imu_ready = true;
-  static size_t imu_unchange_count = 0;
-  static sensor_msgs::Imu last_imu{};
-  constexpr size_t kMaxUnchangedCount = 10;
-
-  if (!has_base_imu_ || base_imu_.header.stamp.isZero())
-  {
-    is_base_imu_ready = false;
-  }
-
-    const auto finite = [](double value) {
-    return std::isfinite(value);
-  };
-
-  const auto& q = base_imu_.orientation;
-  const auto& gyro = base_imu_.angular_velocity;
-  const auto& acc = base_imu_.linear_acceleration;
-
-  const bool value_valid =
-      finite(q.x) && finite(q.y) && finite(q.z) && finite(q.w) &&
-      finite(gyro.x) && finite(gyro.y) && finite(gyro.z) &&
-      finite(acc.x) && finite(acc.y) && finite(acc.z);
-
-  if (!value_valid)
-  {
-    return false;
-  }
-
-  const double norm2 = q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w;
-  if (!std::isfinite(norm2) || norm2 < 1e-12)
-  {
-    return false;
-  }
-
-  if (!isBaseImuChange(base_imu_, last_imu))
-  {
-    ++imu_unchange_count;
-  }
-  else
-  {
-    imu_unchange_count = 0;
-  }
-
-  if (imu_unchange_count >= kMaxUnchangedCount)
-  {
-    is_base_imu_ready = false;
-  }
-
-  last_imu = base_imu_;
-
-  return is_base_imu_ready;
 }
 
 bool AutoInputMux::isBaseImuChange(const sensor_msgs::Imu& current, 
@@ -230,6 +211,21 @@ ObstacleType AutoInputMux::toObstacleType(uint8_t obstacle_type)
   }
 }
 
+CruiseDriveRequest AutoInputMux::toCruiseDriveRequest(uint8_t request)
+{
+  switch (request)
+  {
+    case 0u:
+      return CruiseDriveRequest::Stop;
+    case 1u:
+      return CruiseDriveRequest::Forward;
+    case 2u:
+      return CruiseDriveRequest::Reverse;
+    default:
+      return CruiseDriveRequest::Invalid;
+  }
+}
+
 ros::Time AutoInputMux::latestStamp(const ros::Time& lhs, const ros::Time& rhs)
 {
   if (lhs.isZero())
@@ -240,7 +236,11 @@ ros::Time AutoInputMux::latestStamp(const ros::Time& lhs, const ros::Time& rhs)
   {
     return lhs;
   }
-  return lhs < rhs ? rhs : lhs;
+  if (lhs < rhs)
+  {
+    return rhs;
+  }
+  return lhs;
 }
 
 void AutoInputMux::applyDebugOverride(AutoInputSnapshot& snapshot) const
@@ -255,10 +255,12 @@ void AutoInputMux::applyDebugOverride(AutoInputSnapshot& snapshot) const
   if (debug_override_.field_mask & AutoDebugOverride::FIELD_AUTO_START_REQUESTED)
   {
     snapshot.auto_start_requested = debug_override_.auto_start_requested;
+    snapshot.auto_start_edge_sequence_valid = false;
   }
   if (debug_override_.field_mask & AutoDebugOverride::FIELD_MANUAL_RESET_REQUESTED)
   {
     snapshot.manual_reset_requested = debug_override_.manual_reset_requested;
+    snapshot.manual_reset_edge_sequence_valid = false;
   }
   if (debug_override_.field_mask & AutoDebugOverride::FIELD_EMERGENCY_STOP)
   {
@@ -288,9 +290,10 @@ void AutoInputMux::applyDebugOverride(AutoInputSnapshot& snapshot) const
   {
     snapshot.grip_fault = debug_override_.grip_fault;
   }
-  if (debug_override_.field_mask & AutoDebugOverride::FIELD_OBSTACLE_DETECTED)
+  if (debug_override_.field_mask & AutoDebugOverride::FIELD_OBSTACLE_CROSSING_TRIGGER)
   {
-    snapshot.obstacle_detected = debug_override_.obstacle_detected;
+    snapshot.obstacle_crossing_trigger = debug_override_.obstacle_crossing_trigger;
+    snapshot.obstacle_trigger_edge_sequences_valid = false;
   }
   if (debug_override_.field_mask & AutoDebugOverride::FIELD_OBSTACLE_TYPE)
   {
@@ -300,9 +303,13 @@ void AutoInputMux::applyDebugOverride(AutoInputSnapshot& snapshot) const
   {
     snapshot.classification_stable = debug_override_.classification_stable;
   }
-  if (debug_override_.field_mask & AutoDebugOverride::FIELD_RANGE_TO_OBSTACLE)
+  if (debug_override_.field_mask & AutoDebugOverride::FIELD_CRUISE_DRIVE_REQUEST)
   {
-    snapshot.range_to_obstacle = debug_override_.range_to_obstacle;
+    snapshot.cruise_drive_request_raw = debug_override_.cruise_drive_request;
+    snapshot.cruise_drive_request =
+        toCruiseDriveRequest(snapshot.cruise_drive_request_raw);
+    snapshot.cruise_drive_request_valid =
+        snapshot.cruise_drive_request != CruiseDriveRequest::Invalid;
   }
   if (debug_override_.field_mask & AutoDebugOverride::FIELD_AT_CROSSING_POSITION)
   {

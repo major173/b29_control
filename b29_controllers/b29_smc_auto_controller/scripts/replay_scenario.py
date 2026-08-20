@@ -5,6 +5,7 @@ import yaml
 import rospy
 
 from b29_smc_auto_controller.msg import AutoDebugOverride
+from std_srvs.srv import Trigger
 
 
 FIELD_MAP = {
@@ -17,10 +18,10 @@ FIELD_MAP = {
     "grip_confirmed": AutoDebugOverride.FIELD_GRIP_CONFIRMED,
     "joint_fault": AutoDebugOverride.FIELD_JOINT_FAULT,
     "grip_fault": AutoDebugOverride.FIELD_GRIP_FAULT,
-    "obstacle_detected": AutoDebugOverride.FIELD_OBSTACLE_DETECTED,
+    "obstacle_crossing_trigger": AutoDebugOverride.FIELD_OBSTACLE_CROSSING_TRIGGER,
     "obstacle_type": AutoDebugOverride.FIELD_OBSTACLE_TYPE,
     "classification_stable": AutoDebugOverride.FIELD_CLASSIFICATION_STABLE,
-    "range_to_obstacle": AutoDebugOverride.FIELD_RANGE_TO_OBSTACLE,
+    "cruise_drive_request": AutoDebugOverride.FIELD_CRUISE_DRIVE_REQUEST,
     "at_crossing_position": AutoDebugOverride.FIELD_AT_CROSSING_POSITION,
     "crossing_step_done": AutoDebugOverride.FIELD_CROSSING_STEP_DONE,
     "crossing_complete": AutoDebugOverride.FIELD_CROSSING_COMPLETE,
@@ -61,10 +62,10 @@ def build_message(event: dict) -> AutoDebugOverride:
     msg.grip_confirmed = event.get("grip_confirmed", False)
     msg.joint_fault = event.get("joint_fault", False)
     msg.grip_fault = event.get("grip_fault", False)
-    msg.obstacle_detected = event.get("obstacle_detected", False)
+    msg.obstacle_crossing_trigger = event.get("obstacle_crossing_trigger", False)
     msg.obstacle_type = event.get("obstacle_type", AutoDebugOverride.OBSTACLE_UNKNOWN)
     msg.classification_stable = event.get("classification_stable", False)
-    msg.range_to_obstacle = event.get("range_to_obstacle", 0.0)
+    msg.cruise_drive_request = event.get("cruise_drive_request", 0)
     msg.at_crossing_position = event.get("at_crossing_position", False)
     msg.crossing_step_done = event.get("crossing_step_done", False)
     msg.crossing_complete = event.get("crossing_complete", False)
@@ -74,17 +75,25 @@ def build_message(event: dict) -> AutoDebugOverride:
     return msg
 
 
+def resolve_service_name(namespace: str, service_name: str) -> str:
+    if service_name.startswith("/"):
+        return service_name
+    return f"{namespace.rstrip('/')}/{service_name}"
+
+
 def main() -> None:
     rospy.init_node("b29_smc_replay")
     topic_name = rospy.get_param("~topic", "/b29_controller/b29_smc_auto_controller/debug_override")
     scenario_param = rospy.get_param("~scenario")
     scenario_path = resolve_scenario_path(scenario_param)
+    controller_namespace = rospy.get_param("~controller_namespace", "/b29_controller/b29_smc_auto_controller")
 
     with open(scenario_path, "r", encoding="utf-8") as handle:
         scenario = yaml.safe_load(handle)
 
     events = scenario.get("events", [])
     publisher = rospy.Publisher(topic_name, AutoDebugOverride, queue_size=1)
+    service_proxies = {}
     rate = rospy.Rate(50)
     start_time = rospy.Time.now()
     index = 0
@@ -93,9 +102,17 @@ def main() -> None:
       elapsed = (rospy.Time.now() - start_time).to_sec()
       event = events[index]
       if elapsed >= float(event["time"]):
-          msg = build_message(event)
-          msg.header.stamp = rospy.Time.now()
-          publisher.publish(msg)
+          if "service" in event:
+              service_name = resolve_service_name(controller_namespace, event["service"])
+              if service_name not in service_proxies:
+                  service_proxies[service_name] = rospy.ServiceProxy(service_name, Trigger)
+              response = service_proxies[service_name]()
+              if not response.success:
+                  raise RuntimeError(f"service {service_name} rejected event: {response.message}")
+          else:
+              msg = build_message(event)
+              msg.header.stamp = rospy.Time.now()
+              publisher.publish(msg)
           index += 1
       rate.sleep()
 

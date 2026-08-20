@@ -1,0 +1,22 @@
+# Real-robot joint limits: names match the B29 hardware URDF and adapter.
+joint_limits:
+  left_first_leg_joint:
+    has_velocity_limits: true
+    max_velocity: 1.2
+    has_acceleration_limits: true
+    max_acceleration: 1.5
+  left_second_leg_joint:
+    has_velocity_limits: true
+    max_velocity: 1.2
+    has_acceleration_limits: true
+    max_acceleration: 1.5
+  right_first_leg_joint:
+    has_velocity_limits: true
+    max_velocity: 1.2
+    has_acceleration_limits: true
+    max_acceleration: 1.5
+  right_second_leg_joint:
+    has_velocity_limits: true
+    max_velocity: 1.2
+    has_acceleration_limits: true
+    max_acceleration: 1.5

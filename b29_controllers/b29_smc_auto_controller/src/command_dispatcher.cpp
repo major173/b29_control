@@ -31,11 +31,11 @@ CommandDispatcher::OutputMode CommandDispatcher::outputMode() const
   return output_mode_;
 }
 
-void CommandDispatcher::dispatch(const AutoControlCommand& command)
+bool CommandDispatcher::dispatch(const AutoControlCommand& command)
 {
   if (!configured_)
   {
-    return;
+    return false;
   }
 
   const bool hold_active = (output_mode_ == OutputMode::kSafeHold) || command.freeze_joints;
@@ -49,7 +49,14 @@ void CommandDispatcher::dispatch(const AutoControlCommand& command)
     double target_speed = 0.0;
     if (output_mode_ == OutputMode::kNormal && !command.stop_all)
     {
-      target_speed = (i == 0 ? command.left_wheel_speed : command.right_wheel_speed);
+      if (i == 0)
+      {
+        target_speed = command.left_wheel_speed;
+      }
+      else
+      {
+        target_speed = command.right_wheel_speed;
+      }
     }
     wheel_joint_handles_[i].setCommand(target_speed);
   }
@@ -72,5 +79,7 @@ void CommandDispatcher::dispatch(const AutoControlCommand& command)
     }
     position_joint_handles_[i].setCommand(target_position);
   }
+
+  return true;
 }
 }  // namespace b29_smc_auto_controller

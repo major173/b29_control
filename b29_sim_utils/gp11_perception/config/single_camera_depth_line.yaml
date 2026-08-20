@@ -1,0 +1,18 @@
+depth_topic: /camera/depth/image_rect_raw
+camera_info_topic: /camera/depth/camera_info
+target_point_topic: /gp11_perception/target_point
+moveit_target_point_topic: /gp11_moveit/reach_arm/target_point
+debug_mask_topic: /gp11_perception/debug_mask
+line_marker_topic: /gp11_perception/line_marker
+publish_target_to_moveit: false
+output_frame: world
+min_depth_m: 0.15
+max_depth_m: 2.50
+foreground_depth_delta_m: 0.015
+min_component_area_px: 150
+pixel_step: 3
+max_points: 4000
+smoothing_alpha: 0.35
+target_ratio: 0.50
+pixel_roi: []
+reference_axis_world: [0.0, 1.0, 0.0]

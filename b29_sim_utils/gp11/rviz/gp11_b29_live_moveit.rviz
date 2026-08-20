@@ -1,0 +1,179 @@
+# Real robot RViz layout, deliberately modelled after the proven Gazebo
+# MotionPlanning workflow.  MoveIt owns the interactive goal, goal ghost,
+# planning request and execution request as one coherent state machine.
+Panels:
+  - Class: rviz/Displays
+    Name: Displays
+    Property Tree Widget:
+      Expanded:
+        - /Global Options1
+        - /Live B29 Robot1
+        - /Anchored MoveIt Planning1
+      Splitter Ratio: 0.5
+  - Class: rviz/Selection
+    Name: Selection
+  - Class: rviz/Tool Properties
+    Name: Tool Properties
+  - Class: rviz/Views
+    Name: Views
+  - Class: rviz/Time
+    Name: Time
+    SyncMode: 0
+    SyncSource: ""
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Alpha: 0.5
+      Cell Size: 0.25
+      Class: rviz/Grid
+      Color: 160; 160; 164
+      Enabled: true
+      Line Style:
+        Line Width: 0.03
+        Value: Lines
+      Name: Grid
+      Normal Cell Count: 0
+      Offset: {X: 0, Y: 0, Z: 0}
+      Plane: XY
+      Plane Cell Count: 20
+      Reference Frame: <Fixed Frame>
+      Value: true
+    - Class: rviz/TF
+      Enabled: false
+      Filter (blacklist): ""
+      Filter (whitelist): ""
+      Frame Timeout: 15
+      Frames:
+        All Enabled: true
+      Marker Alpha: 0.7
+      Marker Scale: 0.25
+      Name: B29 Live TF
+      Show Arrows: false
+      Show Axes: false
+      Show Names: false
+      Update Interval: 0
+      Value: true
+    # This is the actual robot only: B29 encoder-backed joint states and TF.
+    # Keep B29's original red materials so it is never confused with the
+    # MoveIt target preview below.
+    - Alpha: 1
+      Class: rviz/RobotModel
+      Collision Enabled: false
+      Enabled: true
+      Links:
+        All Links Enabled: true
+        Expand Joint Details: false
+        Expand Link Details: false
+        Expand Tree: false
+      Name: Live B29 Robot (red, real TF)
+      Robot Description: /robot_description
+      TF Prefix: ""
+      Update Interval: 0
+      Value: true
+      Visual Enabled: true
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /gp11_moveit/execution_monitor/markers
+      Name: Motor Command Evidence
+      Namespaces: {}
+      Queue Size: 10
+      Value: true
+    # The native display is the single owner of target interaction, goal
+    # preview, Plan and Plan & Execute.  This is the same ownership model as
+    # the Gazebo workflow; there is no competing custom marker or ghost.
+    - Class: moveit_rviz_plugin/MotionPlanning
+      Enabled: true
+      Name: Anchored MoveIt Planning
+      Planned Path:
+        Links: ~
+        Loop Animation: false
+        Robot Alpha: 0.35
+        Show Robot Collision: false
+        Show Robot Visual: true
+        Show Trail: false
+        State Display Time: 0.05 s
+        Trajectory Topic: /move_group/display_planned_path
+      Planning Metrics:
+        Payload: 1
+        Show Joint Torques: false
+        Show Manipulability: false
+        Show Manipulability Index: false
+        Show Weight Limit: false
+      Planning Request:
+        Colliding Link Color: 255; 0; 0
+        # This is the draggable, plan-able target preview.  It is deliberately
+        # opaque grey; the red RobotModel above is live B29 TF only.
+        Goal State Alpha: 1.0
+        Goal State Color: 150; 150; 155
+        # Leave this at MoveIt's automatic size.  A non-default persisted
+        # value schedules an extra marker clear/rebuild while the namespaced
+        # model is loading, which can race the first drag feedback in Noetic.
+        Interactive Marker Size: 0
+        Joint Violation Color: 255; 0; 255
+        Planning Group: reach_arm
+        Query Goal State: true
+        Query Start State: false
+        Show Workspace: false
+        Start State Alpha: 0
+        Start State Color: 0; 255; 0
+      Planning Scene Topic: /move_group/monitored_planning_scene
+      # RViz runs in /gp11_moveit, so this default name resolves to the private
+      # anchored model immediately; MoveGroup endpoints are remapped globally
+      # by the runtime without rebuilding RobotInteraction.
+      Robot Description: robot_description
+      Scene Geometry:
+        Scene Alpha: 1
+        Show Scene Geometry: true
+        Voxel Coloring: Z-Axis
+        Voxel Rendering: Occupied Voxels
+      # The planning scene's current-state robot would duplicate the live TF
+      # model.  Goal State above is the only planning-model visual at rest.
+      Scene Robot:
+        Attached Body Color: 150; 50; 150
+        Links: ~
+        Robot Alpha: 0
+        Show Scene Robot: false
+      Value: true
+  Enabled: true
+  Global Options:
+    Background Color: 48; 48; 48
+    Default Light: true
+    # world is connected to B29's real TF by gp11_real_anchor_tf.py.
+    Fixed Frame: world
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz/Interact
+      # Match the proven Gazebo RViz workflow: the Interact tool owns drag
+      # events, so its active 6-DOF marker remains the only selectable handle.
+      Hide Inactive Objects: true
+    - Class: rviz/MoveCamera
+    - Class: rviz/Select
+    - Class: rviz/FocusCamera
+    - Class: rviz/Measure
+  Value: true
+  Views:
+    Current:
+      Class: rviz/Orbit
+      Distance: 4
+      Enable Stereo Rendering:
+        Stereo Eye Separation: 0.06
+        Stereo Focal Distance: 1
+        Swap Stereo Eyes: false
+        Value: false
+      Field of View: 0.785398
+      Focal Point: {X: 0, Y: 0, Z: 0}
+      Focal Shape Fixed Size: true
+      Focal Shape Size: 0.05
+      Invert Z Axis: false
+      Name: Current View
+      Near Clip Distance: 0.01
+      Pitch: 0.25
+      Target Frame: <Fixed Frame>
+      Yaw: 1.35
+    Saved: ~
+Window Geometry:
+  Height: 846
+  Width: 1200
+  X: 685
+  Y: 52

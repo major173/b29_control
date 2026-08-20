@@ -1,0 +1,112 @@
+<?xml version="1.0"?>
+<launch>
+       <arg name="planner_mode" default="normal" doc="Planner mode: normal or debug"/>
+       <arg name="temporary_allow_start_without_grip_confirmed" default="true"
+            doc="Temporarily bypass only the start_disconnect grip gate"/>
+       <arg name="launch_disconnect_blackbox" default="true"
+            doc="Launch lightweight read-only cable-disconnect recorder"/>
+       <arg name="launch_single_flip_moveit" default="true"
+            doc="Launch headless auto-anchor MoveIt runtime for the obstacle flip"/>
+       <arg name="launch_automatic_flip" default="true"
+            doc="Automatically trigger and execute the flip after disconnect succeeds"/>
+       <arg name="continuous_obstacles" default="true"
+            doc="Keep the automatic node armed for repeated two-pass obstacle cycles"/>
+       <arg name="smc_controller_namespace" default="/b29_controller/b29_smc_auto_controller"/>
+       <arg name="rviz_config" default="$(find b29_control)/rviz/config_dual_role.rviz"/>
+       <arg name="model" default="$(find b29_control)/urdf/b29/b29.urdf.xacro"/>
+       <arg name="use_rviz" default="false"/>
+
+       <param name="robot_description"
+              command="$(find xacro)/xacro $(arg model) use_simulation:=false"/>
+
+       <rosparam file="$(find b29_control)/config/hardware.yaml" command="load"/>
+       <rosparam file="$(find b29_control)/config/controller_dual_role.yaml" command="load"/>
+       <param name="steering_engine_hw/gravity_compensation/controller_mode_enabled"
+              value="true"/>
+       <param name="b29_controller/b29_smc_auto_controller/planner_interface/mode"
+              value="$(arg planner_mode)"/>
+       <param name="b29_controller/b29_smc_auto_controller/debug_validation/enabled"
+              value="$(eval arg('planner_mode') == 'debug')"/>
+       <param name="b29_controller/b29_smc_auto_controller/temporary_allow_start_without_grip_confirmed"
+              value="$(arg temporary_allow_start_without_grip_confirmed)"/>
+
+       <node if="$(arg launch_disconnect_blackbox)"
+             name="b29_disconnect_blackbox"
+             pkg="b29_smc_auto_controller"
+             type="disconnect_blackbox.py"
+             output="screen">
+         <param name="output_directory" value="$(env HOME)/.ros/b29_disconnect_blackbox"/>
+         <param name="sample_rate" value="20.0"/>
+         <param name="joint_states_topic" value="/joint_states"/>
+         <param name="state_trace_topic"
+                value="$(arg smc_controller_namespace)/state_trace"/>
+       </node>
+
+       <node name="b29_hardware" pkg="b29_control" type="b29_hardware" respawn="false"
+             output="screen"/>
+
+       <node name="controller_spawner"
+             pkg="controller_manager"
+             type="spawner"
+             output="screen"
+             args="b29_controller/joint_state_controller
+                   b29_controller/robot_state_controller
+                   b29_controller/imu_sensor_controller
+                   b29_controller/b29_smc_auto_controller"/>
+
+       <include file="$(find b29_planner_adapter)/launch/planner_adapter.launch">
+         <arg name="interface_mode" value="$(arg planner_mode)"/>
+         <arg name="smc_controller_namespace" value="$(arg smc_controller_namespace)"/>
+       </include>
+
+       <node name="imu_topic_relay"
+             pkg="topic_tools"
+             type="relay"
+             output="screen"
+             args="/base_imu /imu/data" />
+
+       <include if="$(arg launch_single_flip_moveit)"
+                file="$(find gp11)/launch/gp11_moveit_real.launch">
+         <arg name="anchor_mode" value="auto"/>
+         <arg name="rviz" value="false"/>
+         <arg name="enable_real_execution" value="true"/>
+         <arg name="launch_reach_target" value="false"/>
+         <arg name="launch_cartesian_goal_server" value="true"/>
+         <arg name="allow_direct_execution" value="true"/>
+         <arg name="launch_execution_monitor" value="true"/>
+         <arg name="launch_motion_blackbox" value="true"/>
+       </include>
+
+       <node if="$(eval arg('launch_single_flip_moveit') and arg('launch_automatic_flip'))"
+             name="gp11_automatic_flip"
+             pkg="gp11"
+             type="gp11_automatic_flip.py"
+             output="screen">
+         <param name="smc_controller_namespace" value="$(arg smc_controller_namespace)"/>
+         <param name="pass_count" value="2"/>
+         <param name="continuous_obstacles" value="$(arg continuous_obstacles)"/>
+         <param name="execution_timeout" value="150.0"/>
+         <param name="handoff_timeout" value="5.0"/>
+         <param name="target_frame" value="world"/>
+         <param name="target_x" value="0.0060528"/>
+         <param name="target_y" value="-0.00000272"/>
+         <param name="target_z" value="-0.7399961"/>
+         <param name="reverse_target_frame" value="world"/>
+         <param name="reverse_target_x" value="0.1700000"/>
+         <param name="reverse_target_y" value="-0.00000272"/>
+         <param name="reverse_target_z" value="0.7399961"/>
+         <param name="post_disconnect_stability_timeout" value="20.0"/>
+         <param name="post_disconnect_stability_duration" value="1.0"/>
+         <param name="post_disconnect_position_span_threshold" value="0.01"/>
+         <param name="post_disconnect_velocity_threshold" value="0.02"/>
+         <param name="post_disconnect_joint_state_max_age" value="0.5"/>
+         <param name="failure_reminder_period" value="5.0"/>
+       </node>
+
+       <node if="$(arg use_rviz)"
+             name="rviz"
+             pkg="rviz"
+             type="rviz"
+             output="screen"
+             args="-d $(arg rviz_config)"/>
+</launch>

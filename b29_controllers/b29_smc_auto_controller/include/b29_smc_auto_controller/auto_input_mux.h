@@ -9,6 +9,7 @@
 #include <b29_smc_auto_controller/auto_types.h>
 
 #include <steering_engine/common/auto_state_interface.h>
+#include <steering_engine/common/remote_control_interface.h>
 
 namespace b29_smc_auto_controller
 {
@@ -23,15 +24,16 @@ public:
   void setControlRequest(const AutoControlRequest& control_request);
   void setDebugOverride(const AutoDebugOverride& debug_override);
   void setAutoState(const steering_engine_hw::AutoStateData& auto_state);
+  void setRemoteControl(const steering_engine_hw::RemoteControlData& remote_control);
 
   AutoInputSnapshot buildSnapshot() const;
 
 private:
   bool isPostureWithinThreshold() const;
-  bool isBaseImuReady() const;
   bool isBaseImuChange(const sensor_msgs::Imu& current, 
                        const sensor_msgs::Imu& previous) const;
   static ObstacleType toObstacleType(uint8_t obstacle_type);
+  static CruiseDriveRequest toCruiseDriveRequest(uint8_t request);
   static ros::Time latestStamp(const ros::Time& lhs, const ros::Time& rhs);
   void applyDebugOverride(AutoInputSnapshot& snapshot) const;
 
@@ -42,10 +44,12 @@ private:
   AutoControlRequest control_request_{};
   AutoDebugOverride debug_override_{};
   steering_engine_hw::AutoStateData auto_state_{};
+  steering_engine_hw::RemoteControlData remote_control_{};
   bool has_joint_state_{false};
   bool has_base_imu_{false};
   bool has_sensor_input_{false};
   bool has_auto_state_{false};
+  bool has_remote_control_{false};
   bool has_control_request_{false};
   bool has_debug_override_{false};
 };

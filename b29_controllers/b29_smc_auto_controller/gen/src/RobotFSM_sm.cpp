@@ -336,29 +336,18 @@ void RobotFSM_Traversing::evTick(RobotFSMContext& context)
 {
     RobotContext& ctxt = context.getOwner();
 
-    if (ctxt.isObstacleDetected())
+    RobotContextState& endState = context.getState();
+
+    context.clearState();
+    try
     {
-        // No actions.
+        ctxt.setCruiseCommand();
+        context.setState(endState);
     }
-    else if (ctxt.isObstacleNotDetected())
-
+    catch (...)
     {
-        RobotContextState& endState = context.getState();
-
-        context.clearState();
-        try
-        {
-            ctxt.setCruiseCommand();
-            context.setState(endState);
-        }
-        catch (...)
-        {
-            context.setState(endState);
-            throw;
-        }
-    }    else
-    {
-         RobotFSM_Default::evTick(context);
+        context.setState(endState);
+        throw;
     }
 
 

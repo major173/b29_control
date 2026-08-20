@@ -1,52 +1,46 @@
 <?xml version="1.0"?>
 <launch>
+  <!-- Default keeps the gravity branch's existing real-hardware Reach flow. -->
+  <arg name="mode" default="reach" doc="Startup mode: reach or dual_role"/>
+
   <arg name="use_sim_time" default="false"/>
   <arg name="use_simulation" default="false"/>
   <arg name="model" default="$(find b29_control)/urdf/b29/b29.urdf.xacro"/>
 
-  <param name="use_sim_time" value="$(arg use_sim_time)"/>
-  <param name="robot_description"
-         command="$(find xacro)/xacro $(arg model) use_simulation:=$(arg use_simulation)"/>
+  <arg name="planner_mode" default="normal"/>
+  <arg name="temporary_allow_start_without_grip_confirmed" default="true"/>
+  <arg name="launch_disconnect_blackbox" default="true"/>
+  <arg name="launch_single_flip_moveit" default="true"/>
+  <arg name="launch_automatic_flip" default="true"/>
+  <arg name="continuous_obstacles" default="true"/>
+  <arg name="smc_controller_namespace"
+       default="/b29_controller/b29_smc_auto_controller"/>
+  <arg name="rviz_config"
+       default="$(find b29_control)/rviz/config_dual_role.rviz"/>
+  <arg name="use_rviz" default="false"/>
 
-  <rosparam file="$(find b29_control)/config/hardware.yaml" command="load"/>
-  <rosparam file="$(find b29_control)/config/controller.yaml" command="load"/>
+  <include if="$(eval arg('mode') == 'reach')"
+           file="$(find b29_control)/launch/start_reach.launch">
+    <arg name="use_sim_time" value="$(arg use_sim_time)"/>
+    <arg name="use_simulation" value="$(arg use_simulation)"/>
+    <arg name="model" value="$(arg model)"/>
+  </include>
 
-  <node name="b29_hardware" pkg="b29_control" type="b29_hardware" respawn="false"
-        output="screen"/>
-
-  <node name="controller_spawner"
-        pkg="controller_manager"
-        type="spawner"
-        output="screen"
-        args="b29_controller/joint_state_controller
-              b29_controller/robot_state_controller
-              b29_controller/imu_sensor_controller
-              b29_controller/left_first_leg_joint_position_controller
-              b29_controller/left_second_leg_joint_position_controller
-              b29_controller/right_first_leg_joint_position_controller
-              b29_controller/right_second_leg_joint_position_controller"/>
-              
-  <!-- <node name="controller_spawner"
-        pkg="controller_manager"
-        type="spawner"
-        output="screen"
-        args="b29_controller/joint_state_controller
-              b29_controller/robot_state_controller
-              b29_controller/b29_joint_controller
-              b29_controller/imu_sensor_controller
-              b29_controller/b29_smc_auto_controller
-              b29_controller/left_first_leg_joint_position_controller
-              b29_controller/left_second_leg_joint_position_controller
-              b29_controller/left_rod_joint_position_controller
-              b29_controller/right_first_leg_joint_position_controller
-              b29_controller/right_second_leg_joint_position_controller
-              b29_controller/right_rod_joint_position_controller
-              b29_controller/left_friction_wheel_joint_velocity_controller
-              b29_controller/right_friction_wheel_joint_velocity_controller" /> -->
-
-  <node name="imu_topic_relay"
-        pkg="topic_tools"
-        type="relay"
-        output="screen"
-        args="/base_imu /imu/data" />
+  <include if="$(eval arg('mode') == 'dual_role')"
+           file="$(find b29_control)/launch/start_dual_role.launch">
+    <arg name="planner_mode" value="$(arg planner_mode)"/>
+    <arg name="temporary_allow_start_without_grip_confirmed"
+         value="$(arg temporary_allow_start_without_grip_confirmed)"/>
+    <arg name="launch_disconnect_blackbox"
+         value="$(arg launch_disconnect_blackbox)"/>
+    <arg name="launch_single_flip_moveit"
+         value="$(arg launch_single_flip_moveit)"/>
+    <arg name="launch_automatic_flip" value="$(arg launch_automatic_flip)"/>
+    <arg name="continuous_obstacles" value="$(arg continuous_obstacles)"/>
+    <arg name="smc_controller_namespace"
+         value="$(arg smc_controller_namespace)"/>
+    <arg name="rviz_config" value="$(arg rviz_config)"/>
+    <arg name="model" value="$(arg model)"/>
+    <arg name="use_rviz" value="$(arg use_rviz)"/>
+  </include>
 </launch>
