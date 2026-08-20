@@ -1,8 +1,8 @@
 steering_engine_hw:
   control_loop_rate_hz: 200
   serial:
-    port: "/dev/ttyACM0"
-    # port: "/dev/ttyUSB0"
+    # port: "/dev/ttyACM0"
+    port: "/dev/ttyUSB0"
     baudrate: 921600
   imu:
     orientation_covariance_diagonal: [0.0012, 0.0012, 0.0012]
@@ -13,7 +13,7 @@ steering_engine_hw:
     gravity: 9.81
     # 首次联调保持 false：仍发送 V2 位置帧，但 torque_flags=0、tau_ff=0。
     # 逐关节确认方向时设为 true，并把未测试关节的 torque_scales 暂设为 0。
-    transmit_enabled: false
+    transmit_enabled: true
     torque_scales: [1.0, 1.0, 1.0, 1.0]
     # 运行时可向 support_side_topic 发布 LEFT/RIGHT；切换由力矩斜率限制平滑。
     support_side: "LEFT"
@@ -30,7 +30,7 @@ steering_engine_hw:
     # COM 坐标位于对应 link frame；未建模的夹爪移动关节使用 URDF 零位几何。
     links:
       base_link:
-        mass: 2.429516
+        mass: 2.829516
         com: [0.000088, -0.000019, 0.037664]
       base_imu:
         mass: 0.01

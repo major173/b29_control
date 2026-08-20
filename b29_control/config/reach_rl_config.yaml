@@ -100,8 +100,8 @@ deploy:
   # DLS 实机故障监测。故障后冻结最后安全目标，需重启节点复位。
   watchdog:
     feedback_timeout_s: 0.10
-    track_error_rad: 0.20
-    track_error_persist_s: 0.20
+    track_error_rad: 0.30
+    track_error_persist_s: 0.50
     dq_limit_rad_s: 2.0
     dq_persist_s: 0.30
 

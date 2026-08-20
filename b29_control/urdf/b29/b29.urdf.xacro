@@ -26,7 +26,7 @@
         </collision>
     </link>
 
-    <xacro:IMU connected_to="base_link" imu_name="base_imu" xyz="0.0 0.0 0.01" rpy="0 0 0"/>
+    <xacro:IMU connected_to="base_link" imu_name="base_imu" xyz="0.0 0.0 0.0" rpy="0 0 0"/>
 
     <!-- ==================== left_first_leg ==================== -->
     <link name="left_first_leg">
