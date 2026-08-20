@@ -216,13 +216,12 @@
         </collision>
     </link>
 
-    <joint name="l_gripper_right_up_joint" type="prismatic">
+    <!-- Passive upper rod has no actuator, transmission, or position sensor.
+         The real-robot model uses its nominal zero-position geometry. -->
+    <joint name="l_gripper_right_up_joint" type="fixed">
         <origin xyz="0.018152 0.046589 0" rpy="0 0 0"/>
         <parent link="l_gripper_right_drive"/>
         <child link="l_gripper_right_up"/>
-        <axis xyz="-1 0 0"/>
-        <limit lower="-0.015" upper="0.015" effort="50" velocity="0.2"/>
-        <dynamics damping="150.0" friction="5.0"/>
     </joint>
 
     <link name="left_gripper_tool"/>
@@ -421,13 +420,12 @@
         </collision>
     </link>
 
-    <joint name="r_gripper_right_uprod_joint" type="prismatic">
+    <!-- Passive upper rod has no actuator, transmission, or position sensor.
+         The real-robot model uses its nominal zero-position geometry. -->
+    <joint name="r_gripper_right_uprod_joint" type="fixed">
         <origin xyz="0.018152 0.046589 0" rpy="0 0 0"/>
         <parent link="r_gripper_right_drive"/>
         <child link="r_gripper_right_uprod"/>
-        <axis xyz="-1 0 0"/>
-        <limit lower="-0.015" upper="0.015" effort="50" velocity="0.2"/>
-        <dynamics damping="150.0" friction="5.0"/>
     </joint>
 
     <link name="right_gripper_tool"/>
