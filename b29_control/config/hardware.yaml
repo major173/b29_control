@@ -31,7 +31,7 @@ steering_engine_hw:
     # COM 坐标位于对应 link frame；未建模的夹爪移动关节使用 URDF 零位几何。
     links:
       base_link:
-        mass: 2.829516
+        mass: 3.729516
         com: [0.000088, -0.000019, 0.037664]
       base_imu:
         mass: 0.01
@@ -40,7 +40,7 @@ steering_engine_hw:
         mass: 0.85685
         com: [-0.063411, -0.008934, 0.141596]
       left_second_leg:
-        mass: 0.55532
+        mass: 1.55532
         com: [0.000033, -0.000056, 0.066999]
       l_gripper_left_drive:
         mass: 0.0064743
@@ -61,7 +61,7 @@ steering_engine_hw:
         mass: 0.484529
         com: [0.058923, 0.005837, 0.094762]
       right_second_leg:
-        mass: 0.55532
+        mass: 1.55532
         com: [0.000033, -0.000056, 0.066999]
       r_gripper_left_drive:
         mass: 0.0064743
