@@ -178,13 +178,13 @@ output_mode: "normal"    # 或 "safe_hold"
 完整正式启动：
 
 ```bash
-roslaunch b29_control start.launch mode:=dual_role planner_mode:=normal
+roslaunch b29_control start.launch planner_mode:=normal
 ```
 
 调试模式：
 
 ```bash
-roslaunch b29_control start.launch mode:=dual_role \
+roslaunch b29_control start.launch \
   planner_mode:=debug \
   launch_single_flip_moveit:=false \
   launch_automatic_flip:=false

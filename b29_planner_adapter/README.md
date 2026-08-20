@@ -94,7 +94,7 @@ Adapter 启动时会读取 SMC 发布的 `max_delta_per_command`。`max_output_d
 完整工程使用：
 
 ```bash
-roslaunch b29_control start.launch mode:=dual_role planner_mode:=normal
+roslaunch b29_control start.launch planner_mode:=normal
 ```
 
 主 launch 会同时启动 SMC、Adapter 和 GP11，不要再单独重复启动 Adapter。

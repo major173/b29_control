@@ -377,7 +377,7 @@ adapter max_output_delta exceeds the active SMC session limit
 cd /home/yxj02/B29_ws
 source /opt/ros/noetic/setup.bash
 source devel/setup.bash
-roslaunch b29_control start.launch mode:=dual_role
+roslaunch b29_control start.launch
 ```
 
 不要同时运行 systemd 服务和手动 `roslaunch`。如果服务正在运行，先停服务；否则会争用串口、ROS master 和控制器。

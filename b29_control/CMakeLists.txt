@@ -180,23 +180,6 @@ target_link_libraries(b29_hardware b29_gravity_compensator ${catkin_LIBRARIES})
 #   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 # )
 
-catkin_install_python(PROGRAMS
-        scripts/anchor_world_tf_publisher.py
-        scripts/rl_inference_node.py
-        scripts/gazebo_rl_bridge_node.py
-        scripts/reach_goal_keyboard_node.py
-        scripts/update_gp11_urdf.py
-        DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-)
-
-# Python helper modules are imported by the nodes and are not rosrun entry points.
-install(FILES
-        scripts/dls_reach_controller.py
-        scripts/reach_policy.py
-        scripts/urdf_kinematics.py
-        DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-)
-
 ## Mark executables for installation
 ## See http://docs.ros.org/melodic/api/catkin/html/howto/format1/building_executables.html
 # install(TARGETS ${PROJECT_NAME}_node

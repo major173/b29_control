@@ -22,7 +22,7 @@ gp11_automatic_flip
 正式运行只启动主 launch：
 
 ```bash
-roslaunch b29_control start.launch mode:=dual_role planner_mode:=normal
+roslaunch b29_control start.launch planner_mode:=normal
 ```
 
 它已经包含 GP11 MoveIt、Adapter 和自动双侧翻越。不要再次单独启动 GP11，否则可能重复启动 MoveGroup、TF、Action Server 或监控节点。
@@ -92,7 +92,7 @@ roslaunch b29_control start.launch mode:=dual_role planner_mode:=normal
 先关闭自动调度：
 
 ```bash
-roslaunch b29_control start.launch mode:=dual_role launch_automatic_flip:=false
+roslaunch b29_control start.launch launch_automatic_flip:=false
 ```
 
 SMC 到达 `DisconnectDoneWaitFlip` 后运行：

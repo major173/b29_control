@@ -24,7 +24,7 @@ output_mode: "safe_hold"
 
 ```bash
 source ~/桌面/B29_ws/devel/setup.bash
-roslaunch b29_control start.launch mode:=dual_role \
+roslaunch b29_control start.launch \
   planner_mode:=debug \
   launch_single_flip_moveit:=false \
   launch_automatic_flip:=false

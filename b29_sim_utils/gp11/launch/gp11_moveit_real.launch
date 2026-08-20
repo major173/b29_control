@@ -4,7 +4,7 @@
        GP11 MoveIt — Real Robot (no Gazebo)
 
        Prerequisite:
-         roslaunch b29_control start.launch mode:=dual_role use_rviz:=false
+         roslaunch b29_control start.launch use_rviz:=false
 
        start.launch owns B29 hardware, /joint_states, TF, and the Planner
        Adapter. This launch owns the only RViz instance;
