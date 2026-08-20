@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <launch>
-  <!-- Default keeps the gravity branch's existing real-hardware Reach flow. -->
-  <arg name="mode" default="reach" doc="Startup mode: reach or dual_role"/>
+  <!-- The merged real-hardware entry follows the dual-role-flip workflow. -->
+  <arg name="mode" default="dual_role" doc="Startup mode: dual_role or reach"/>
 
   <arg name="use_sim_time" default="false"/>
   <arg name="use_simulation" default="false"/>

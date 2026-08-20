@@ -311,7 +311,6 @@ private:
   std::unordered_map<std::string, ActuatorIndex> joint_to_actuator_{};
   ControlMap control_map_{};
   ProtocolTopics protocol_topics_{};
-  uint8_t gravity_compensation_mode_{0};
   double joint_speed_target_{1.0};
   std::array<double, 2> claw_speed_target_{{1.0, 1.0}};
   ros::Subscriber joint_speed_sub_;

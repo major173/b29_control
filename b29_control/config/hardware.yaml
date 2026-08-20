@@ -11,8 +11,9 @@ steering_engine_hw:
   gravity_compensation:
     enabled: true
     gravity: 9.81
-    # 首次联调保持 false：仍发送 V2 位置帧，但 torque_flags=0、tau_ff=0。
-    # 逐关节确认方向时设为 true，并把未测试关节的 torque_scales 暂设为 0。
+    # dual-role 的 start.launch 会把 controller_mode_enabled 覆盖为 true：
+    # 仅状态机重力模式非零时发送上位机 tau_ff，模式 0 时 torque_flags=0。
+    controller_mode_enabled: false
     transmit_enabled: true
     torque_scales: [1.0, 1.0, 1.0, 1.0]
     # 运行时可向 support_side_topic 发布 LEFT/RIGHT；切换由力矩斜率限制平滑。
@@ -78,8 +79,7 @@ steering_engine_hw:
         mass: 0.12712
         com: [0.00052003, 0.011886, -0.0001]
   protocol:
-    # V2 帧中兼容字段固定发送 0；保留本参数供旧协议配置参考。
-    gravity_compensation_mode: 0
+    # V2 帧中的旧下位机重力补偿字段由代码强制为 0，不再提供可配置开关。
     id_map:
       left_first_leg_joint: 2
       left_second_leg_joint: 5

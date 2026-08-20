@@ -9,6 +9,21 @@
 
 namespace steering_engine_hw
 {
+bool stateMachineGravityModeToSupport(std::uint8_t mode, SupportSide& support)
+{
+  if (mode == 1u)
+  {
+    support = SupportSide::LEFT;
+    return true;
+  }
+  if (mode == 2u)
+  {
+    support = SupportSide::RIGHT;
+    return true;
+  }
+  return false;
+}
+
 namespace
 {
 bool xmlRpcToDouble(const XmlRpc::XmlRpcValue& value, double& result)

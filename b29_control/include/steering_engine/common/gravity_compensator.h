@@ -18,6 +18,11 @@ enum class SupportSide : std::uint8_t
   RIGHT = 1,
 };
 
+/// Decode the dual-role state-machine gravity command.
+/// 0 means disabled; 1 means the left gripper is the anchor/support; 2 means
+/// the right gripper is the anchor/support. Returns false for 0 or invalid data.
+bool stateMachineGravityModeToSupport(std::uint8_t mode, SupportSide& support);
+
 class GravityCompensator
 {
 public:

@@ -229,6 +229,15 @@ install(FILES
 ## Testing ##
 #############
 
+if(CATKIN_ENABLE_TESTING)
+  catkin_add_gtest(test_state_machine_gravity_mode
+                   test/test_state_machine_gravity_mode.cpp)
+  if(TARGET test_state_machine_gravity_mode)
+    target_link_libraries(test_state_machine_gravity_mode
+                          b29_gravity_compensator ${catkin_LIBRARIES})
+  endif()
+endif()
+
 ## Add gtest based cpp test target and link libraries
 # catkin_add_gtest(${PROJECT_NAME}-test test/test_b29_control.cpp)
 # if(TARGET ${PROJECT_NAME}-test)

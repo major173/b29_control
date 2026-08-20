@@ -194,14 +194,6 @@ void StRobotHW::write(const ros::Time &time, const ros::Duration &period) {
   std::array<double, k_torque_ff_count_> joint_torque_feedforward{};
   const uint8_t requested_gravity_mode =
       auto_state_data_.gravity_compensation_mode;
-  if (gravity_controller_mode_enabled_) {
-    // The named leg is the moving leg, so the opposite side is the support.
-    if (requested_gravity_mode == 1u) {
-      support_side_.store(static_cast<std::uint8_t>(SupportSide::RIGHT));
-    } else if (requested_gravity_mode == 2u) {
-      support_side_.store(static_cast<std::uint8_t>(SupportSide::LEFT));
-    }
-  }
   const bool torque_ff_valid =
       gravity_transmit_enabled_ && gravity_feedforward_valid_ &&
       (!gravity_controller_mode_enabled_ || requested_gravity_mode != 0u);
@@ -438,21 +430,6 @@ void StRobotHW::setInterface() {
 }
 
 bool StRobotHW::loadProtocolConfig(ros::NodeHandle &root_nh) {
-  int gravity_compensation_mode = 0;
-  root_nh.param<int>(
-      "/steering_engine_hw/protocol/gravity_compensation_mode",
-      gravity_compensation_mode, 0);
-  if (gravity_compensation_mode < 0 || gravity_compensation_mode > 2) {
-    ROS_ERROR("protocol/gravity_compensation_mode must be 0, 1, or 2");
-    return false;
-  }
-  gravity_compensation_mode_ =
-      static_cast<uint8_t>(gravity_compensation_mode);
-  if (gravity_compensation_mode_ != 0u) {
-    ROS_WARN("V2 control frames always send legacy gravity mode 0; "
-             "host tau_ff is used instead");
-  }
-
   XmlRpc::XmlRpcValue id_map;
   if (!root_nh.getParam("/steering_engine_hw/protocol/id_map", id_map)) {
     ROS_ERROR("Missing steering_engine_hw/protocol/id_map");
@@ -649,9 +626,12 @@ bool StRobotHW::loadGravityCompensation(ros::NodeHandle &root_nh) {
   gravity_torque_pub_ =
       root_nh.advertise<std_msgs::Float64MultiArray>(torque_topic, 1);
 
-  ROS_INFO("Gravity feedforward support=%s, transmit=%s, input=%s, output=%s",
+  ROS_INFO("Host gravity feedforward support=%s, transmit=%s, "
+           "state_machine_controlled=%s, lower_gravity=forced_off, "
+           "input=%s, output=%s",
            initial_support_side.c_str(),
            gravity_transmit_enabled_ ? "enabled" : "disabled",
+           gravity_controller_mode_enabled_ ? "true" : "false",
            support_side_topic.c_str(),
            torque_topic.c_str());
   return true;
@@ -699,6 +679,29 @@ void StRobotHW::updateGravityCompensation(const ros::Time &time,
   if (!gravity_compensator_.enabled()) {
     tau_gravity_.fill(0.0);
     return;
+  }
+
+  const uint8_t requested_gravity_mode =
+      auto_state_data_.gravity_compensation_mode;
+  if (gravity_controller_mode_enabled_) {
+    // The dual-role state machine publishes which locked first-leg joint is
+    // moving during cable release. That joint is on the anchored/support side:
+    // LeftFirstLeg(1) -> left gripper anchored, RightFirstLeg(2) -> right.
+    if (requested_gravity_mode == 0u) {
+      tau_gravity_.fill(0.0);
+      return;
+    }
+    SupportSide requested_support = SupportSide::LEFT;
+    if (!stateMachineGravityModeToSupport(requested_gravity_mode,
+                                          requested_support)) {
+      tau_gravity_.fill(0.0);
+      ROS_ERROR_THROTTLE(1.0,
+                         "Invalid state-machine gravity mode: %u; "
+                         "host feedforward disabled",
+                         static_cast<unsigned int>(requested_gravity_mode));
+      return;
+    }
+    support_side_.store(static_cast<std::uint8_t>(requested_support));
   }
 
   constexpr double kFeedbackTimeoutSec = 0.2;
@@ -753,7 +756,10 @@ void StRobotHW::updateGravityCompensation(const ros::Time &time,
     raw_torque = gravity_compensator_.compute(q_actual, support);
   }
   ROS_INFO_THROTTLE(5.0,
-                    "[gravity] imu_used=%s imu_online=%s quaternion_valid=%s",
+                    "[gravity] mode=%u active=true support=%s imu_used=%s "
+                    "imu_online=%s quaternion_valid=%s",
+                    static_cast<unsigned int>(requested_gravity_mode),
+                    support == SupportSide::LEFT ? "LEFT" : "RIGHT",
                     imu_usable ? "true" : "false",
                     auto_state_data_.imu_ready ? "true" : "false",
                     imu_orientation_valid_ ? "true" : "false");
