@@ -31,7 +31,7 @@ steering_engine_hw:
     # COM 坐标位于对应 link frame；未建模的夹爪移动关节使用 URDF 零位几何。
     links:
       base_link:
-        mass: 3.729516
+        mass: 7.029516
         com: [0.000088, -0.000019, 0.037664]
       base_imu:
         mass: 0.01
