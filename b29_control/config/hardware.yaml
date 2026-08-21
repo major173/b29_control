@@ -58,7 +58,7 @@ steering_engine_hw:
         mass: 0.12712
         com: [0.00052003, 0.011886, -0.0001]
       right_first_leg:
-        mass: 0.484529
+        mass: 0.84529
         com: [0.058923, 0.005837, 0.094762]
       right_second_leg:
         mass: 1.55532
