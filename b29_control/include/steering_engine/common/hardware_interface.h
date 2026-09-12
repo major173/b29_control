@@ -5,6 +5,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <memory>
 #include <std_msgs/String.h>
 #include <std_msgs/Float64.h>
@@ -42,6 +43,7 @@
 
 // SMC
 #include "steering_engine/common/auto_state_interface.h"
+#include "steering_engine/common/gravity_compensator.h"
 #include "steering_engine/common/remote_control_interface.h"
 
 namespace steering_engine_hw {
@@ -94,8 +96,9 @@ public:
    */
   void write(const ros::Time &time, const ros::Duration &period) override;
 
-  void pack(unsigned char *tx_buffer, unsigned char ctrl, unsigned char *data,
-            uint8_t gravity_compensation_mode);
+  void pack(unsigned char *tx_buffer, const unsigned char *data,
+            const std::array<double, 4> &torque_ff,
+            bool torque_ff_valid);
   void unpack(std::vector<uint8_t> rx_buffer,const ros::Time &time);
 
   bool loadUrdf(ros::NodeHandle &root_nh);
@@ -107,8 +110,13 @@ public:
   void addChildren(const KDL::SegmentMap::const_iterator segment);
 
   bool loadProtocolConfig(ros::NodeHandle &root_nh);
+  bool loadGravityCompensation(ros::NodeHandle &root_nh);
   void jointSpeedTargetCallback(const std_msgs::Float64::ConstPtr &msg);
   void clawSpeedTargetCallback(const std_msgs::Float64MultiArray::ConstPtr &msg);
+  void supportSideCallback(const std_msgs::String::ConstPtr &msg);
+  void updateGravityCompensation(const ros::Time &time,
+                                 const ros::Duration &period);
+
   
   void updateImuState(double acc_x, double acc_y, double acc_z,
                     double gyro_x, double gyro_y, double gyro_z,
@@ -237,20 +245,55 @@ private:
   int rx_len_;
   std::vector<uint8_t> rx_buffer_;
   int tx_len_;
-  static constexpr size_t k_frame_length_ = 52;
+  static constexpr size_t k_frame_length_ = 69;
   static constexpr size_t k_header_length_ = 2;
   static constexpr size_t k_ctrl_length_ = 1;
   static constexpr size_t k_length_ = 1;
   static constexpr size_t k_data_length_ = 44;
-  static constexpr size_t k_gravity_compensation_length_ = 1;
+  static constexpr size_t k_legacy_gravity_mode_length_ = 1;
+  static constexpr size_t k_torque_flags_length_ = 1;
+  static constexpr size_t k_torque_ff_count_ = 4;
+  static constexpr size_t k_torque_ff_length_ =
+      k_torque_ff_count_ * sizeof(float);
+  static constexpr size_t k_payload_length_ =
+      k_data_length_ + k_legacy_gravity_mode_length_ +
+      k_torque_flags_length_ + k_torque_ff_length_;
   static constexpr size_t k_crc_length_ = 1;
   static constexpr size_t k_tail_length_ = 2;
+  static_assert(k_payload_length_ == 62,
+                "V2 control payload must be 62 bytes");
+  static_assert(k_frame_length_ ==
+                    k_header_length_ + k_ctrl_length_ + k_length_ +
+                    k_payload_length_ + k_crc_length_ + k_tail_length_,
+                "V2 control frame must be 69 bytes");
+  static constexpr size_t k_feedback_motor_count_ = kActuatorCount;
+  static constexpr size_t k_feedback_motor_entry_length_ = 13;
+  static constexpr size_t k_feedback_imu_float_count_ = 10;
+  static constexpr size_t k_feedback_remote_joint_count_ = 4;
+  static constexpr size_t k_feedback_remote_control_status_length_ = 1;
+  static constexpr size_t k_feedback_auto_control_input_length_ = 2;
+  static constexpr size_t k_feedback_status_length_ = 3;
+  static constexpr size_t k_feedback_payload_length_ =
+      k_feedback_motor_count_ * k_feedback_motor_entry_length_ +
+      k_feedback_imu_float_count_ * sizeof(float) +
+      k_feedback_remote_joint_count_ * sizeof(float) +
+      k_feedback_remote_control_status_length_ +
+      k_feedback_auto_control_input_length_ +
+      k_feedback_status_length_;
+  static constexpr size_t k_feedback_frame_length_ =
+      k_header_length_ + k_ctrl_length_ + k_length_ +
+      k_feedback_payload_length_ + k_crc_length_ + k_tail_length_;
+  static_assert(k_feedback_payload_length_ == 166,
+                "Feedback payload must match the 166-byte protocol");
+  static_assert(k_feedback_frame_length_ == 173,
+                "Feedback frame must match the 173-byte protocol");
   uint8_t tx_buffer_[k_frame_length_];
 
   //通信协议常量
   const unsigned char header[2] = {0x55, 0xaa};
   const unsigned char ender[2] = {0x0d, 0x0a};
-  const unsigned char control_code_ = 0x01;
+  const unsigned char tx_control_code_ = 0x02;
+  const unsigned char feedback_control_code_ = 0x01;
   
   std::array<double, 4> imu_orientation_{{0.0, 0.0, 0.0, 1.0}};
   std::array<double, 9> imu_orientation_covariance_{{0.0}};
@@ -258,6 +301,7 @@ private:
   std::array<double, 9> imu_angular_velocity_covariance_{{0.0}};
   std::array<double, 3> imu_linear_acceleration_{{0.0, 0.0, 0.0}};
   std::array<double, 9> imu_linear_acceleration_covariance_{{0.0}};
+  bool imu_orientation_valid_{false};
 
   // actor offset
   std::array<double, kActuatorCount> offset_vector_{};
@@ -271,6 +315,20 @@ private:
   std::array<double, 2> claw_speed_target_{{1.0, 1.0}};
   ros::Subscriber joint_speed_sub_;
   ros::Subscriber claw_speed_sub_;
+
+  // Host-side torque feedforward sent in the V2 frame after the position data.
+  GravityCompensator gravity_compensator_;
+  std::atomic<std::uint8_t> support_side_{static_cast<std::uint8_t>(SupportSide::LEFT)};
+  std::array<double, GravityCompensator::kJointCount> tau_gravity_{{0.0, 0.0, 0.0, 0.0}};
+  std::array<double, GravityCompensator::kJointCount> gravity_torque_scales_{{1.0, 1.0, 1.0, 1.0}};
+  bool gravity_transmit_enabled_{false};
+  bool gravity_controller_mode_enabled_{false};
+  bool gravity_feedforward_valid_{false};
+  double gravity_torque_slew_rate_{20.0};
+  double gravity_publish_rate_{50.0};
+  ros::Time last_gravity_publish_time_{};
+  ros::Subscriber support_side_sub_;
+  ros::Publisher gravity_torque_pub_;
 };
 
 typedef struct {
@@ -278,8 +336,12 @@ typedef struct {
   unsigned char ctrl_;      // k_ctrl_length_
   unsigned char length_;    // k_length_
   unsigned char data_[44];  // k_data_length_
-  unsigned char gravity_compensation_mode_; // k_gravity_compensation_length_
+  unsigned char legacy_gravity_compensation_mode_;
+  unsigned char torque_flags_;
+  unsigned char torque_ff_[16];
   unsigned char crc_;       // k_crc_length_
   unsigned char ender_[2];  // k_tail_length_
 } __packed SerialFrame;
+static_assert(sizeof(SerialFrame) == 69,
+              "SerialFrame must match the 69-byte V2 control protocol");
 } // namespace steering_engine_hw

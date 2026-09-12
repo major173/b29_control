@@ -52,21 +52,20 @@
     <build_depend>roscpp</build_depend>
     <build_depend>rospy</build_depend>
     <build_depend>serial</build_depend>
-    <build_depend>std_msgs</build_depend>
     <build_depend>controller_manager</build_depend>
     <build_depend>rm_common</build_depend>
+    <depend>eigen</depend>
+    <depend>std_msgs</depend>
+    <depend>urdf</depend>
     <build_export_depend>roscpp</build_export_depend>
     <build_export_depend>rospy</build_export_depend>
     <build_export_depend>rm_common</build_export_depend>
-    <build_export_depend>std_msgs</build_export_depend>
     <exec_depend>roscpp</exec_depend>
     <exec_depend>rospy</exec_depend>
     <exec_depend>serial</exec_depend>
-    <exec_depend>std_msgs</exec_depend>
     <exec_depend>controller_manager</exec_depend>
     <exec_depend>imu_sensor_controller</exec_depend>
     <exec_depend>joint_state_controller</exec_depend>
-    <exec_depend>position_controllers</exec_depend>
     <exec_depend>robot_state_controller</exec_depend>
     <exec_depend>sensor_msgs</exec_depend>
     <exec_depend>topic_tools</exec_depend>

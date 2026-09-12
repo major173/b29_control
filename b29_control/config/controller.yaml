@@ -18,7 +18,7 @@ b29_controller:
     # start_disconnect or entry into the automatic state.
     posture_roll_limit: 0.10
     posture_pitch_limit: 0.10
-    
+
     joint_names:
       left_first_leg_joint: "left_first_leg_joint"
       left_second_leg_joint: "left_second_leg_joint"

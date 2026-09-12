@@ -109,6 +109,7 @@ TEST(ObstacleCrossingRuntime, CompletedDisconnectWaitsForSeparateFlipStart)
 
   const ObstacleCrossingRuntime::Actions start_actions = runtime.update(at(1.12), inputs, events);
   EXPECT_EQ(runtime.stage(), ObstacleCrossingStage::Disconnecting);
+  EXPECT_EQ(runtime.gravityCompensationMode(), GravityCompensationMode::RightFirstLeg);
   EXPECT_TRUE(start_actions.start_disconnect_process);
 
   events.disconnect = DisconnectCableProcess::Outcome::Completed;
@@ -128,6 +129,7 @@ TEST(ObstacleCrossingRuntime, CompletedDisconnectWaitsForSeparateFlipStart)
   events.start_flip_requested = true;
   const ObstacleCrossingRuntime::Actions flip_actions = runtime.update(at(200.1), inputs, events);
   EXPECT_EQ(runtime.stage(), ObstacleCrossingStage::PlannerControl);
+  EXPECT_EQ(runtime.gravityCompensationMode(), GravityCompensationMode::RightFirstLeg);
   EXPECT_EQ(runtime.traceState().transition_reason, "start_flip_requested");
   EXPECT_EQ(flip_actions.planner_action, ObstacleCrossingRuntime::PlannerAction::Start);
 }

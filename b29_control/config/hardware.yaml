@@ -1,4 +1,5 @@
 steering_engine_hw:
+  control_loop_rate_hz: 200
   serial:
     # port: "/dev/ttyACM0"
     port: "/dev/ttyUSB0"
@@ -7,7 +8,78 @@ steering_engine_hw:
     orientation_covariance_diagonal: [0.0012, 0.0012, 0.0012]
     angular_velocity_covariance_diagonal: [0.0004, 0.0004, 0.0004]
     linear_acceleration_covariance_diagonal: [0.01, 0.01, 0.01]
+  gravity_compensation:
+    enabled: true
+    gravity: 9.81
+    # dual-role 的 start.launch 会把 controller_mode_enabled 覆盖为 true：
+    # 仅状态机重力模式非零时发送上位机 tau_ff，模式 0 时 torque_flags=0。
+    controller_mode_enabled: false
+    transmit_enabled: true
+    torque_scales: [1.0, 1.0, 1.0, 1.0]
+    # 运行时可向 support_side_topic 发布 LEFT/RIGHT；切换由力矩斜率限制平滑。
+    support_side: "LEFT"
+    support_side_topic: "/support_side"
+    torque_topic: "/gravity_compensation/torque_ff"
+    torque_slew_rate: 20.0  # N*m/s
+    publish_rate: 50.0
+    support_links:
+      left: "left_second_leg"
+      right: "right_second_leg"
+    # 反馈帧 imu_ready=1 且四元数有限/非零范数时，使用 IMU 绝对姿态计算重力方向；
+    # 否则回退到“支撑 link +Z 竖直向上”。base_imu 相对 base_link 的 rpy 从 URDF 读取。
+    # 初值整理自 b29.urdf.xacro。运行时动力学只读取这里，不读取 URDF inertial。
+    # COM 坐标位于对应 link frame；未建模的夹爪移动关节使用 URDF 零位几何。
+    links:
+      base_link:
+        mass: 7.029516
+        com: [0.000088, -0.000019, 0.037664]
+      base_imu:
+        mass: 0.01
+        com: [0.0, 0.0, 0.0]
+      left_first_leg:
+        mass: 0.85685
+        com: [-0.063411, -0.008934, 0.141596]
+      left_second_leg:
+        mass: 1.55532
+        com: [0.000033, -0.000056, 0.066999]
+      l_gripper_left_drive:
+        mass: 0.0064743
+        com: [-0.0050526, 0.01348, -0.0000000070075]
+      l_gripper_left_up:
+        mass: 0.519091
+        com: [-0.005091, 0.065621, -0.000075]
+      left_friction_wheel:
+        mass: 0.084511
+        com: [0.0, -0.00061383, 0.0]
+      l_gripper_right_drive:
+        mass: 0.0064743
+        com: [0.0050526, 0.01348, 0.0000000069946]
+      l_gripper_right_up:
+        mass: 0.12712
+        com: [0.00052003, 0.011886, -0.0001]
+      right_first_leg:
+        mass: 0.84529
+        com: [0.058923, 0.005837, 0.094762]
+      right_second_leg:
+        mass: 1.55532
+        com: [0.000033, -0.000056, 0.066999]
+      r_gripper_left_drive:
+        mass: 0.0064743
+        com: [-0.0050526, 0.01348, -0.0000000070069]
+      r_gripper_left_uprod:
+        mass: 0.519091
+        com: [-0.005091, 0.065621, -0.000075]
+      right_friction_wheel:
+        mass: 0.084511
+        com: [0.0, -0.00061383, 0.0]
+      r_gripper_right_drive:
+        mass: 0.0064743
+        com: [0.0050526, 0.01348, 0.0000000069946]
+      r_gripper_right_uprod:
+        mass: 0.12712
+        com: [0.00052003, 0.011886, -0.0001]
   protocol:
+    # V2 帧中的旧下位机重力补偿字段由代码强制为 0，不再提供可配置开关。
     id_map:
       left_first_leg_joint: 2
       left_second_leg_joint: 5

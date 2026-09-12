@@ -13,9 +13,19 @@ int main(int argc, char **argv) {
   steering_engine_hw::StRobotHW hardware;
   // controller_manager::ControllerManager cm(&robot_hw);
 
-  ros::Rate loop_rate(50);
+  double control_loop_rate_hz = 200.0;
+  nh.param("/steering_engine_hw/control_loop_rate_hz",
+           control_loop_rate_hz, 200.0);
+  if (control_loop_rate_hz <= 0.0) {
+    ROS_ERROR("control_loop_rate_hz must be greater than zero");
+    return 1;
+  }
+  ros::Rate loop_rate(control_loop_rate_hz);
   ros::NodeHandle nh_hw("~");
-  hardware.init(nh, nh_hw);
+  if (!hardware.init(nh, nh_hw)) {
+    ROS_ERROR("Failed to initialize B29 hardware");
+    return 1;
+  }
 
   // Setup a separate thread that will be used to service ROS callbacks.
   ros::AsyncSpinner spinner(1);

@@ -50,7 +50,7 @@ flowchart LR
     D --> H["Hardware Interface"]
     H -->|"joint_states"| A
     A -->|"Feedback / Result"| M
-    
+
 ```
 
 当前 MoveIt Action 地址：

@@ -109,6 +109,14 @@ roslaunch b29_control start.launch
 - `Right`：打开右夹爪、移动左锁定臂、左一重力补偿。
 - `Left`：打开左夹爪、移动右锁定臂、右一重力补偿。
 
+合并分支使用上位机重力前馈，不使用下位机旧重力模型。状态机的
+`gravity_compensation_mode` 直接驱动上位机支撑侧：`LeftFirstLeg` 对应左锚，
+`RightFirstLeg` 对应右锚。V2 控制帧中的旧下位机重力字段始终发送 `0`。
+
+上位机力矩前馈从 `EnableGravityCompensation` 开始，覆盖 `Disconnecting`、
+`DisconnectDoneWaitFlip`、Planner、遥控、重夹和脱离失败后的人工介入；确认重新夹紧后关闭。
+因此巡航和普通 Idle 状态不会发送重力力矩，而脱离电缆及脱离后等待翻转时会持续补偿。
+
 行进方向和首遍侧别：
 
 | 下位机巡航请求 | 语义 | 第一遍 crossing_side | 说明 |

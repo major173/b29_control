@@ -21,6 +21,7 @@ find_package(catkin REQUIRED COMPONENTS
         rm_common
         rm_msgs
 )
+find_package(Eigen3 REQUIRED)
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
@@ -112,10 +113,9 @@ find_package(catkin REQUIRED COMPONENTS
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
-        INCLUDE_DIRS include
-        # LIBRARIES b29_control
-        CATKIN_DEPENDS rm_common std_msgs
-        # DEPENDS system_lib
+        INCLUDE_DIRS include ${EIGEN3_INCLUDE_DIR}
+        LIBRARIES b29_gravity_compensator
+        CATKIN_DEPENDS rm_common roscpp std_msgs urdf
 )
 
 ###########
@@ -127,10 +127,14 @@ catkin_package(
 include_directories(
         include
         ${catkin_INCLUDE_DIRS}
+        ${EIGEN3_INCLUDE_DIR}
 )
 
+add_library(b29_gravity_compensator src/common/gravity_compensator.cpp)
+target_link_libraries(b29_gravity_compensator ${catkin_LIBRARIES})
+
 add_executable(b29_hardware src/common/hardware_interface.cpp src/main.cpp)
-target_link_libraries(b29_hardware ${catkin_LIBRARIES})
+target_link_libraries(b29_hardware b29_gravity_compensator ${catkin_LIBRARIES})
 
 ## Declare a C++ library
 # add_library(${PROJECT_NAME}
@@ -176,12 +180,6 @@ target_link_libraries(b29_hardware ${catkin_LIBRARIES})
 #   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 # )
 
-catkin_install_python(PROGRAMS
-        scripts/update_gp11_urdf.py
-        scripts/urdf_kinematics.py
-        DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-)
-
 ## Mark executables for installation
 ## See http://docs.ros.org/melodic/api/catkin/html/howto/format1/building_executables.html
 # install(TARGETS ${PROJECT_NAME}_node
@@ -212,6 +210,15 @@ install(DIRECTORY include/
 #############
 ## Testing ##
 #############
+
+if(CATKIN_ENABLE_TESTING)
+  catkin_add_gtest(test_state_machine_gravity_mode
+                   test/test_state_machine_gravity_mode.cpp)
+  if(TARGET test_state_machine_gravity_mode)
+    target_link_libraries(test_state_machine_gravity_mode
+                          b29_gravity_compensator ${catkin_LIBRARIES})
+  endif()
+endif()
 
 ## Add gtest based cpp test target and link libraries
 # catkin_add_gtest(${PROJECT_NAME}-test test/test_b29_control.cpp)
